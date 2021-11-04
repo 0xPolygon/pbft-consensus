@@ -3,8 +3,6 @@ package ibft
 import (
 	"container/heap"
 	"sync"
-
-	"github.com/0xPolygon/polygon-sdk/consensus/ibft/proto"
 )
 
 // msgQueue defines the structure that holds message queues for different IBFT states
@@ -32,7 +30,7 @@ func (m *msgQueue) pushMessage(task *msgTask) {
 }
 
 // readMessage reads the message from a message queue, based on the current state and view
-func (m *msgQueue) readMessage(state IbftState, current *proto.View) *msgTask {
+func (m *msgQueue) readMessage(state IbftState, current *View) *msgTask {
 	m.queueLock.Lock()
 	defer m.queueLock.Unlock()
 
@@ -98,12 +96,12 @@ func newMsgQueue() *msgQueue {
 }
 
 // protoTypeToMsg converts the proto message request type to a MsgType object
-func protoTypeToMsg(msgType proto.MessageReq_Type) MsgType {
-	if msgType == proto.MessageReq_Preprepare {
+func protoTypeToMsg(msgType MessageReq_Type) MsgType {
+	if msgType == MessageReq_Preprepare {
 		return msgPreprepare
-	} else if msgType == proto.MessageReq_Prepare {
+	} else if msgType == MessageReq_Prepare {
 		return msgPrepare
-	} else if msgType == proto.MessageReq_Commit {
+	} else if msgType == MessageReq_Commit {
 		return msgCommit
 	}
 
@@ -155,10 +153,10 @@ func (m MsgType) String() string {
 
 type msgTask struct {
 	// priority
-	view *proto.View
+	view *View
 	msg  MsgType
 
-	obj *proto.MessageReq
+	obj *MessageReq
 }
 
 type msgQueueImpl []*msgTask
@@ -215,7 +213,7 @@ func (m *msgQueueImpl) Pop() interface{} {
 // If v.Sequence < y.Sequence => -1 ELSE => 1
 //
 // If v.Round < y.Round => -1 ELSE 1
-func cmpView(v, y *proto.View) int {
+func cmpView(v, y *View) int {
 	if v.Sequence != y.Sequence {
 		if v.Sequence < y.Sequence {
 			return -1

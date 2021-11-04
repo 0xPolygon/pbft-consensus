@@ -11,11 +11,9 @@ import (
 
 	"github.com/0xPolygon/polygon-sdk/blockchain"
 	"github.com/0xPolygon/polygon-sdk/consensus"
-	"github.com/0xPolygon/polygon-sdk/consensus/ibft/proto"
 	"github.com/0xPolygon/polygon-sdk/crypto"
 	"github.com/0xPolygon/polygon-sdk/helper/hex"
 	"github.com/0xPolygon/polygon-sdk/network"
-	"github.com/0xPolygon/polygon-sdk/protocol"
 	"github.com/0xPolygon/polygon-sdk/state"
 	"github.com/0xPolygon/polygon-sdk/txpool"
 	"github.com/0xPolygon/polygon-sdk/types"
@@ -28,28 +26,30 @@ const (
 	DefaultEpochSize = 100000
 )
 
+/*
 type blockchainInterface interface {
 	Header() *types.Header
 	GetHeaderByNumber(i uint64) (*types.Header, bool)
 	WriteBlocks(blocks []*types.Block) error
 }
+*/
 
 // Ibft represents the IBFT consensus mechanism object
 type Ibft struct {
-	sealing bool // Flag indicating if the node is a sealer
+	//sealing bool // Flag indicating if the node is a sealer
 
 	logger hclog.Logger      // Output logger
 	config *consensus.Config // Consensus configuration
 	state  *currentState     // Reference to the current state
 
-	blockchain blockchainInterface // Interface exposed by the blockchain layer
-	executor   *state.Executor     // Reference to the state executor
-	closeCh    chan struct{}       // Channel for closing
+	//blockchain blockchainInterface // Interface exposed by the blockchain layer
+	//executor   *state.Executor     // Reference to the state executor
+	closeCh chan struct{} // Channel for closing
 
 	validatorKey     *ecdsa.PrivateKey // Private key for the validator
-	validatorKeyAddr types.Address
+	validatorKeyAddr NodeID
 
-	txpool *txpool.TxPool // Reference to the transaction pool
+	//txpool *txpool.TxPool // Reference to the transaction pool
 
 	store     *snapshotStore // Snapshot store that keeps track of all snapshots
 	epochSize uint64
@@ -57,13 +57,13 @@ type Ibft struct {
 	msgQueue *msgQueue     // Structure containing different message queues
 	updateCh chan struct{} // Update channel
 
-	syncer       *protocol.Syncer // Reference to the sync protocol
-	syncNotifyCh chan bool        // Sync protocol notification channel
+	//syncer       *protocol.Syncer // Reference to the sync protocol
+	//syncNotifyCh chan bool        // Sync protocol notification channel
 
-	network   *network.Server // Reference to the networking layer
-	transport transport       // Reference to the transport protocol
+	//network   *network.Server // Reference to the networking layer
+	transport transport // Reference to the transport protocol
 
-	operator *operator
+	//operator *operator
 
 	// aux test methods
 	forceTimeoutCh bool
@@ -82,27 +82,27 @@ func Factory(
 	logger hclog.Logger,
 ) (consensus.Consensus, error) {
 	p := &Ibft{
-		logger:       logger.Named("ibft"),
-		config:       config,
-		blockchain:   blockchain,
-		executor:     executor,
-		closeCh:      make(chan struct{}),
-		txpool:       txpool,
-		state:        &currentState{},
-		network:      network,
-		epochSize:    DefaultEpochSize,
-		syncNotifyCh: make(chan bool),
-		sealing:      sealing,
+		logger: logger.Named("ibft"),
+		config: config,
+		//blockchain: blockchain,
+		//executor:     executor,
+		closeCh: make(chan struct{}),
+		//txpool:       txpool,
+		state: &currentState{},
+		//network:      network,
+		epochSize: DefaultEpochSize,
+		//syncNotifyCh: make(chan bool),
+		//sealing:      sealing,
 	}
 
 	// Istanbul requires a different header hash function
-	types.HeaderHash = istanbulHeaderHash
+	//types.HeaderHash = istanbulHeaderHash
 
-	p.syncer = protocol.NewSyncer(logger, network, blockchain)
+	//p.syncer = protocol.NewSyncer(logger, network, blockchain)
 
 	// register the grpc operator
-	p.operator = &operator{ibft: p}
-	proto.RegisterIbftOperatorServer(srv, p.operator)
+	//p.operator = &operator{ibft: p}
+	//proto.RegisterIbftOperatorServer(srv, p.operator)
 
 	if err := p.createKey(); err != nil {
 		return nil, err
@@ -110,14 +110,17 @@ func Factory(
 
 	p.logger.Info("validator key", "addr", p.validatorKeyAddr.String())
 
-	// start the transport protocol
-	if err := p.setupTransport(); err != nil {
-		return nil, err
-	}
+	/*
+		// start the transport protocol
+		if err := p.setupTransport(); err != nil {
+			return nil, err
+		}
+	*/
 
 	return p, nil
 }
 
+/*
 // Start starts the IBFT consensus
 func (i *Ibft) Start() error {
 	// Start the syncer
@@ -133,11 +136,13 @@ func (i *Ibft) Start() error {
 
 	return nil
 }
+*/
 
 type transport interface {
-	Gossip(msg *proto.MessageReq) error
+	Gossip(msg *MessageReq) error
 }
 
+/*
 // Define the IBFT libp2p protocol
 var ibftProto = "/ibft/0.1"
 
@@ -146,21 +151,21 @@ type gossipTransport struct {
 }
 
 // Gossip publishes a new message to the topic
-func (g *gossipTransport) Gossip(msg *proto.MessageReq) error {
+func (g *gossipTransport) Gossip(msg *MessageReq) error {
 	return g.topic.Publish(msg)
 }
 
 // setupTransport sets up the gossip transport protocol
 func (i *Ibft) setupTransport() error {
 	// Define a new topic
-	topic, err := i.network.NewTopic(ibftProto, &proto.MessageReq{})
+	topic, err := i.network.NewTopic(ibftProto, &MessageReq{})
 	if err != nil {
 		return err
 	}
 
 	// Subscribe to the newly created topic
 	err = topic.Subscribe(func(obj interface{}) {
-		msg := obj.(*proto.MessageReq)
+		msg := obj.(*MessageReq)
 
 		if !i.isSealing() {
 			// if we are not sealing we do not care about the messages
@@ -192,6 +197,7 @@ func (i *Ibft) setupTransport() error {
 
 	return nil
 }
+*/
 
 // createKey sets the validator's private key, from the file path
 func (i *Ibft) createKey() error {
@@ -222,9 +228,11 @@ func (i *Ibft) start() {
 	// to sync with other nodes.
 	i.setState(SyncState)
 
-	// Grab the latest header
-	header := i.blockchain.Header()
-	i.logger.Debug("current sequence", "sequence", header.Number+1)
+	/*
+		// Grab the latest header
+		header := i.blockchain.Header()
+		i.logger.Debug("current sequence", "sequence", header.Number+1)
+	*/
 
 	for {
 		select {
@@ -263,25 +271,28 @@ func (i *Ibft) runCycle() {
 
 // isValidSnapshot checks if the current node is in the validator set for the latest snapshot
 func (i *Ibft) isValidSnapshot() bool {
-	if !i.isSealing() {
-		return false
-	}
-
-	// check if we are a validator and enabled
-	header := i.blockchain.Header()
-	snap, err := i.getSnapshot(header.Number)
-	if err != nil {
-		return false
-	}
-
-	if snap.Set.Includes(i.validatorKeyAddr) {
-		i.state.view = &proto.View{
-			Sequence: header.Number + 1,
-			Round:    0,
+	/*
+		if !i.isSealing() {
+			return false
 		}
 
-		return true
-	}
+		// check if we are a validator and enabled
+		header := i.blockchain.Header()
+		snap, err := i.getSnapshot(header.Number)
+		if err != nil {
+			return false
+		}
+
+		if snap.Set.Includes(i.validatorKeyAddr) {
+			i.state.view = &View{
+				Sequence: header.Number + 1,
+				Round:    0,
+			}
+
+			return true
+		}
+	*/
+
 	return false
 }
 
@@ -290,30 +301,35 @@ func (i *Ibft) isValidSnapshot() bool {
 // It fetches fresh data from the blockchain. Checks if the current node is a validator and resolves any pending blocks
 func (i *Ibft) runSyncState() {
 	for i.isState(SyncState) {
-		// try to sync with some target peer
-		p := i.syncer.BestPeer()
-		if p == nil {
-			// if we do not have any peers and we have been a validator
-			// we can start now. In case we start on another fork this will be
-			// reverted later
-			if i.isValidSnapshot() {
-				// initialize the round and sequence
-				header := i.blockchain.Header()
-				i.state.view = &proto.View{
-					Round:    0,
-					Sequence: header.Number + 1,
-				}
-				i.setState(AcceptState)
-			} else {
-				time.Sleep(1 * time.Second)
-			}
-			continue
-		}
 
-		if err := i.syncer.BulkSyncWithPeer(p); err != nil {
-			i.logger.Error("failed to bulk sync", "err", err)
-			continue
-		}
+		/*
+			// try to sync with some target peer
+			p := i.syncer.BestPeer()
+			if p == nil {
+				// if we do not have any peers and we have been a validator
+				// we can start now. In case we start on another fork this will be
+				// reverted later
+				if i.isValidSnapshot() {
+					// initialize the round and sequence
+					header := i.blockchain.Header()
+					i.state.view = &View{
+						Round:    0,
+						Sequence: header.Number + 1,
+					}
+					i.setState(AcceptState)
+				} else {
+					time.Sleep(1 * time.Second)
+				}
+				continue
+			}
+		*/
+
+		/*
+			if err := i.syncer.BulkSyncWithPeer(p); err != nil {
+				i.logger.Error("failed to bulk sync", "err", err)
+				continue
+			}
+		*/
 
 		// if we are a validator we do not even want to wait here
 		// we can just move ahead
@@ -324,12 +340,14 @@ func (i *Ibft) runSyncState() {
 
 		// start watch mode
 		var isValidator bool
-		i.syncer.WatchSyncWithPeer(p, func(b *types.Block) bool {
-			i.syncer.Broadcast(b)
-			isValidator = i.isValidSnapshot()
+		/*
+			i.syncer.WatchSyncWithPeer(p, func(b *types.Block) bool {
+				i.syncer.Broadcast(b)
+				isValidator = i.isValidSnapshot()
 
-			return !isValidator
-		})
+				return !isValidator
+			})
+		*/
 
 		if isValidator {
 			// at this point, we are in sync with the latest chain we know of
@@ -340,6 +358,7 @@ func (i *Ibft) runSyncState() {
 	}
 }
 
+/*
 var defaultBlockPeriod = 2 * time.Second
 
 // buildBlock builds the block, based on the passed in snapshot and parent header
@@ -430,6 +449,7 @@ func (i *Ibft) buildBlock(snap *Snapshot, parent *types.Header) (*types.Block, e
 	i.logger.Info("build block", "number", header.Number, "txns", len(txns))
 	return block, nil
 }
+*/
 
 // runAcceptState runs the Accept state loop
 //
@@ -593,10 +613,10 @@ func (i *Ibft) runValidateState() {
 		}
 
 		switch msg.Type {
-		case proto.MessageReq_Prepare:
+		case MessageReq_Prepare:
 			i.state.addPrepared(msg)
 
-		case proto.MessageReq_Commit:
+		case MessageReq_Commit:
 			i.state.addCommitted(msg)
 
 		default:
@@ -634,6 +654,7 @@ func (i *Ibft) runValidateState() {
 	}
 }
 
+/*
 func (i *Ibft) insertBlock(block *types.Block) error {
 	committedSeals := [][]byte{}
 	for _, commit := range i.state.committed {
@@ -664,7 +685,7 @@ func (i *Ibft) insertBlock(block *types.Block) error {
 	)
 
 	// increase the sequence number and reset the round if any
-	i.state.view = &proto.View{
+	i.state.view = &View{
 		Sequence: header.Number + 1,
 		Round:    0,
 	}
@@ -684,6 +705,7 @@ var (
 	errBlockVerificationFailed = fmt.Errorf("block verification failed")
 	errFailedToInsertBlock     = fmt.Errorf("failed to insert block")
 )
+*/
 
 func (i *Ibft) handleStateErr(err error) {
 	i.state.err = err
@@ -778,23 +800,23 @@ func (i *Ibft) runRoundChangeState() {
 // --- com wrappers ---
 
 func (i *Ibft) sendRoundChange() {
-	i.gossip(proto.MessageReq_RoundChange)
+	i.gossip(MessageReq_RoundChange)
 }
 
 func (i *Ibft) sendPreprepareMsg() {
-	i.gossip(proto.MessageReq_Preprepare)
+	i.gossip(MessageReq_Preprepare)
 }
 
 func (i *Ibft) sendPrepareMsg() {
-	i.gossip(proto.MessageReq_Prepare)
+	i.gossip(MessageReq_Prepare)
 }
 
 func (i *Ibft) sendCommitMsg() {
-	i.gossip(proto.MessageReq_Commit)
+	i.gossip(MessageReq_Commit)
 }
 
-func (i *Ibft) gossip(typ proto.MessageReq_Type) {
-	msg := &proto.MessageReq{
+func (i *Ibft) gossip(typ MessageReq_Type) {
+	msg := &MessageReq{
 		Type: typ,
 	}
 
@@ -802,14 +824,14 @@ func (i *Ibft) gossip(typ proto.MessageReq_Type) {
 	msg.View = i.state.view.Copy()
 
 	// if we are sending a preprepare message we need to include the proposed block
-	if msg.Type == proto.MessageReq_Preprepare {
+	if msg.Type == MessageReq_Preprepare {
 		msg.Proposal = &any.Any{
 			Value: i.state.block.MarshalRLP(),
 		}
 	}
 
 	// if the message is commit, we need to add the committed seal
-	if msg.Type == proto.MessageReq_Commit {
+	if msg.Type == MessageReq_Commit {
 		seal, err := writeCommittedSeal(i.validatorKey, i.state.block.Header)
 		if err != nil {
 			i.logger.Error("failed to commit seal", "err", err)
@@ -818,7 +840,7 @@ func (i *Ibft) gossip(typ proto.MessageReq_Type) {
 		msg.Seal = hex.EncodeToHex(seal)
 	}
 
-	if msg.Type != proto.MessageReq_Preprepare {
+	if msg.Type != MessageReq_Preprepare {
 		// send a copy to ourselves so that we can process this message as well
 		msg2 := msg.Copy()
 		msg2.From = i.validatorKeyAddr.String()
@@ -864,6 +886,7 @@ func (i *Ibft) randomTimeout() time.Duration {
 	return timeout
 }
 
+/*
 // isSealing checks if the current node is sealing blocks
 func (i *Ibft) isSealing() bool {
 	return i.sealing
@@ -947,9 +970,10 @@ func (i *Ibft) Close() error {
 	}
 	return nil
 }
+*/
 
 // getNextMessage reads a new message from the message queue
-func (i *Ibft) getNextMessage(timeout time.Duration) (*proto.MessageReq, bool) {
+func (i *Ibft) getNextMessage(timeout time.Duration) (*MessageReq, bool) {
 	timeoutCh := time.After(timeout)
 	for {
 		msg := i.msgQueue.readMessage(i.getState(), i.state.view)
@@ -975,10 +999,10 @@ func (i *Ibft) getNextMessage(timeout time.Duration) (*proto.MessageReq, bool) {
 }
 
 // pushMessage pushes a new message to the message queue
-func (i *Ibft) pushMessage(msg *proto.MessageReq) {
+func (i *Ibft) pushMessage(msg *MessageReq) {
 	task := &msgTask{
 		view: msg.View,
-		msg:  protoTypeToMsg(msg.Type),
+		msg:  msg.Type,
 		obj:  msg,
 	}
 	i.msgQueue.pushMessage(task)

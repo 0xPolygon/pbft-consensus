@@ -5,9 +5,47 @@ import (
 	"math"
 	"sync/atomic"
 
-	"github.com/0xPolygon/polygon-sdk/consensus/ibft/proto"
 	"github.com/0xPolygon/polygon-sdk/types"
 )
+
+type MessageReq_Type int32
+
+const (
+	MessageReq_Preprepare  MessageReq_Type = 0
+	MessageReq_Prepare     MessageReq_Type = 1
+	MessageReq_Commit      MessageReq_Type = 2
+	MessageReq_RoundChange MessageReq_Type = 3
+)
+
+type MessageReq struct {
+	// type is the type of the message
+	Type MessageReq_Type
+
+	// from is the address of the sender
+	From string
+
+	// seal is the committed seal if message is commit
+	Seal string
+
+	// signature is the crypto signature of the message
+	Signature string
+
+	// view is the view assigned to the message
+	View *View
+
+	// hash of the locked block
+	Digest string
+
+	// proposal is the rlp encoded block in preprepare messages
+	Proposal []byte
+}
+
+type View struct {
+	Round    uint64
+	Sequence uint64
+}
+
+type NodeID string
 
 type IbftState uint32
 
@@ -54,19 +92,19 @@ type currentState struct {
 	block *types.Block
 
 	// The selected proposer
-	proposer types.Address
+	proposer NodeID
 
 	// Current view
-	view *proto.View
+	view *View
 
 	// List of prepared messages
-	prepared map[types.Address]*proto.MessageReq
+	prepared map[NodeID]*MessageReq
 
 	// List of committed messages
-	committed map[types.Address]*proto.MessageReq
+	committed map[NodeID]*MessageReq
 
 	// List of round change messages
-	roundMessages map[uint64]map[types.Address]*proto.MessageReq
+	roundMessages map[uint64]map[NodeID]*MessageReq
 
 	// Locked signals whether the proposal is locked
 	locked bool
@@ -127,13 +165,13 @@ func (c *currentState) maxRound() (maxRound uint64, found bool) {
 
 // resetRoundMsgs resets the prepared, committed and round messages in the current state
 func (c *currentState) resetRoundMsgs() {
-	c.prepared = map[types.Address]*proto.MessageReq{}
-	c.committed = map[types.Address]*proto.MessageReq{}
-	c.roundMessages = map[uint64]map[types.Address]*proto.MessageReq{}
+	c.prepared = map[NodeID]*MessageReq{}
+	c.committed = map[NodeID]*MessageReq{}
+	c.roundMessages = map[uint64]map[NodeID]*MessageReq{}
 }
 
 // CalcProposer calculates the proposer and sets it to the state
-func (c *currentState) CalcProposer(lastProposer types.Address) {
+func (c *currentState) CalcProposer(lastProposer NodeID) {
 	c.proposer = c.validators.CalcProposer(c.view.Round, lastProposer)
 }
 
@@ -152,8 +190,8 @@ func (c *currentState) cleanRound(round uint64) {
 }
 
 // AddRoundMessage adds a message to the round, and returns the round message size
-func (c *currentState) AddRoundMessage(msg *proto.MessageReq) int {
-	if msg.Type != proto.MessageReq_RoundChange {
+func (c *currentState) AddRoundMessage(msg *MessageReq) int {
+	if msg.Type != MessageReq_RoundChange {
 		return 0
 	}
 	c.addMessage(msg)
@@ -162,8 +200,8 @@ func (c *currentState) AddRoundMessage(msg *proto.MessageReq) int {
 }
 
 // addPrepared adds a prepared message
-func (c *currentState) addPrepared(msg *proto.MessageReq) {
-	if msg.Type != proto.MessageReq_Prepare {
+func (c *currentState) addPrepared(msg *MessageReq) {
+	if msg.Type != MessageReq_Prepare {
 		return
 	}
 
@@ -171,8 +209,8 @@ func (c *currentState) addPrepared(msg *proto.MessageReq) {
 }
 
 // addCommitted adds a committed message
-func (c *currentState) addCommitted(msg *proto.MessageReq) {
-	if msg.Type != proto.MessageReq_Commit {
+func (c *currentState) addCommitted(msg *MessageReq) {
+	if msg.Type != MessageReq_Commit {
 		return
 	}
 
@@ -180,21 +218,21 @@ func (c *currentState) addCommitted(msg *proto.MessageReq) {
 }
 
 // addMessage adds a new message to one of the following message lists: committed, prepared, roundMessages
-func (c *currentState) addMessage(msg *proto.MessageReq) {
-	addr := msg.FromAddr()
+func (c *currentState) addMessage(msg *MessageReq) {
+	addr := NodeID(msg.From)
 	if !c.validators.Includes(addr) {
 		// only include messages from validators
 		return
 	}
 
-	if msg.Type == proto.MessageReq_Commit {
+	if msg.Type == MessageReq_Commit {
 		c.committed[addr] = msg
-	} else if msg.Type == proto.MessageReq_Prepare {
+	} else if msg.Type == MessageReq_Prepare {
 		c.prepared[addr] = msg
-	} else if msg.Type == proto.MessageReq_RoundChange {
+	} else if msg.Type == MessageReq_RoundChange {
 		view := msg.View
 		if _, ok := c.roundMessages[view.Round]; !ok {
-			c.roundMessages[view.Round] = map[types.Address]*proto.MessageReq{}
+			c.roundMessages[view.Round] = map[NodeID]*MessageReq{}
 		}
 
 		c.roundMessages[view.Round][addr] = msg
@@ -211,12 +249,12 @@ func (c *currentState) numCommitted() int {
 	return len(c.committed)
 }
 
-type ValidatorSet []types.Address
+type ValidatorSet []NodeID
 
 // CalcProposer calculates the address of the next proposer, from the validator set
-func (v *ValidatorSet) CalcProposer(round uint64, lastProposer types.Address) types.Address {
+func (v *ValidatorSet) CalcProposer(round uint64, lastProposer NodeID) NodeID {
 	seed := uint64(0)
-	if lastProposer == types.ZeroAddress {
+	if lastProposer == "" {
 		seed = round
 	} else {
 		offset := 0
@@ -233,12 +271,12 @@ func (v *ValidatorSet) CalcProposer(round uint64, lastProposer types.Address) ty
 }
 
 // Add adds a new address to the validator set
-func (v *ValidatorSet) Add(addr types.Address) {
+func (v *ValidatorSet) Add(addr NodeID) {
 	*v = append(*v, addr)
 }
 
 // Del removes an address from the validator set
-func (v *ValidatorSet) Del(addr types.Address) {
+func (v *ValidatorSet) Del(addr NodeID) {
 	for indx, i := range *v {
 		if i == addr {
 			*v = append((*v)[:indx], (*v)[indx+1:]...)
@@ -267,7 +305,7 @@ func (v *ValidatorSet) Equal(vv *ValidatorSet) bool {
 
 // Index returns the index of the passed in address in the validator set.
 // Returns -1 if not found
-func (v *ValidatorSet) Index(addr types.Address) int {
+func (v *ValidatorSet) Index(addr NodeID) int {
 	for indx, i := range *v {
 		if i == addr {
 			return indx
@@ -278,7 +316,7 @@ func (v *ValidatorSet) Index(addr types.Address) int {
 }
 
 // Includes checks if the address is in the validator set
-func (v *ValidatorSet) Includes(addr types.Address) bool {
+func (v *ValidatorSet) Includes(addr NodeID) bool {
 	return v.Index(addr) != -1
 }
 
