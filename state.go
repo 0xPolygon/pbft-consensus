@@ -1,34 +1,31 @@
 package ibft
 
 import (
+	"encoding/hex"
 	"fmt"
 	"math"
 	"sync/atomic"
-
-	"github.com/0xPolygon/polygon-sdk/types"
+	"time"
 )
 
-type MessageReq_Type int32
+type MsgType int32
 
 const (
-	MessageReq_Preprepare  MessageReq_Type = 0
-	MessageReq_Prepare     MessageReq_Type = 1
-	MessageReq_Commit      MessageReq_Type = 2
-	MessageReq_RoundChange MessageReq_Type = 3
+	MessageReq_RoundChange MsgType = 0
+	MessageReq_Preprepare  MsgType = 1
+	MessageReq_Commit      MsgType = 2
+	MessageReq_Prepare     MsgType = 3
 )
 
 type MessageReq struct {
 	// type is the type of the message
-	Type MessageReq_Type
+	Type MsgType
 
 	// from is the address of the sender
-	From string
+	From NodeID
 
 	// seal is the committed seal if message is commit
-	Seal string
-
-	// signature is the crypto signature of the message
-	Signature string
+	Seal []byte
 
 	// view is the view assigned to the message
 	View *View
@@ -40,9 +37,41 @@ type MessageReq struct {
 	Proposal []byte
 }
 
+func (m *MessageReq) SetProposal(b []byte) {
+	m.Proposal = append([]byte{}, b...)
+}
+
+func (m *MessageReq) Copy() *MessageReq {
+	mm := new(MessageReq)
+	*mm = *m
+	if m.View != nil {
+		mm.View = m.View.Copy()
+	}
+	if m.Proposal != nil {
+		mm.Proposal = append([]byte{}, m.Proposal...)
+	}
+	return mm
+}
+
 type View struct {
-	Round    uint64
+	// round is the current round/height being finalized
+	Round uint64
+
+	// Sequence is a sequence number inside the round
 	Sequence uint64
+}
+
+func (v *View) Copy() *View {
+	vv := new(View)
+	*vv = *v
+	return vv
+}
+
+func ViewMsg(round, sequence uint64) *View {
+	return &View{
+		Round:    round,
+		Sequence: sequence,
+	}
 }
 
 type NodeID string
@@ -80,16 +109,26 @@ func (i IbftState) String() string {
 	panic(fmt.Sprintf("BUG: Ibft state not found %d", i))
 }
 
+type Proposal struct {
+	Data []byte
+	Hash []byte
+
+	// Time is the time to create this proposal
+	Time time.Time
+}
+
 // currentState defines the current state object in IBFT
 type currentState struct {
 	// validators represent the current validator set
-	validators ValidatorSet
+	validators ValidatorSetInterface
+
+	snap *Snapshot
 
 	// state is the current state
 	state uint64
 
-	// The proposed block
-	block *types.Block
+	// The proposed block of arbitrary data
+	proposal *Proposal
 
 	// The selected proposer
 	proposer NodeID
@@ -135,9 +174,13 @@ func (c *currentState) setState(s IbftState) {
 	atomic.StoreUint64(stateAddr, uint64(s))
 }
 
+func (c *currentState) MaxFaultyNodes() int {
+	return int(math.Ceil(float64(c.validators.Len())/3)) - 1
+}
+
 // NumValid returns the number of required messages
 func (c *currentState) NumValid() int {
-	return 2 * c.validators.MaxFaultyNodes()
+	return 2 * c.MaxFaultyNodes()
 }
 
 // getErr returns the current error, if any, and consumes it
@@ -149,7 +192,7 @@ func (c *currentState) getErr() error {
 }
 
 func (c *currentState) maxRound() (maxRound uint64, found bool) {
-	num := c.validators.MaxFaultyNodes() + 1
+	num := c.MaxFaultyNodes() + 1
 
 	for k, round := range c.roundMessages {
 		if len(round) < num {
@@ -171,8 +214,8 @@ func (c *currentState) resetRoundMsgs() {
 }
 
 // CalcProposer calculates the proposer and sets it to the state
-func (c *currentState) CalcProposer(lastProposer NodeID) {
-	c.proposer = c.validators.CalcProposer(c.view.Round, lastProposer)
+func (c *currentState) CalcProposer() {
+	c.proposer = c.validators.CalcProposer(c.view.Round)
 }
 
 func (c *currentState) lock() {
@@ -180,7 +223,7 @@ func (c *currentState) lock() {
 }
 
 func (c *currentState) unlock() {
-	c.block = nil
+	c.proposal = nil
 	c.locked = false
 }
 
@@ -249,6 +292,12 @@ func (c *currentState) numCommitted() int {
 	return len(c.committed)
 }
 
+type ValidatorSetInterface interface {
+	CalcProposer(round uint64) NodeID
+	Includes(id NodeID) bool
+	Len() int
+}
+
 type ValidatorSet []NodeID
 
 // CalcProposer calculates the address of the next proposer, from the validator set
@@ -270,6 +319,7 @@ func (v *ValidatorSet) CalcProposer(round uint64, lastProposer NodeID) NodeID {
 	return (*v)[pick]
 }
 
+/*
 // Add adds a new address to the validator set
 func (v *ValidatorSet) Add(addr NodeID) {
 	*v = append(*v, addr)
@@ -283,12 +333,14 @@ func (v *ValidatorSet) Del(addr NodeID) {
 		}
 	}
 }
+*/
 
 // Len returns the size of the validator set
 func (v *ValidatorSet) Len() int {
 	return len(*v)
 }
 
+/*
 // Equal checks if 2 validator sets are equal
 func (v *ValidatorSet) Equal(vv *ValidatorSet) bool {
 	if len(*v) != len(*vv) {
@@ -302,6 +354,7 @@ func (v *ValidatorSet) Equal(vv *ValidatorSet) bool {
 
 	return true
 }
+*/
 
 // Index returns the index of the passed in address in the validator set.
 // Returns -1 if not found
@@ -324,4 +377,9 @@ func (v *ValidatorSet) Includes(addr NodeID) bool {
 func (v *ValidatorSet) MaxFaultyNodes() int {
 	// numberOfValidators / 3
 	return int(math.Ceil(float64(len(*v))/3)) - 1
+}
+
+// EncodeToHex generates a hex string based on the byte representation, with the '0x' prefix
+func EncodeToHex(str []byte) string {
+	return "0x" + hex.EncodeToString(str)
 }

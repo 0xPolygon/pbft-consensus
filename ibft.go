@@ -1,30 +1,20 @@
 package ibft
 
 import (
-	"context"
-	"crypto/ecdsa"
+	"bytes"
 	"fmt"
+	"log"
 	"math"
-	"path/filepath"
+	"os"
 	"reflect"
 	"time"
-
-	"github.com/0xPolygon/polygon-sdk/blockchain"
-	"github.com/0xPolygon/polygon-sdk/consensus"
-	"github.com/0xPolygon/polygon-sdk/crypto"
-	"github.com/0xPolygon/polygon-sdk/helper/hex"
-	"github.com/0xPolygon/polygon-sdk/network"
-	"github.com/0xPolygon/polygon-sdk/state"
-	"github.com/0xPolygon/polygon-sdk/txpool"
-	"github.com/0xPolygon/polygon-sdk/types"
-	"github.com/hashicorp/go-hclog"
-	"google.golang.org/grpc"
-	any "google.golang.org/protobuf/types/known/anypb"
 )
 
+/*
 const (
 	DefaultEpochSize = 100000
 )
+*/
 
 /*
 type blockchainInterface interface {
@@ -34,25 +24,44 @@ type blockchainInterface interface {
 }
 */
 
+type Config struct {
+}
+
+type Interface interface {
+	BuildBlock() (*Proposal, error)
+	Validate(proposal []byte) ([]byte, error)
+	Insert(proposal []byte, committedSeals [][]byte) error
+	ValidatorSet() (*Snapshot, error)
+}
+
+type Snapshot struct {
+	Number       uint64
+	ValidatorSet ValidatorSetInterface
+}
+
 // Ibft represents the IBFT consensus mechanism object
 type Ibft struct {
 	//sealing bool // Flag indicating if the node is a sealer
 
-	logger hclog.Logger      // Output logger
-	config *consensus.Config // Consensus configuration
-	state  *currentState     // Reference to the current state
+	inter Interface
+
+	logger *log.Logger   // Output logger
+	config *Config       // Consensus configuration
+	state  *currentState // Reference to the current state
 
 	//blockchain blockchainInterface // Interface exposed by the blockchain layer
 	//executor   *state.Executor     // Reference to the state executor
 	closeCh chan struct{} // Channel for closing
 
-	validatorKey     *ecdsa.PrivateKey // Private key for the validator
-	validatorKeyAddr NodeID
+	validator SignKey
+
+	//validatorKey     *ecdsa.PrivateKey // Private key for the validator
+	//validatorKeyAddr NodeID
 
 	//txpool *txpool.TxPool // Reference to the transaction pool
 
-	store     *snapshotStore // Snapshot store that keeps track of all snapshots
-	epochSize uint64
+	//store *snapshotStore // Snapshot store that keeps track of all snapshots
+	//epochSize uint64
 
 	msgQueue *msgQueue     // Structure containing different message queues
 	updateCh chan struct{} // Update channel
@@ -61,7 +70,7 @@ type Ibft struct {
 	//syncNotifyCh chan bool        // Sync protocol notification channel
 
 	//network   *network.Server // Reference to the networking layer
-	transport transport // Reference to the transport protocol
+	transport Transport // Reference to the transport protocol
 
 	//operator *operator
 
@@ -69,20 +78,20 @@ type Ibft struct {
 	forceTimeoutCh bool
 }
 
+type SignKey interface {
+	NodeID() NodeID
+	Sign(b []byte) ([]byte, error)
+}
+
 // Factory implements the base consensus Factory method
-func Factory(
-	ctx context.Context,
-	sealing bool,
-	config *consensus.Config,
-	txpool *txpool.TxPool,
-	network *network.Server,
-	blockchain *blockchain.Blockchain,
-	executor *state.Executor,
-	srv *grpc.Server,
-	logger hclog.Logger,
-) (consensus.Consensus, error) {
+func Factory(logger *log.Logger, config *Config) (*Ibft, error) {
+	if logger == nil {
+		logger = log.New(os.Stderr, "", log.LstdFlags)
+	}
+
 	p := &Ibft{
-		logger: logger.Named("ibft"),
+		logger: logger,
+		// logger: logger.Named("ibft"),
 		config: config,
 		//blockchain: blockchain,
 		//executor:     executor,
@@ -90,9 +99,11 @@ func Factory(
 		//txpool:       txpool,
 		state: &currentState{},
 		//network:      network,
-		epochSize: DefaultEpochSize,
+		//epochSize: DefaultEpochSize,
 		//syncNotifyCh: make(chan bool),
 		//sealing:      sealing,
+		msgQueue: newMsgQueue(),
+		updateCh: make(chan struct{}),
 	}
 
 	// Istanbul requires a different header hash function
@@ -104,11 +115,13 @@ func Factory(
 	//p.operator = &operator{ibft: p}
 	//proto.RegisterIbftOperatorServer(srv, p.operator)
 
-	if err := p.createKey(); err != nil {
-		return nil, err
-	}
+	/*
+		if err := p.createKey(); err != nil {
+			return nil, err
+		}
+	*/
 
-	p.logger.Info("validator key", "addr", p.validatorKeyAddr.String())
+	p.logger.Printf("[INFO] validator key", "addr", p.validator.NodeID())
 
 	/*
 		// start the transport protocol
@@ -137,10 +150,6 @@ func (i *Ibft) Start() error {
 	return nil
 }
 */
-
-type transport interface {
-	Gossip(msg *MessageReq) error
-}
 
 /*
 // Define the IBFT libp2p protocol
@@ -175,7 +184,7 @@ func (i *Ibft) setupTransport() error {
 
 		// decode sender
 		if err := validateMsg(msg); err != nil {
-			i.logger.Error("failed to validate msg", "err", err)
+			i.logger.Printf("[ERROR] failed to validate msg", "err", err)
 
 			return
 		}
@@ -199,6 +208,7 @@ func (i *Ibft) setupTransport() error {
 }
 */
 
+/*
 // createKey sets the validator's private key, from the file path
 func (i *Ibft) createKey() error {
 	// i.msgQueue = msgQueueImpl{}
@@ -219,6 +229,7 @@ func (i *Ibft) createKey() error {
 
 	return nil
 }
+*/
 
 const IbftKeyName = "validator.key"
 
@@ -231,7 +242,7 @@ func (i *Ibft) start() {
 	/*
 		// Grab the latest header
 		header := i.blockchain.Header()
-		i.logger.Debug("current sequence", "sequence", header.Number+1)
+		i.logger.Printf("[DEBUG] current sequence", "sequence", header.Number+1)
 	*/
 
 	for {
@@ -250,7 +261,7 @@ func (i *Ibft) start() {
 func (i *Ibft) runCycle() {
 	// Log to the console
 	if i.state.view != nil {
-		i.logger.Debug("cycle", "state", i.getState(), "sequence", i.state.view.Sequence, "round", i.state.view.Round)
+		i.logger.Print("[DEBUG] cycle", "state", i.getState(), "sequence", i.state.view.Sequence, "round", i.state.view.Round)
 	}
 
 	// Based on the current state, execute the corresponding section
@@ -269,9 +280,9 @@ func (i *Ibft) runCycle() {
 	}
 }
 
+/*
 // isValidSnapshot checks if the current node is in the validator set for the latest snapshot
 func (i *Ibft) isValidSnapshot() bool {
-	/*
 		if !i.isSealing() {
 			return false
 		}
@@ -291,10 +302,10 @@ func (i *Ibft) isValidSnapshot() bool {
 
 			return true
 		}
-	*/
 
 	return false
 }
+*/
 
 // runSyncState implements the Sync state loop.
 //
@@ -326,17 +337,19 @@ func (i *Ibft) runSyncState() {
 
 		/*
 			if err := i.syncer.BulkSyncWithPeer(p); err != nil {
-				i.logger.Error("failed to bulk sync", "err", err)
+				i.logger.Printf("[ERROR] failed to bulk sync", "err", err)
 				continue
 			}
 		*/
 
-		// if we are a validator we do not even want to wait here
-		// we can just move ahead
-		if i.isValidSnapshot() {
-			i.setState(AcceptState)
-			continue
-		}
+		/*
+			// if we are a validator we do not even want to wait here
+			// we can just move ahead
+			if i.isValidSnapshot() {
+				i.setState(AcceptState)
+				continue
+			}
+		*/
 
 		// start watch mode
 		var isValidator bool
@@ -422,7 +435,7 @@ func (i *Ibft) buildBlock(snap *Snapshot, parent *types.Header) (*types.Block, e
 			txns = append(txns, txn)
 		}
 	}
-	i.logger.Info("picked out txns from pool", "num", len(txns), "remaining", i.txpool.Length())
+	i.logger.Printf("[INFO] picked out txns from pool", "num", len(txns), "remaining", i.txpool.Length())
 
 	_, root := transition.Commit()
 	header.StateRoot = root
@@ -446,7 +459,7 @@ func (i *Ibft) buildBlock(snap *Snapshot, parent *types.Header) (*types.Block, e
 	// is sealed after all the committed seals
 	block.Header.ComputeHash()
 
-	i.logger.Info("build block", "number", header.Number, "txns", len(txns))
+	i.logger.Printf("[INFO] build block", "number", header.Number, "txns", len(txns))
 	return block, nil
 }
 */
@@ -457,66 +470,76 @@ func (i *Ibft) buildBlock(snap *Snapshot, parent *types.Header) (*types.Block, e
 // it moves back to the Sync state. On the other hand, if the node is a validator, it calculates the proposer.
 // If it turns out that the current node is the proposer, it builds a block, and sends preprepare and then prepare messages.
 func (i *Ibft) runAcceptState() { // start new round
-	logger := i.logger.Named("acceptState")
-	logger.Info("Accept state", "sequence", i.state.view.Sequence)
+	i.logger.Printf("[INFO] Accept state", "sequence", i.state.view.Sequence)
 
-	// This is the state in which we either propose a block or wait for the pre-prepare message
-	parent := i.blockchain.Header()
-	number := parent.Number + 1
-	if number != i.state.view.Sequence {
-		i.logger.Error("sequence not correct", "parent", parent.Number, "sequence", i.state.view.Sequence)
-		i.setState(SyncState)
-		return
-	}
-	snap, err := i.getSnapshot(parent.Number)
+	snap, err := i.inter.ValidatorSet()
 	if err != nil {
-		i.logger.Error("cannot find snapshot", "num", parent.Number)
 		i.setState(SyncState)
 		return
 	}
 
-	if !snap.Set.Includes(i.validatorKeyAddr) {
-		// we are not a validator anymore, move back to sync state
-		i.logger.Info("we are not a validator anymore")
-		i.setState(SyncState)
-		return
-	}
+	/*
+		// This is the state in which we either propose a block or wait for the pre-prepare message
+		parent := i.blockchain.Header()
+		number := parent.Number + 1
+		if number != i.state.view.Sequence {
+			i.logger.Printf("[ERROR] sequence not correct", "parent", parent.Number, "sequence", i.state.view.Sequence)
+			i.setState(SyncState)
+			return
+		}
+		snap, err := i.getSnapshot(parent.Number)
+		if err != nil {
+			i.logger.Printf("[ERROR] cannot find snapshot", "num", parent.Number)
+			i.setState(SyncState)
+			return
+		}
 
-	i.logger.Info("current snapshot", "validators", len(snap.Set), "votes", len(snap.Votes))
+		if !snap.Set.Includes(i.validatorKeyAddr) {
+			// we are not a validator anymore, move back to sync state
+			i.logger.Printf("[INFO] we are not a validator anymore")
+			i.setState(SyncState)
+			return
+		}
 
-	i.state.validators = snap.Set
+		i.logger.Printf("[INFO] current snapshot", "validators", len(snap.Set), "votes", len(snap.Votes))
+	*/
+
+	i.state.snap = snap
+	i.state.validators = snap.ValidatorSet
 
 	// reset round messages
 	i.state.resetRoundMsgs()
 
-	// select the proposer of the block
-	var lastProposer types.Address
-	if parent.Number != 0 {
-		lastProposer, _ = ecrecoverFromHeader(parent)
-	}
+	/*
+		// select the proposer of the block
+		var lastProposer types.Address
+		if parent.Number != 0 {
+			lastProposer, _ = ecrecoverFromHeader(parent)
+		}
+	*/
 
-	i.state.CalcProposer(lastProposer)
+	i.state.CalcProposer()
 
-	if i.state.proposer == i.validatorKeyAddr {
-		logger.Info("we are the proposer", "block", number)
+	if i.state.proposer == i.validator.NodeID() {
+		// i.logger.Printf("[INFO] we are the proposer", "block", number)
 
 		if !i.state.locked {
-			// since the state is not locked, we need to build a new block
-			i.state.block, err = i.buildBlock(snap, parent)
+			// since the state is not locked, we need to build a new proposal
+			i.state.proposal, err = i.inter.BuildBlock( /*snap, parent*/ )
 			if err != nil {
-				i.logger.Error("failed to build block", "err", err)
+				i.logger.Printf("[ERROR] failed to build block", "err", err)
 				i.setState(RoundChangeState)
 				return
 			}
 
 			// calculate how much time do we have to wait to mine the block
-			delay := time.Until(time.Unix(int64(i.state.block.Header.Timestamp), 0))
-
+			delay := time.Until(i.state.proposal.Time)
 			select {
 			case <-time.After(delay):
 			case <-i.closeCh:
 				return
 			}
+
 		}
 
 		// send the preprepare message as an RLP encoded block
@@ -530,7 +553,7 @@ func (i *Ibft) runAcceptState() { // start new round
 		return
 	}
 
-	i.logger.Info("proposer calculated", "proposer", i.state.proposer, "block", number)
+	i.logger.Printf("[INFO] proposer calculated", "proposer", i.state.proposer, "block")
 
 	// we are NOT a proposer for the block. Then, we have to wait
 	// for a pre-prepare message from the proposer
@@ -546,21 +569,22 @@ func (i *Ibft) runAcceptState() { // start new round
 			continue
 		}
 
-		if msg.From != i.state.proposer.String() {
-			i.logger.Error("msg received from wrong proposer")
+		if msg.From != i.state.proposer {
+			i.logger.Printf("[ERROR] msg received from wrong proposer")
 			continue
 		}
 
 		// retrieve the block proposal
-		block := &types.Block{}
-		if err := block.UnmarshalRLP(msg.Proposal.Value); err != nil {
-			i.logger.Error("failed to unmarshal block", "err", err)
+		hash, err := i.inter.Validate(msg.Proposal)
+		if err != nil {
+			i.logger.Printf("[ERROR] failed to unmarshal block", "err", err)
 			i.setState(RoundChangeState)
 			return
 		}
+
 		if i.state.locked {
 			// the state is locked, we need to receive the same block
-			if block.Hash() == i.state.block.Hash() {
+			if bytes.Equal(hash, i.state.proposal.Hash) {
 				// fast-track and send a commit message and wait for validations
 				i.sendCommitMsg()
 				i.setState(ValidateState)
@@ -568,17 +592,22 @@ func (i *Ibft) runAcceptState() { // start new round
 				i.handleStateErr(errIncorrectBlockLocked)
 			}
 		} else {
-			// since its a new block, we have to verify it first
-			if err := i.verifyHeaderImpl(snap, parent, block.Header); err != nil {
-				i.logger.Error("block verification failed", "err", err)
-				i.handleStateErr(errBlockVerificationFailed)
-			} else {
-				i.state.block = block
-
-				// send prepare message and wait for validations
-				i.sendPrepareMsg()
-				i.setState(ValidateState)
+			/*
+				// since its a new block, we have to verify it first
+				if err := i.verifyHeaderImpl(snap, parent, block.Header); err != nil {
+					i.logger.Printf("[ERROR] block verification failed", "err", err)
+					i.handleStateErr(errBlockVerificationFailed)
+				} else {
+			*/
+			i.state.proposal = &Proposal{
+				Hash: hash,
+				Data: msg.Proposal,
 			}
+
+			// send prepare message and wait for validations
+			i.sendPrepareMsg()
+			i.setState(ValidateState)
+			//}
 		}
 	}
 }
@@ -639,15 +668,26 @@ func (i *Ibft) runValidateState() {
 
 	if i.getState() == CommitState {
 		// at this point either if it works or not we need to unlock
-		block := i.state.block
+		committedSeals := [][]byte{}
+		for _, commit := range i.state.committed {
+			// no need to check the format of seal here because writeCommittedSeals will check
+			committedSeals = append(committedSeals, commit.Seal)
+		}
+
+		proposal := i.state.proposal.Data
 		i.state.unlock()
 
-		if err := i.insertBlock(block); err != nil {
+		if err := i.inter.Insert(proposal, committedSeals); err != nil {
 			// start a new round with the state unlocked since we need to
 			// be able to propose/validate a different block
-			i.logger.Error("failed to insert block", "err", err)
+			i.logger.Print("[ERROR] failed to insert block", "err", err)
 			i.handleStateErr(errFailedToInsertBlock)
 		} else {
+			i.state.view = &View{
+				Sequence: i.state.snap.Number + 1,
+				Round:    0,
+			}
+
 			// move ahead to the next block
 			i.setState(AcceptState)
 		}
@@ -675,8 +715,8 @@ func (i *Ibft) insertBlock(block *types.Block) error {
 		return err
 	}
 
-	i.logger.Info(
-		"block committed",
+	i.logger.Printf(
+[INFO] 		"block committed",
 		"sequence", i.state.view.Sequence,
 		"hash", block.Hash(),
 		"validators", len(i.state.validators),
@@ -699,13 +739,13 @@ func (i *Ibft) insertBlock(block *types.Block) error {
 
 	return nil
 }
+*/
 
 var (
 	errIncorrectBlockLocked    = fmt.Errorf("block locked is incorrect")
 	errBlockVerificationFailed = fmt.Errorf("block verification failed")
 	errFailedToInsertBlock     = fmt.Errorf("failed to insert block")
 )
-*/
 
 func (i *Ibft) handleStateErr(err error) {
 	i.state.err = err
@@ -714,7 +754,7 @@ func (i *Ibft) handleStateErr(err error) {
 
 func (i *Ibft) runRoundChangeState() {
 	sendRoundChange := func(round uint64) {
-		i.logger.Debug("local round change", "round", round)
+		i.logger.Printf("[DEBUG] local round change", "round", round)
 		// set the new round
 		i.state.view.Round = round
 		// clean the round
@@ -727,19 +767,21 @@ func (i *Ibft) runRoundChangeState() {
 	}
 
 	checkTimeout := func() {
-		// check if there is any peer that is really advanced and we might need to sync with it first
-		if i.syncer != nil {
-			bestPeer := i.syncer.BestPeer()
-			if bestPeer != nil {
-				lastProposal := i.blockchain.Header()
-				if bestPeer.Number() > lastProposal.Number {
-					i.logger.Debug("it has found a better peer to connect", "local", lastProposal.Number, "remote", bestPeer.Number())
-					// we need to catch up with the last sequence
-					i.setState(SyncState)
-					return
+		/*
+			// check if there is any peer that is really advanced and we might need to sync with it first
+			if i.syncer != nil {
+				bestPeer := i.syncer.BestPeer()
+				if bestPeer != nil {
+					lastProposal := i.blockchain.Header()
+					if bestPeer.Number() > lastProposal.Number {
+						i.logger.Printf("[DEBUG] it has found a better peer to connect", "local", lastProposal.Number, "remote", bestPeer.Number())
+						// we need to catch up with the last sequence
+						i.setState(SyncState)
+						return
+					}
 				}
 			}
-		}
+		*/
 
 		// otherwise, it seems that we are in sync
 		// and we should start a new round
@@ -749,13 +791,13 @@ func (i *Ibft) runRoundChangeState() {
 	// if the round was triggered due to an error, we send our own
 	// next round change
 	if err := i.state.getErr(); err != nil {
-		i.logger.Debug("round change handle err", "err", err)
+		i.logger.Printf("[DEBUG] round change handle err", "err", err)
 		sendNextRoundChange()
 	} else {
 		// otherwise, it is due to a timeout in any stage
 		// First, we try to sync up with any max round already available
 		if maxRound, ok := i.state.maxRound(); ok {
-			i.logger.Debug("round change set max round", "round", maxRound)
+			i.logger.Printf("[DEBUG] round change set max round", "round", maxRound)
 			sendRoundChange(maxRound)
 		} else {
 			// otherwise, do your best to sync up
@@ -772,7 +814,7 @@ func (i *Ibft) runRoundChangeState() {
 			return
 		}
 		if msg == nil {
-			i.logger.Debug("round change timeout")
+			i.logger.Printf("[DEBUG] round change timeout")
 			checkTimeout()
 			//update the timeout duration
 			timeout = i.randomTimeout()
@@ -786,7 +828,7 @@ func (i *Ibft) runRoundChangeState() {
 			// start a new round inmediatly
 			i.state.view.Round = msg.View.Round
 			i.setState(AcceptState)
-		} else if num == i.state.validators.MaxFaultyNodes()+1 {
+		} else if num == i.state.MaxFaultyNodes()+1 {
 			// weak certificate, try to catch up if our round number is smaller
 			if i.state.view.Round < msg.View.Round {
 				// update timer
@@ -815,7 +857,7 @@ func (i *Ibft) sendCommitMsg() {
 	i.gossip(MessageReq_Commit)
 }
 
-func (i *Ibft) gossip(typ MessageReq_Type) {
+func (i *Ibft) gossip(typ MsgType) {
 	msg := &MessageReq{
 		Type: typ,
 	}
@@ -825,33 +867,28 @@ func (i *Ibft) gossip(typ MessageReq_Type) {
 
 	// if we are sending a preprepare message we need to include the proposed block
 	if msg.Type == MessageReq_Preprepare {
-		msg.Proposal = &any.Any{
-			Value: i.state.block.MarshalRLP(),
-		}
+		msg.SetProposal(i.state.proposal.Data)
 	}
 
 	// if the message is commit, we need to add the committed seal
 	if msg.Type == MessageReq_Commit {
-		seal, err := writeCommittedSeal(i.validatorKey, i.state.block.Header)
+		// seal the hash of the proposal
+		seal, err := i.validator.Sign(i.state.proposal.Hash)
 		if err != nil {
-			i.logger.Error("failed to commit seal", "err", err)
+			i.logger.Print("[ERROR] failed to commit seal", "err", err)
 			return
 		}
-		msg.Seal = hex.EncodeToHex(seal)
+		msg.Seal = seal
 	}
 
 	if msg.Type != MessageReq_Preprepare {
 		// send a copy to ourselves so that we can process this message as well
 		msg2 := msg.Copy()
-		msg2.From = i.validatorKeyAddr.String()
+		msg2.From = i.validator.NodeID()
 		i.pushMessage(msg2)
 	}
-	if err := signMsg(i.validatorKey, msg); err != nil {
-		i.logger.Error("failed to sign message", "err", err)
-		return
-	}
 	if err := i.transport.Gossip(msg); err != nil {
-		i.logger.Error("failed to gossip", "err", err)
+		i.logger.Print("[ERROR] failed to gossip", "err", err)
 	}
 }
 
@@ -867,7 +904,7 @@ func (i *Ibft) isState(s IbftState) bool {
 
 // setState sets the IBFT state
 func (i *Ibft) setState(s IbftState) {
-	i.logger.Debug("state change", "new", s)
+	i.logger.Printf("[DEBUG] state change", "new", s)
 	i.state.setState(s)
 }
 
@@ -956,21 +993,13 @@ func (i *Ibft) VerifyHeader(parent, header *types.Header) error {
 func (i *Ibft) GetBlockCreator(header *types.Header) (types.Address, error) {
 	return ecrecoverFromHeader(header)
 }
+*/
 
 // Close closes the IBFT consensus mechanism, and does write back to disk
 func (i *Ibft) Close() error {
 	close(i.closeCh)
-
-	if i.config.Path != "" {
-		err := i.store.saveToPath(i.config.Path)
-
-		if err != nil {
-			return err
-		}
-	}
 	return nil
 }
-*/
 
 // getNextMessage reads a new message from the message queue
 func (i *Ibft) getNextMessage(timeout time.Duration) (*MessageReq, bool) {
