@@ -72,6 +72,10 @@ type testerAccount struct {
 	priv  *ecdsa.PrivateKey
 }
 
+func (t *testerAccount) NodeID() NodeID {
+	return NodeID(t.alias)
+}
+
 func (t *testerAccount) Address() NodeID {
 	return ""
 	// return crypto.PubKeyToAddress(&t.priv.PublicKey)

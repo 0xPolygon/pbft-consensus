@@ -32,6 +32,7 @@ type Interface interface {
 	Validate(proposal []byte) ([]byte, error)
 	Insert(proposal []byte, committedSeals [][]byte) error
 	ValidatorSet() (*Snapshot, error)
+	Hash(p []byte) ([]byte, error)
 }
 
 type Snapshot struct {
@@ -121,7 +122,7 @@ func Factory(logger *log.Logger, config *Config) (*Ibft, error) {
 		}
 	*/
 
-	p.logger.Printf("[INFO] validator key", "addr", p.validator.NodeID())
+	p.logger.Print("[INFO] validator key", "addr", p.validator.NodeID())
 
 	/*
 		// start the transport protocol
@@ -261,7 +262,7 @@ func (i *Ibft) start() {
 func (i *Ibft) runCycle() {
 	// Log to the console
 	if i.state.view != nil {
-		i.logger.Print("[DEBUG] cycle", "state", i.getState(), "sequence", i.state.view.Sequence, "round", i.state.view.Round)
+		i.logger.Printf("[DEBUG] cycle: state=%s, sequence=%d, round=%d", i.getState(), i.state.view.Sequence, i.state.view.Round)
 	}
 
 	// Based on the current state, execute the corresponding section
@@ -470,7 +471,7 @@ func (i *Ibft) buildBlock(snap *Snapshot, parent *types.Header) (*types.Block, e
 // it moves back to the Sync state. On the other hand, if the node is a validator, it calculates the proposer.
 // If it turns out that the current node is the proposer, it builds a block, and sends preprepare and then prepare messages.
 func (i *Ibft) runAcceptState() { // start new round
-	i.logger.Printf("[INFO] Accept state", "sequence", i.state.view.Sequence)
+	i.logger.Printf("[INFO] accept state: sequence %d", i.state.view.Sequence)
 
 	snap, err := i.inter.ValidatorSet()
 	if err != nil {
@@ -504,6 +505,15 @@ func (i *Ibft) runAcceptState() { // start new round
 		i.logger.Printf("[INFO] current snapshot", "validators", len(snap.Set), "votes", len(snap.Votes))
 	*/
 
+	fmt.Println(i.validator.NodeID())
+
+	if !snap.ValidatorSet.Includes(i.validator.NodeID()) {
+		// we are not a validator anymore, move back to sync state
+		i.logger.Printf("[INFO] we are not a validator anymore")
+		i.setState(SyncState)
+		return
+	}
+
 	i.state.snap = snap
 	i.state.validators = snap.ValidatorSet
 
@@ -527,13 +537,14 @@ func (i *Ibft) runAcceptState() { // start new round
 			// since the state is not locked, we need to build a new proposal
 			i.state.proposal, err = i.inter.BuildBlock( /*snap, parent*/ )
 			if err != nil {
-				i.logger.Printf("[ERROR] failed to build block", "err", err)
+				i.logger.Print("[ERROR] failed to build block", "err", err)
 				i.setState(RoundChangeState)
 				return
 			}
 
 			// calculate how much time do we have to wait to mine the block
 			delay := time.Until(i.state.proposal.Time)
+
 			select {
 			case <-time.After(delay):
 			case <-i.closeCh:
@@ -553,17 +564,23 @@ func (i *Ibft) runAcceptState() { // start new round
 		return
 	}
 
-	i.logger.Printf("[INFO] proposer calculated", "proposer", i.state.proposer, "block")
+	i.logger.Printf("[INFO] proposer calculated: proposer=%s, sequence=%d", i.state.proposer, snap.Number)
 
 	// we are NOT a proposer for the block. Then, we have to wait
 	// for a pre-prepare message from the proposer
 
 	timeout := i.randomTimeout()
 	for i.getState() == AcceptState {
+		fmt.Println("X")
+
 		msg, ok := i.getNextMessage(timeout)
 		if !ok {
 			return
 		}
+
+		fmt.Println("-- msg --")
+		fmt.Println(msg)
+
 		if msg == nil {
 			i.setState(RoundChangeState)
 			continue
@@ -575,16 +592,20 @@ func (i *Ibft) runAcceptState() { // start new round
 		}
 
 		// retrieve the block proposal
-		hash, err := i.inter.Validate(msg.Proposal)
-		if err != nil {
-			i.logger.Printf("[ERROR] failed to unmarshal block", "err", err)
+		if _, err := i.inter.Validate(msg.Proposal); err != nil {
+			i.logger.Print("[ERROR] failed to unmarshal block", "err", err)
 			i.setState(RoundChangeState)
 			return
 		}
 
 		if i.state.locked {
+			fmt.Println("Xxx")
+
+			hash1, _ := i.inter.Hash(msg.Proposal)
+			hash2, _ := i.inter.Hash(i.state.proposal.Data)
+
 			// the state is locked, we need to receive the same block
-			if bytes.Equal(hash, i.state.proposal.Hash) {
+			if bytes.Equal(hash1, hash2) {
 				// fast-track and send a commit message and wait for validations
 				i.sendCommitMsg()
 				i.setState(ValidateState)
@@ -600,7 +621,6 @@ func (i *Ibft) runAcceptState() { // start new round
 				} else {
 			*/
 			i.state.proposal = &Proposal{
-				Hash: hash,
 				Data: msg.Proposal,
 			}
 
@@ -661,26 +681,23 @@ func (i *Ibft) runValidateState() {
 			// we have received enough commit messages
 			sendCommit()
 
-			// try to commit the block (TODO: just to get out of the loop)
+			// change to commit state just to get out of the loop
 			i.setState(CommitState)
 		}
 	}
 
 	if i.getState() == CommitState {
-		// at this point either if it works or not we need to unlock
-		committedSeals := [][]byte{}
-		for _, commit := range i.state.committed {
-			// no need to check the format of seal here because writeCommittedSeals will check
-			committedSeals = append(committedSeals, commit.Seal)
-		}
-
+		committedSeals := i.state.getCommittedSeals()
 		proposal := i.state.proposal.Data
+
+		// at this point either if it works or not we need to unlock the state
+		// to allow for other block to be produced if it insertion fails
 		i.state.unlock()
 
 		if err := i.inter.Insert(proposal, committedSeals); err != nil {
 			// start a new round with the state unlocked since we need to
 			// be able to propose/validate a different block
-			i.logger.Print("[ERROR] failed to insert block", "err", err)
+			i.logger.Print("[ERROR] failed to insert proposal", "err", err)
 			i.handleStateErr(errFailedToInsertBlock)
 		} else {
 			i.state.view = &View{
@@ -693,6 +710,11 @@ func (i *Ibft) runValidateState() {
 		}
 	}
 }
+
+/*
+TODO:
+- Validate seal
+*/
 
 /*
 func (i *Ibft) insertBlock(block *types.Block) error {
@@ -754,7 +776,7 @@ func (i *Ibft) handleStateErr(err error) {
 
 func (i *Ibft) runRoundChangeState() {
 	sendRoundChange := func(round uint64) {
-		i.logger.Printf("[DEBUG] local round change", "round", round)
+		i.logger.Print("[DEBUG] local round change", "round", round)
 		// set the new round
 		i.state.view.Round = round
 		// clean the round
@@ -788,16 +810,19 @@ func (i *Ibft) runRoundChangeState() {
 		sendNextRoundChange()
 	}
 
+	fmt.Println("- state -")
+	fmt.Println(i.state)
+
 	// if the round was triggered due to an error, we send our own
 	// next round change
 	if err := i.state.getErr(); err != nil {
-		i.logger.Printf("[DEBUG] round change handle err", "err", err)
+		i.logger.Print("[DEBUG] round change handle err", "err", err)
 		sendNextRoundChange()
 	} else {
 		// otherwise, it is due to a timeout in any stage
 		// First, we try to sync up with any max round already available
 		if maxRound, ok := i.state.maxRound(); ok {
-			i.logger.Printf("[DEBUG] round change set max round", "round", maxRound)
+			i.logger.Print("[DEBUG] round change set max round", "round", maxRound)
 			sendRoundChange(maxRound)
 		} else {
 			// otherwise, do your best to sync up
@@ -873,7 +898,9 @@ func (i *Ibft) gossip(typ MsgType) {
 	// if the message is commit, we need to add the committed seal
 	if msg.Type == MessageReq_Commit {
 		// seal the hash of the proposal
-		seal, err := i.validator.Sign(i.state.proposal.Hash)
+		hash, _ := i.inter.Hash(i.state.proposal.Data)
+
+		seal, err := i.validator.Sign(hash)
 		if err != nil {
 			i.logger.Print("[ERROR] failed to commit seal", "err", err)
 			return
@@ -904,7 +931,7 @@ func (i *Ibft) isState(s IbftState) bool {
 
 // setState sets the IBFT state
 func (i *Ibft) setState(s IbftState) {
-	i.logger.Printf("[DEBUG] state change", "new", s)
+	i.logger.Printf("[DEBUG] state change: '%s'", s)
 	i.state.setState(s)
 }
 

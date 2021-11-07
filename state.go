@@ -67,7 +67,7 @@ func (v *View) Copy() *View {
 	return vv
 }
 
-func ViewMsg(round, sequence uint64) *View {
+func ViewMsg(sequence, round uint64) *View {
 	return &View{
 		Round:    round,
 		Sequence: sequence,
@@ -92,28 +92,23 @@ func (i IbftState) String() string {
 	switch i {
 	case AcceptState:
 		return "AcceptState"
-
 	case RoundChangeState:
 		return "RoundChangeState"
-
 	case ValidateState:
 		return "ValidateState"
-
 	case CommitState:
 		return "CommitState"
-
 	case SyncState:
 		return "SyncState"
 	}
-
 	panic(fmt.Sprintf("BUG: Ibft state not found %d", i))
 }
 
 type Proposal struct {
+	// Data is an arbitrary set of data to approve in consensus
 	Data []byte
-	Hash []byte
 
-	// Time is the time to create this proposal
+	// Time is the time to create the proposal
 	Time time.Time
 }
 
@@ -158,6 +153,14 @@ func newState() *currentState {
 	c.resetRoundMsgs()
 
 	return c
+}
+
+func (c *currentState) getCommittedSeals() [][]byte {
+	committedSeals := [][]byte{}
+	for _, commit := range c.committed {
+		committedSeals = append(committedSeals, commit.Seal)
+	}
+	return committedSeals
 }
 
 // getState returns the current state

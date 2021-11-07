@@ -46,11 +46,11 @@ func TestMsgQueue_RoundChangeState(t *testing.T) {
 
 		msg1 := m.readMessage(RoundChangeState, ViewMsg(2, 0))
 		assert.NotNil(t, msg1)
-		assert.Equal(t, msg1.obj.From, "F")
+		assert.Equal(t, msg1.obj.From, NodeID("F"))
 
 		msg2 := m.readMessage(RoundChangeState, ViewMsg(2, 0))
 		assert.NotNil(t, msg2)
-		assert.Equal(t, msg2.obj.From, "D")
+		assert.Equal(t, msg2.obj.From, NodeID("D"))
 	}
 }
 
