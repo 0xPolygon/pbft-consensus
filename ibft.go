@@ -2,6 +2,7 @@ package ibft
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log"
 	"math"
@@ -46,9 +47,9 @@ type Ibft struct {
 
 	inter Interface
 
-	logger *log.Logger   // Output logger
-	config *Config       // Consensus configuration
-	state  *currentState // Reference to the current state
+	logger *log.Logger // Output logger
+	// config *Config       // Consensus configuration
+	state *currentState // Reference to the current state
 
 	//blockchain blockchainInterface // Interface exposed by the blockchain layer
 	//executor   *state.Executor     // Reference to the state executor
@@ -85,20 +86,23 @@ type SignKey interface {
 }
 
 // Factory implements the base consensus Factory method
-func Factory(logger *log.Logger, config *Config) (*Ibft, error) {
+func Factory(logger *log.Logger /*, config *Config*/, inter Interface, validator SignKey, transport Transport) (*Ibft, error) {
 	if logger == nil {
 		logger = log.New(os.Stderr, "", log.LstdFlags)
 	}
 
 	p := &Ibft{
+		inter:  inter,
 		logger: logger,
 		// logger: logger.Named("ibft"),
-		config: config,
+		// config: config,
 		//blockchain: blockchain,
 		//executor:     executor,
 		closeCh: make(chan struct{}),
 		//txpool:       txpool,
-		state: &currentState{},
+		validator: validator,
+		state:     &currentState{},
+		transport: transport,
 		//network:      network,
 		//epochSize: DefaultEpochSize,
 		//syncNotifyCh: make(chan bool),
@@ -122,7 +126,7 @@ func Factory(logger *log.Logger, config *Config) (*Ibft, error) {
 		}
 	*/
 
-	p.logger.Print("[INFO] validator key", "addr", p.validator.NodeID())
+	p.logger.Printf("[INFO] validator key: addr=%s\n", p.validator.NodeID())
 
 	/*
 		// start the transport protocol
@@ -235,10 +239,15 @@ func (i *Ibft) createKey() error {
 const IbftKeyName = "validator.key"
 
 // start starts the IBFT consensus state machine
-func (i *Ibft) start() {
+func (i *Ibft) Run(ctx context.Context) {
+	// if we have arrive at this point we are assuming that we are synced
+	// since this will assume we are good we have first to move to its initial
+	// state for consensus that is the AcceptState
+	i.setState(AcceptState)
+
 	// consensus always starts in SyncState mode in case it needs
 	// to sync with other nodes.
-	i.setState(SyncState)
+	// i.setState(SyncState)
 
 	/*
 		// Grab the latest header
@@ -246,9 +255,9 @@ func (i *Ibft) start() {
 		i.logger.Printf("[DEBUG] current sequence", "sequence", header.Number+1)
 	*/
 
-	for {
+	for i.getState() != SyncState {
 		select {
-		case <-i.closeCh:
+		case <-ctx.Done():
 			return
 		default: // Default is here because we would block until we receive something in the closeCh
 		}
@@ -276,8 +285,13 @@ func (i *Ibft) runCycle() {
 	case RoundChangeState:
 		i.runRoundChangeState()
 
-	case SyncState:
-		i.runSyncState()
+	case CommitState:
+		i.runCommitState()
+
+		/*
+			case SyncState:
+				i.runSyncState()
+		*/
 	}
 }
 
@@ -308,13 +322,20 @@ func (i *Ibft) isValidSnapshot() bool {
 }
 */
 
+func (i *Ibft) SetSequence(sequence uint64) {
+	i.state.view = &View{
+		Round:    0,
+		Sequence: sequence,
+	}
+}
+
+/*
 // runSyncState implements the Sync state loop.
 //
 // It fetches fresh data from the blockchain. Checks if the current node is a validator and resolves any pending blocks
 func (i *Ibft) runSyncState() {
 	for i.isState(SyncState) {
 
-		/*
 			// try to sync with some target peer
 			p := i.syncer.BestPeer()
 			if p == nil {
@@ -334,34 +355,30 @@ func (i *Ibft) runSyncState() {
 				}
 				continue
 			}
-		*/
 
-		/*
 			if err := i.syncer.BulkSyncWithPeer(p); err != nil {
 				i.logger.Printf("[ERROR] failed to bulk sync", "err", err)
 				continue
 			}
-		*/
 
-		/*
 			// if we are a validator we do not even want to wait here
 			// we can just move ahead
 			if i.isValidSnapshot() {
 				i.setState(AcceptState)
 				continue
 			}
-		*/
+
 
 		// start watch mode
 		var isValidator bool
-		/*
+
 			i.syncer.WatchSyncWithPeer(p, func(b *types.Block) bool {
 				i.syncer.Broadcast(b)
 				isValidator = i.isValidSnapshot()
 
 				return !isValidator
 			})
-		*/
+
 
 		if isValidator {
 			// at this point, we are in sync with the latest chain we know of
@@ -371,6 +388,7 @@ func (i *Ibft) runSyncState() {
 		}
 	}
 }
+*/
 
 /*
 var defaultBlockPeriod = 2 * time.Second
@@ -587,7 +605,7 @@ func (i *Ibft) runAcceptState() { // start new round
 		}
 
 		if msg.From != i.state.proposer {
-			i.logger.Printf("[ERROR] msg received from wrong proposer")
+			i.logger.Printf("[ERROR] msg received from wrong proposer: expected=%s, found=%s", i.state.proposer, msg.From)
 			continue
 		}
 
@@ -657,6 +675,7 @@ func (i *Ibft) runValidateState() {
 			return
 		}
 		if msg == nil {
+			// timeout
 			i.setState(RoundChangeState)
 			continue
 		}
@@ -685,29 +704,26 @@ func (i *Ibft) runValidateState() {
 			i.setState(CommitState)
 		}
 	}
+}
 
-	if i.getState() == CommitState {
-		committedSeals := i.state.getCommittedSeals()
-		proposal := i.state.proposal.Data
+func (i *Ibft) runCommitState() {
+	committedSeals := i.state.getCommittedSeals()
+	proposal := i.state.proposal.Data
 
-		// at this point either if it works or not we need to unlock the state
-		// to allow for other block to be produced if it insertion fails
-		i.state.unlock()
+	// at this point either if it works or not we need to unlock the state
+	// to allow for other block to be produced if it insertion fails
+	i.state.unlock()
 
-		if err := i.inter.Insert(proposal, committedSeals); err != nil {
-			// start a new round with the state unlocked since we need to
-			// be able to propose/validate a different block
-			i.logger.Print("[ERROR] failed to insert proposal", "err", err)
-			i.handleStateErr(errFailedToInsertBlock)
-		} else {
-			i.state.view = &View{
-				Sequence: i.state.snap.Number + 1,
-				Round:    0,
-			}
+	if err := i.inter.Insert(proposal, committedSeals); err != nil {
+		// start a new round with the state unlocked since we need to
+		// be able to propose/validate a different block
+		i.logger.Print("[ERROR] failed to insert proposal", "err", err)
+		i.handleStateErr(errFailedToInsertBlock)
+	} else {
+		i.SetSequence(i.state.snap.Number + 1)
 
-			// move ahead to the next block
-			i.setState(AcceptState)
-		}
+		// move ahead to the next block
+		i.setState(AcceptState)
 	}
 }
 
@@ -885,6 +901,7 @@ func (i *Ibft) sendCommitMsg() {
 func (i *Ibft) gossip(typ MsgType) {
 	msg := &MessageReq{
 		Type: typ,
+		From: i.validator.NodeID(), // not sure if this goes in gossip?
 	}
 
 	// add View
@@ -919,6 +936,10 @@ func (i *Ibft) gossip(typ MsgType) {
 	}
 }
 
+func (i *Ibft) GetState() IbftState {
+	return i.getState()
+}
+
 // getState returns the current IBFT state
 func (i *Ibft) getState() IbftState {
 	return i.state.getState()
@@ -927,6 +948,10 @@ func (i *Ibft) getState() IbftState {
 // isState checks if the node is in the passed in state
 func (i *Ibft) isState(s IbftState) bool {
 	return i.state.getState() == s
+}
+
+func (i *Ibft) SetState(s IbftState) {
+	i.setState(s)
 }
 
 // setState sets the IBFT state
@@ -1052,6 +1077,10 @@ func (i *Ibft) getNextMessage(timeout time.Duration) (*MessageReq, bool) {
 		case <-i.updateCh:
 		}
 	}
+}
+
+func (i *Ibft) PushMessage(msg *MessageReq) {
+	i.pushMessage(msg)
 }
 
 // pushMessage pushes a new message to the message queue
