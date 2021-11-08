@@ -1,6 +1,7 @@
 package ibft
 
 import (
+	"context"
 	"crypto/sha1"
 	"fmt"
 	"log"
@@ -41,7 +42,7 @@ func TestTransition_ValidateState_Prepare(t *testing.T) {
 	})
 	i.Close()
 
-	i.runCycle()
+	i.runCycle(context.Background())
 
 	i.expect(expectResult{
 		sequence:    1,
@@ -92,7 +93,7 @@ func TestTransition_ValidateState_CommitFastTrack(t *testing.T) {
 		//Seal: seal,
 	})
 
-	i.runCycle()
+	i.runCycle(context.Background())
 
 	i.expect(expectResult{
 		sequence:   1,
@@ -109,7 +110,7 @@ func TestTransition_AcceptState_ToSyncState(t *testing.T) {
 	i.setState(AcceptState)
 	i.Close()
 
-	i.runCycle()
+	i.runCycle(context.Background())
 
 	i.expect(expectResult{
 		sequence: 1,
@@ -138,7 +139,7 @@ func TestTransition_AcceptState_Proposer_ProposeBlock(t *testing.T) {
 		Time: time.Now().Add(1 * time.Second),
 	})
 
-	i.runCycle()
+	i.runCycle(context.Background())
 
 	i.expect(expectResult{
 		sequence: 1,
@@ -158,7 +159,7 @@ func TestTransition_AcceptState_Proposer_Locked(t *testing.T) {
 		Data: mockProposal,
 	}
 
-	i.runCycle()
+	i.runCycle(context.Background())
 
 	i.expect(expectResult{
 		sequence: 1,
@@ -193,7 +194,7 @@ func TestTransition_AcceptState_Validator_VerifyCorrect(t *testing.T) {
 		View:     ViewMsg(1, 0),
 	})
 
-	i.runCycle()
+	i.runCycle(context.Background())
 
 	i.expect(expectResult{
 		sequence: 1,
@@ -224,7 +225,7 @@ func TestTransition_AcceptState_Validator_VerifyFails(t *testing.T) {
 		View:     ViewMsg(1, 0),
 	})
 
-	i.runCycle()
+	i.runCycle(context.Background())
 
 	i.expect(expectResult{
 		sequence: 1,
@@ -248,7 +249,7 @@ func TestTransition_AcceptState_Validator_ProposerInvalid(t *testing.T) {
 	})
 	i.forceTimeout()
 
-	i.runCycle()
+	i.runCycle(context.Background())
 
 	i.expect(expectResult{
 		sequence: 1,
@@ -285,7 +286,7 @@ func TestTransition_AcceptState_Validator_LockWrong(t *testing.T) {
 		View:     ViewMsg(1, 0),
 	})
 
-	i.runCycle()
+	i.runCycle(context.Background())
 
 	i.expect(expectResult{
 		sequence: 1,
@@ -315,7 +316,7 @@ func TestTransition_AcceptState_Validator_LockCorrect(t *testing.T) {
 		View:     ViewMsg(1, 0),
 	})
 
-	i.runCycle()
+	i.runCycle(context.Background())
 
 	i.expect(expectResult{
 		sequence: 1,
@@ -351,7 +352,7 @@ func TestTransition_RoundChangeState_CatchupRound(t *testing.T) {
 	// not processed all the messages yet.
 	// After it receives 3 Round change messages higher than his own
 	// round it will change round again and move to accept
-	m.runCycle()
+	m.runCycle(context.Background())
 
 	m.expect(expectResult{
 		sequence: 1,
@@ -372,7 +373,7 @@ func TestTransition_RoundChangeState_Timeout(t *testing.T) {
 	// one RoundChange message.
 	// After the timeout, it increases to round 2 and sends another
 	/// RoundChange message.
-	m.runCycle()
+	m.runCycle(context.Background())
 
 	m.expect(expectResult{
 		sequence: 1,
@@ -406,7 +407,7 @@ func TestTransition_RoundChangeState_WeakCertificate(t *testing.T) {
 	})
 	m.Close()
 
-	m.runCycle()
+	m.runCycle(context.Background())
 
 	m.expect(expectResult{
 		sequence: 1,
@@ -425,7 +426,7 @@ func TestTransition_RoundChangeState_ErrStartNewRound(t *testing.T) {
 	m.state.err = errBlockVerificationFailed
 
 	m.setState(RoundChangeState)
-	m.runCycle()
+	m.runCycle(context.Background())
 
 	m.expect(expectResult{
 		sequence: 1,
@@ -444,7 +445,7 @@ func TestTransition_RoundChangeState_StartNewRound(t *testing.T) {
 	m.state.view.Sequence = 1
 
 	m.setState(RoundChangeState)
-	m.runCycle()
+	m.runCycle(context.Background())
 
 	m.expect(expectResult{
 		sequence: 1,
@@ -470,7 +471,7 @@ func TestTransition_RoundChangeState_MaxRound(t *testing.T) {
 	})
 
 	m.setState(RoundChangeState)
-	m.runCycle()
+	m.runCycle(context.Background())
 
 	m.expect(expectResult{
 		sequence: 1,

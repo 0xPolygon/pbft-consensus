@@ -1,0 +1,20 @@
+receivers:
+  # Make sure to add the otlp receiver.
+  # This will open up the receiver on port 4317
+  otlp:
+    protocols:
+      grpc:
+        endpoint: "0.0.0.0:4317"
+processors:
+extensions:
+  health_check: {}
+exporters:
+  jaeger:
+    endpoint: "127.0.0.1:14250"
+    insecure: true
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: []
+      exporters: [jaeger]

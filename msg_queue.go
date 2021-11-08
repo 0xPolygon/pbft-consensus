@@ -31,14 +31,20 @@ func (m *msgQueue) pushMessage(task *msgTask) {
 
 // readMessage reads the message from a message queue, based on the current state and view
 func (m *msgQueue) readMessage(state IbftState, current *View) *msgTask {
+	msg, _ := m.readMessageWithDiscards(state, current)
+	return msg
+}
+
+func (m *msgQueue) readMessageWithDiscards(state IbftState, current *View) (*msgTask, []*msgTask) {
 	m.queueLock.Lock()
 	defer m.queueLock.Unlock()
 
+	discarded := []*msgTask{}
 	queue := m.getQueue(state)
 
 	for {
 		if queue.Len() == 0 {
-			return nil
+			return nil, discarded
 		}
 		msg := queue.head()
 
@@ -48,13 +54,13 @@ func (m *msgQueue) readMessage(state IbftState, current *View) *msgTask {
 			// since we are interested in knowing all the possible rounds
 			if msg.view.Sequence > current.Sequence {
 				// future message
-				return nil
+				return nil, discarded
 			}
 		} else {
 			// otherwise, we compare both sequence and round
 			if cmpView(msg.view, current) > 0 {
 				// future message
-				return nil
+				return nil, discarded
 			}
 		}
 
@@ -64,11 +70,12 @@ func (m *msgQueue) readMessage(state IbftState, current *View) *msgTask {
 
 		if cmpView(msg.view, current) < 0 {
 			// old value, try again
+			discarded = append(discarded, msg)
 			continue
 		}
 
 		// good value, return it
-		return msg
+		return msg, discarded
 	}
 }
 

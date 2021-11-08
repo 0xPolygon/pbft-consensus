@@ -9,6 +9,12 @@ Fuzzy uses OpenTracing to profile the execution of the IBFT state machine among 
 $ docker run --net=host jaegertracing/all-in-one:1.27
 ```
 
+You also need to run the OpenCollector to move data to Jaeger from the OpenTelemetry client in IBFT.
+
+```
+$ docker run --net=host -v "${PWD}/otel-jaeger-config.yaml":/otel-local-config.yaml otel/opentelemetry-collector --config otel-local-config.yaml
+```
+
 ## Tests
 
 ### TestIBFT_NoIssue

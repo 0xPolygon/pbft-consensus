@@ -6,6 +6,8 @@ import (
 	"math"
 	"sync/atomic"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
 )
 
 type MsgType int32
@@ -16,6 +18,21 @@ const (
 	MessageReq_Commit      MsgType = 2
 	MessageReq_Prepare     MsgType = 3
 )
+
+func (m MsgType) String() string {
+	switch m {
+	case MessageReq_RoundChange:
+		return "RoundChange"
+	case MessageReq_Preprepare:
+		return "Preprepare"
+	case MessageReq_Commit:
+		return "Commit"
+	case MessageReq_Prepare:
+		return "Prepare"
+	default:
+		panic(fmt.Sprintf("BUG: Bad msgtype %d", m))
+	}
+}
 
 type MessageReq struct {
 	// type is the type of the message
@@ -35,6 +52,10 @@ type MessageReq struct {
 
 	// proposal is the rlp encoded block in preprepare messages
 	Proposal []byte
+}
+
+func (m *MessageReq) ToAttributes() []attribute.KeyValue {
+	return nil
 }
 
 func (m *MessageReq) SetProposal(b []byte) {
@@ -153,6 +174,10 @@ func newState() *currentState {
 	c.resetRoundMsgs()
 
 	return c
+}
+
+func (c *currentState) GetSequence() uint64 {
+	return c.view.Sequence
 }
 
 func (c *currentState) getCommittedSeals() [][]byte {

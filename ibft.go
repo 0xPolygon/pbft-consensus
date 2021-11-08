@@ -9,6 +9,10 @@ import (
 	"os"
 	"reflect"
 	"time"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 /*
@@ -76,6 +80,7 @@ type Ibft struct {
 
 	//operator *operator
 
+	tracer trace.Tracer
 	// aux test methods
 	forceTimeoutCh bool
 }
@@ -91,9 +96,37 @@ func Factory(logger *log.Logger /*, config *Config*/, inter Interface, validator
 		logger = log.New(os.Stderr, "", log.LstdFlags)
 	}
 
+	fmt.Println("XXX")
+	fmt.Println(otel.GetTracerProvider())
+
+	tracer := otel.Tracer("test-tracer-xx")
+
+	/*
+		// work begins
+		ctx, span := tracer.Start(
+			context.Background(),
+			"CollectorExporter-Example")
+		defer span.End()
+
+		for i := 0; i < 10; i++ {
+			_, iSpan := tracer.Start(ctx, fmt.Sprintf("Sample-%d", i))
+			log.Printf("Doing really hard work (%d / 10)\n", i+1)
+
+			<-time.After(time.Second)
+			iSpan.End()
+		}
+
+		log.Printf("Done!")
+
+		panic("X")
+	*/
+
+	// tracer := otel.Tracer("ibft")
+
 	p := &Ibft{
 		inter:  inter,
 		logger: logger,
+		tracer: tracer,
 		// logger: logger.Named("ibft"),
 		// config: config,
 		//blockchain: blockchain,
@@ -255,6 +288,27 @@ func (i *Ibft) Run(ctx context.Context) {
 		i.logger.Printf("[DEBUG] current sequence", "sequence", header.Number+1)
 	*/
 
+	var sequenceCtx context.Context
+	var span trace.Span
+	var sequence uint64
+
+	checkSpanChange := func() {
+		currentSequence := i.state.GetSequence()
+		if sequence == currentSequence && sequenceCtx != nil {
+			return
+		}
+		if span != nil {
+			// finish the current span
+			span.End()
+		}
+		// create a new span
+		sequence = currentSequence
+		sequenceCtx, span = i.tracer.Start(context.Background(), fmt.Sprintf("Sequence-%d", sequence))
+	}
+
+	// first init the context and span
+	checkSpanChange()
+
 	for i.getState() != SyncState {
 		select {
 		case <-ctx.Done():
@@ -262,37 +316,74 @@ func (i *Ibft) Run(ctx context.Context) {
 		default: // Default is here because we would block until we receive something in the closeCh
 		}
 
+		// trace each state change
+		//cycleCtx, span := i.tracer.Start(sequenceCtx, i.getState().String())
+
+		//span.AddEvent("XXXXX")
+
 		// Start the state machine loop
-		i.runCycle()
+		i.runCycle(sequenceCtx)
+
+		//span.End()
+		checkSpanChange()
 	}
 }
 
 // runCycle represents the IBFT state machine loop
-func (i *Ibft) runCycle() {
+func (i *Ibft) runCycle(ctx context.Context) {
 	// Log to the console
 	if i.state.view != nil {
 		i.logger.Printf("[DEBUG] cycle: state=%s, sequence=%d, round=%d", i.getState(), i.state.view.Sequence, i.state.view.Round)
 	}
 
+	/*
+		ctx, span := i.tracer.Start(
+			context.Background(),
+			"CollectorExporter-Example")
+		// defer span.End()
+	*/
+
+	/*
+		for j := 0; j < 10; j++ {
+			_, iSpan := i.tracer.Start(ctx, fmt.Sprintf("Sample-%d", j))
+			log.Printf("Doing really hard work (%d / 10)\n", j+1)
+
+			<-time.After(time.Second)
+			iSpan.End()
+		}
+	*/
+
+	log.Printf("Done!")
+
+	/*
+		fmt.Println("==>")
+		_, span := i.tracer.Start(context.Background(), "cycle", trace.WithAttributes(attribute.String("state", i.getState().String())))
+
+		span.End()
+	*/
+
 	// Based on the current state, execute the corresponding section
 	switch i.getState() {
 	case AcceptState:
-		i.runAcceptState()
+		i.runAcceptState(ctx)
 
 	case ValidateState:
-		i.runValidateState()
+		i.runValidateState(ctx)
 
 	case RoundChangeState:
-		i.runRoundChangeState()
+		i.runRoundChangeState(ctx)
 
 	case CommitState:
-		i.runCommitState()
+		i.runCommitState(ctx)
 
 		/*
 			case SyncState:
 				i.runSyncState()
 		*/
 	}
+
+	fmt.Println("<<<=== end")
+	//span.End()
 }
 
 /*
@@ -488,7 +579,10 @@ func (i *Ibft) buildBlock(snap *Snapshot, parent *types.Header) (*types.Block, e
 // The Accept state always checks the snapshot, and the validator set. If the current node is not in the validators set,
 // it moves back to the Sync state. On the other hand, if the node is a validator, it calculates the proposer.
 // If it turns out that the current node is the proposer, it builds a block, and sends preprepare and then prepare messages.
-func (i *Ibft) runAcceptState() { // start new round
+func (i *Ibft) runAcceptState(ctx context.Context) { // start new round
+	ctx, span := i.tracer.Start(ctx, "AcceptState")
+	defer span.End()
+
 	i.logger.Printf("[INFO] accept state: sequence %d", i.state.view.Sequence)
 
 	snap, err := i.inter.ValidatorSet()
@@ -548,7 +642,18 @@ func (i *Ibft) runAcceptState() { // start new round
 
 	i.state.CalcProposer()
 
-	if i.state.proposer == i.validator.NodeID() {
+	isProposer := i.state.proposer == i.validator.NodeID()
+
+	// log the current state of this span
+	span.SetAttributes(
+		attribute.Bool("isproposer", isProposer),
+		attribute.Bool("locked", i.state.locked),
+		attribute.String("proposer", string(i.state.proposer)),
+	)
+
+	if isProposer {
+		// span.AddEvent("proposer")
+
 		// i.logger.Printf("[INFO] we are the proposer", "block", number)
 
 		if !i.state.locked {
@@ -588,10 +693,14 @@ func (i *Ibft) runAcceptState() { // start new round
 	// for a pre-prepare message from the proposer
 
 	timeout := i.randomTimeout()
+
+	// We only need to wait here for one type of message, the Prepare message from the proposer.
+	// However, since we can receive bad Prepare messages we have to wait (or timeout) until
+	// we get the message from the correct proposer.
 	for i.getState() == AcceptState {
 		fmt.Println("X")
 
-		msg, ok := i.getNextMessage(timeout)
+		msg, ok := i.getNextMessage(span, timeout)
 		if !ok {
 			return
 		}
@@ -653,9 +762,12 @@ func (i *Ibft) runAcceptState() { // start new round
 // runValidateState implements the Validate state loop.
 //
 // The Validate state is rather simple - all nodes do in this state is read messages and add them to their local snapshot state
-func (i *Ibft) runValidateState() {
+func (i *Ibft) runValidateState(ctx context.Context) { // start new round
+	ctx, span := i.tracer.Start(ctx, "ValidateState")
+	defer span.End()
+
 	hasCommitted := false
-	sendCommit := func() {
+	sendCommit := func(span trace.Span) {
 		// at this point either we have enough prepare messages
 		// or commit messages so we can lock the block
 		i.state.lock()
@@ -664,19 +776,25 @@ func (i *Ibft) runValidateState() {
 			// send the commit message
 			i.sendCommitMsg()
 			hasCommitted = true
+
+			span.AddEvent("Commit")
 		}
 	}
 
 	timeout := i.randomTimeout()
 	for i.getState() == ValidateState {
-		msg, ok := i.getNextMessage(timeout)
+		_, span := i.tracer.Start(ctx, "ValidateState")
+
+		msg, ok := i.getNextMessage(span, timeout)
 		if !ok {
 			// closing
+			span.End()
 			return
 		}
 		if msg == nil {
 			// timeout
 			i.setState(RoundChangeState)
+			span.End()
 			continue
 		}
 
@@ -693,20 +811,63 @@ func (i *Ibft) runValidateState() {
 
 		if i.state.numPrepared() > i.state.NumValid() {
 			// we have received enough pre-prepare messages
-			sendCommit()
+			sendCommit(span)
 		}
 
 		if i.state.numCommitted() > i.state.NumValid() {
 			// we have received enough commit messages
-			sendCommit()
+			sendCommit(span)
 
 			// change to commit state just to get out of the loop
 			i.setState(CommitState)
 		}
+
+		// set the attributes of this span once it is done
+		i.setStateSpanAttributes(span)
+
+		span.End()
 	}
 }
 
-func (i *Ibft) runCommitState() {
+func spanAddEventMessage(typ string, span trace.Span, msg *MessageReq) {
+	span.AddEvent("Message", trace.WithAttributes(
+		// where was the message generated
+		attribute.String("typ", typ),
+
+		// type of message
+		attribute.String("msg", msg.Type.String()),
+
+		// from address of the sender
+		attribute.String("from", string(msg.From)),
+
+		// view sequence
+		attribute.Int64("sequence", int64(msg.View.Sequence)),
+
+		// round sequence
+		attribute.Int64("round", int64(msg.View.Round)),
+	))
+}
+
+func (i *Ibft) setStateSpanAttributes(span trace.Span) {
+	attr := []attribute.KeyValue{}
+
+	// number of committed messages
+	attr = append(attr, attribute.Int64("committed", int64(i.state.numCommitted())))
+
+	// number of prepared messages
+	attr = append(attr, attribute.Int64("prepared", int64(i.state.numPrepared())))
+
+	// number of change state messages per round
+	for round, msgs := range i.state.roundMessages {
+		attr = append(attr, attribute.Int64(fmt.Sprintf("roundchange_%d", round), int64(len(msgs))))
+	}
+	span.SetAttributes(attr...)
+}
+
+func (i *Ibft) runCommitState(ctx context.Context) {
+	_, span := i.tracer.Start(ctx, "CommitState")
+	defer span.End()
+
 	committedSeals := i.state.getCommittedSeals()
 	proposal := i.state.proposal.Data
 
@@ -790,7 +951,10 @@ func (i *Ibft) handleStateErr(err error) {
 	i.setState(RoundChangeState)
 }
 
-func (i *Ibft) runRoundChangeState() {
+func (i *Ibft) runRoundChangeState(ctx context.Context) {
+	ctx, span := i.tracer.Start(ctx, "RoundChange")
+	defer span.End()
+
 	sendRoundChange := func(round uint64) {
 		i.logger.Print("[DEBUG] local round change", "round", round)
 		// set the new round
@@ -821,6 +985,8 @@ func (i *Ibft) runRoundChangeState() {
 			}
 		*/
 
+		// TODO
+
 		// otherwise, it seems that we are in sync
 		// and we should start a new round
 		sendNextRoundChange()
@@ -849,9 +1015,12 @@ func (i *Ibft) runRoundChangeState() {
 	// create a timer for the round change
 	timeout := i.randomTimeout()
 	for i.getState() == RoundChangeState {
-		msg, ok := i.getNextMessage(timeout)
+		_, span := i.tracer.Start(ctx, "RoundChangeState")
+
+		msg, ok := i.getNextMessage(span, timeout)
 		if !ok {
 			// closing
+			span.End()
 			return
 		}
 		if msg == nil {
@@ -859,6 +1028,7 @@ func (i *Ibft) runRoundChangeState() {
 			checkTimeout()
 			//update the timeout duration
 			timeout = i.randomTimeout()
+			span.End()
 			continue
 		}
 
@@ -877,6 +1047,9 @@ func (i *Ibft) runRoundChangeState() {
 				sendRoundChange(msg.View.Round)
 			}
 		}
+
+		i.setStateSpanAttributes(span)
+		span.End()
 	}
 }
 
@@ -1054,11 +1227,18 @@ func (i *Ibft) Close() error {
 }
 
 // getNextMessage reads a new message from the message queue
-func (i *Ibft) getNextMessage(timeout time.Duration) (*MessageReq, bool) {
+func (i *Ibft) getNextMessage(span trace.Span, timeout time.Duration) (*MessageReq, bool) {
 	timeoutCh := time.After(timeout)
 	for {
-		msg := i.msgQueue.readMessage(i.getState(), i.state.view)
+		msg, discards := i.msgQueue.readMessageWithDiscards(i.getState(), i.state.view)
+		// send the discard messages
+		for _, msg := range discards {
+			spanAddEventMessage("dropMessage", span, msg.obj)
+		}
 		if msg != nil {
+			// add the event to the span
+			spanAddEventMessage("message", span, msg.obj)
+
 			return msg.obj, true
 		}
 
@@ -1071,6 +1251,7 @@ func (i *Ibft) getNextMessage(timeout time.Duration) (*MessageReq, bool) {
 		// someone closes the stopCh (i.e. timeout for round change)
 		select {
 		case <-timeoutCh:
+			span.AddEvent("Timeout")
 			return nil, true
 		case <-i.closeCh:
 			return nil, false
