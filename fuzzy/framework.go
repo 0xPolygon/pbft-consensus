@@ -12,16 +12,17 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.7.0"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 )
 
-func initProvider() func() {
+func initTracer(name string) *sdktrace.TracerProvider {
 	ctx := context.Background()
 
 	res, err := resource.New(ctx,
 		resource.WithAttributes(
 			// the service name used to display traces in backends
-			semconv.ServiceNameKey.String("test-service-7"),
+			semconv.ServiceNameKey.String(name),
 		),
 	)
 	if err != nil {
@@ -46,25 +47,17 @@ func initProvider() func() {
 		sdktrace.WithResource(res),
 		sdktrace.WithSpanProcessor(bsp),
 	)
-	otel.SetTracerProvider(tracerProvider)
+	// otel.SetTracerProvider(tracerProvider)
 
 	// set global propagator to tracecontext (the default is no-op).
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 
-	return func() {
-		// Shutdown will flush any remaining spans and shut down the exporter.
-		if err := tracerProvider.Shutdown(ctx); err != nil {
-			panic("failed to shutdown TracerProvider")
-		}
-	}
-}
-
-func init() {
-	initProvider()
+	return tracerProvider
 }
 
 type cluster struct {
-	nodes []*node
+	nodes  []*node
+	tracer *sdktrace.TracerProvider
 }
 
 func newIBFTCluster(t *testing.T, prefix string, count int) *cluster {
@@ -76,10 +69,12 @@ func newIBFTCluster(t *testing.T, prefix string, count int) *cluster {
 	tt := &transport{}
 
 	c := &cluster{
-		nodes: []*node{},
+		nodes:  []*node{},
+		tracer: initTracer("fuzzy_" + prefix),
 	}
 	for _, name := range names {
-		n, err := newIBFTNode(name, names, tt)
+		trace := c.tracer.Tracer(name)
+		n, err := newIBFTNode(name, names, trace, tt)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -98,6 +93,9 @@ func (c *cluster) Stop() {
 	for _, n := range c.nodes {
 		n.Stop()
 	}
+	if err := c.tracer.Shutdown(context.Background()); err != nil {
+		panic("failed to shutdown TracerProvider")
+	}
 }
 
 type node struct {
@@ -107,7 +105,7 @@ type node struct {
 	closeCh chan struct{}
 }
 
-func newIBFTNode(name string, nodes []string, tt *transport) (*node, error) {
+func newIBFTNode(name string, nodes []string, trace trace.Tracer, tt *transport) (*node, error) {
 	kk := key(name)
 	fsm := &fsm{
 		nodes: nodes,
@@ -116,6 +114,7 @@ func newIBFTNode(name string, nodes []string, tt *transport) (*node, error) {
 	}
 
 	con, _ := ibft.Factory(nil, fsm, kk, tt)
+	con.SetTrace(trace)
 
 	tt.Register(name, func(msg *ibft.MessageReq) {
 		// pipe messages from mock transport to ibft

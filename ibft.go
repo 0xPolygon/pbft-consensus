@@ -106,8 +106,6 @@ func Factory(logger *log.Logger /*, config *Config*/, inter Interface, validator
 	fmt.Println("XXX")
 	fmt.Println(otel.GetTracerProvider())
 
-	tracer := otel.Tracer("test-tracer-xx")
-
 	/*
 		// work begins
 		ctx, span := tracer.Start(
@@ -133,7 +131,7 @@ func Factory(logger *log.Logger /*, config *Config*/, inter Interface, validator
 	p := &Ibft{
 		inter:  inter,
 		logger: logger,
-		tracer: tracer,
+		//tracer: tracer,
 		// logger: logger.Named("ibft"),
 		// config: config,
 		//blockchain: blockchain,
@@ -176,6 +174,10 @@ func Factory(logger *log.Logger /*, config *Config*/, inter Interface, validator
 	*/
 
 	return p, nil
+}
+
+func (i *Ibft) SetTrace(trace trace.Tracer) {
+	i.tracer = trace
 }
 
 /*
@@ -280,6 +282,11 @@ const IbftKeyName = "validator.key"
 
 // start starts the IBFT consensus state machine
 func (i *Ibft) Run(ctx context.Context) {
+	// set the tracer to noop if nothing set
+	if i.tracer == nil {
+		i.tracer = trace.NewNoopTracerProvider().Tracer("")
+	}
+
 	// if we have arrive at this point we are assuming that we are synced
 	// since this will assume we are good we have first to move to its initial
 	// state for consensus that is the AcceptState
