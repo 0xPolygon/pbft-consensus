@@ -20,9 +20,13 @@ func (f *fsm) currentHeight() uint64 {
 	return number
 }
 
+func (f *fsm) nextHeight() uint64 {
+	return f.currentHeight() + 1
+}
+
 func (f *fsm) BuildBlock() (*ibft.Proposal, error) {
 	proposal := &ibft.Proposal{
-		Data: []byte{byte(f.currentHeight())},
+		Data: []byte{byte(f.nextHeight())},
 		Time: time.Now().Add(1 * time.Second),
 	}
 	return proposal, nil
@@ -54,7 +58,7 @@ func (f *fsm) ValidatorSet() (*ibft.Snapshot, error) {
 	// get the current number from last proposal if any (otherwise 0)
 	snap := &ibft.Snapshot{
 		ValidatorSet: &vv,
-		Number:       f.currentHeight(),
+		Number:       f.nextHeight(),
 	}
 	return snap, nil
 }
