@@ -32,10 +32,17 @@ type blockchainInterface interface {
 type Config struct {
 }
 
+type Proposal2 struct {
+	Proposal       []byte
+	CommittedSeals [][]byte
+	Proposer       NodeID
+	Number         uint64
+}
+
 type Interface interface {
 	BuildBlock() (*Proposal, error)
 	Validate(proposal []byte) ([]byte, error)
-	Insert(proposal []byte, committedSeals [][]byte) error
+	Insert(p *Proposal2) error
 	ValidatorSet() (*Snapshot, error)
 	Hash(p []byte) ([]byte, error)
 }
@@ -875,7 +882,13 @@ func (i *Ibft) runCommitState(ctx context.Context) {
 	// to allow for other block to be produced if it insertion fails
 	i.state.unlock()
 
-	if err := i.inter.Insert(proposal, committedSeals); err != nil {
+	pp := &Proposal2{
+		Proposal:       proposal,
+		CommittedSeals: committedSeals,
+		Proposer:       i.state.proposer,
+		Number:         i.state.snap.Number,
+	}
+	if err := i.inter.Insert(pp); err != nil {
 		// start a new round with the state unlocked since we need to
 		// be able to propose/validate a different block
 		i.logger.Print("[ERROR] failed to insert proposal", "err", err)

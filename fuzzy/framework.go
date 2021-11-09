@@ -110,8 +110,9 @@ type node struct {
 func newIBFTNode(name string, nodes []string, tt *transport) (*node, error) {
 	kk := key(name)
 	fsm := &fsm{
-		nodes:  nodes,
-		number: 1, // next sequence
+		nodes: nodes,
+		// number:    1, // next sequence
+		proposals: []*ibft.Proposal2{},
 	}
 
 	con, _ := ibft.Factory(nil, fsm, kk, tt)
