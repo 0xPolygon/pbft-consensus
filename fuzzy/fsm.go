@@ -2,6 +2,7 @@ package fuzzy
 
 import (
 	"crypto/sha1"
+	"sync"
 	"time"
 
 	"github.com/0xPolygon/ibft-consensus"
@@ -10,9 +11,13 @@ import (
 type fsm struct {
 	nodes     []string
 	proposals []*ibft.Proposal2
+	lock      sync.Mutex
 }
 
 func (f *fsm) currentHeight() uint64 {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
 	number := uint64(1) // initial height is always 1 since 0 is the genesis
 	if len(f.proposals) != 0 {
 		number = f.proposals[len(f.proposals)-1].Number

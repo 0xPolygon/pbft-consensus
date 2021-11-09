@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/0xPolygon/ibft-consensus"
 	"go.opentelemetry.io/otel"
@@ -56,7 +57,9 @@ func initTracer(name string) *sdktrace.TracerProvider {
 }
 
 type cluster struct {
+	t      *testing.T
 	nodes  []*node
+	daemon *daemon
 	tracer *sdktrace.TracerProvider
 }
 
@@ -69,6 +72,7 @@ func newIBFTCluster(t *testing.T, prefix string, count int) *cluster {
 	tt := &transport{}
 
 	c := &cluster{
+		t:      t,
 		nodes:  []*node{},
 		tracer: initTracer("fuzzy_" + prefix),
 	}
@@ -83,10 +87,46 @@ func newIBFTCluster(t *testing.T, prefix string, count int) *cluster {
 	return c
 }
 
+func (c *cluster) WaitForHeight(num uint64, timeout time.Duration) {
+	// we need to check every node in the ensemble?
+	// yes, this should test if everyone can agree on the final set.
+	// note, if we include drops, we need to do sync otherwise this will never work
+
+	enough := func() bool {
+		for _, n := range c.nodes {
+			if n.fsm.currentHeight() < num {
+				return false
+			}
+		}
+		return true
+	}
+
+	for {
+		select {
+		case <-time.After(100 * time.Millisecond):
+			if enough() {
+				return
+			}
+		case <-time.After(timeout):
+			c.t.Fatal("timeout")
+		}
+	}
+}
+
 func (c *cluster) Start() {
 	for _, n := range c.nodes {
 		n.Run()
 	}
+}
+
+func (c *cluster) StopNode(name string) {
+	for _, n := range c.nodes {
+		if n.name == name {
+			n.Stop()
+			return
+		}
+	}
+	panic("not found")
 }
 
 func (c *cluster) Stop() {
@@ -137,14 +177,24 @@ func (n *node) Run() {
 	// that we just synced up with
 	n.ibft.SetSequence(0)
 
+	ctx, cancelFn := context.WithCancel(context.Background())
 	go func() {
-		n.ibft.Run(context.Background())
+		<-n.closeCh
+		cancelFn()
+	}()
+
+	// we need to do more stuff here.
+
+	go func() {
+		n.ibft.Run(ctx)
 		fmt.Println("- sync done -")
+
+		// panic("done??")
 	}()
 }
 
 func (n *node) Stop() {
-	// TODO
+	close(n.closeCh)
 }
 
 type key string
@@ -173,4 +223,7 @@ func (t *transport) Gossip(msg *ibft.MessageReq) error {
 		handler(msg)
 	}
 	return nil
+}
+
+type daemon struct {
 }

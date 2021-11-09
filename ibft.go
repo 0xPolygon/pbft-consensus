@@ -1160,11 +1160,14 @@ func (i *Ibft) forceTimeout() {
 
 // randomTimeout calculates the timeout duration depending on the current round
 func (i *Ibft) randomTimeout() time.Duration {
-	timeout := time.Duration(10000) * time.Millisecond
+	// timeout := time.Duration(2000) * time.Millisecond
+	timeout := 2 * time.Second
 	round := i.state.view.Round
 	if round > 0 {
 		timeout += time.Duration(math.Pow(2, float64(round))) * time.Second
 	}
+	fmt.Println("-- timeout --")
+	fmt.Println(timeout)
 	return timeout
 }
 
