@@ -13,6 +13,5 @@ func TestFuzz_LeaderDrop(t *testing.T) {
 	c.WaitForHeight(2, 1*time.Minute)
 
 	c.StopNode("leader_drop_0")
-
-	time.Sleep(10 * time.Second)
+	c.WaitForHeight(15, 1*time.Minute)
 }

@@ -45,6 +45,7 @@ type Interface interface {
 	Insert(p *Proposal2) error
 	ValidatorSet() (*Snapshot, error)
 	Hash(p []byte) ([]byte, error)
+	IsStuck(num uint64) (uint64, bool)
 }
 
 type Snapshot struct {
@@ -1005,7 +1006,22 @@ func (i *Ibft) runRoundChangeState(ctx context.Context) {
 			}
 		*/
 
-		// TODO
+		// At this point we might be stuck in the network if:
+		// - We have advanced the round but everyone else passed.
+		//   We are removing those messages since they are old now.
+		if bestHeight, stucked := i.inter.IsStuck(i.state.view.Sequence); stucked {
+
+			fmt.Println("\n\n\n\n\nSTUCKKK\n\n\n\n\n")
+
+			span.AddEvent("OutOfSync", trace.WithAttributes(
+				// our local height
+				attribute.Int64("local", int64(i.state.view.Sequence)),
+				// the best remote height
+				attribute.Int64("remote", int64(bestHeight)),
+			))
+			i.setState(SyncState)
+			return
+		}
 
 		// otherwise, it seems that we are in sync
 		// and we should start a new round

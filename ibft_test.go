@@ -674,6 +674,10 @@ func (m *mockB) Validate(proposal []byte) ([]byte, error) {
 	return nil, nil
 }
 
+func (m *mockB) IsStuck(num uint64) (uint64, bool) {
+	return 0, false
+}
+
 func (m *mockB) Insert(pp *Proposal2) error {
 	// TODO
 	return nil

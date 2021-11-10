@@ -9,9 +9,25 @@ import (
 )
 
 type fsm struct {
+	n         *node
 	nodes     []string
 	proposals []*ibft.Proposal2
 	lock      sync.Mutex
+}
+
+func (f *fsm) getProposals() (uint64, []*ibft.Proposal2) {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
+	res := []*ibft.Proposal2{}
+	for _, r := range f.proposals {
+		res = append(res, r)
+	}
+	number := uint64(0)
+	if len(res) != 0 {
+		number = uint64(res[len(res)-1].Number)
+	}
+	return number, res
 }
 
 func (f *fsm) currentHeight() uint64 {
@@ -29,6 +45,10 @@ func (f *fsm) nextHeight() uint64 {
 	return f.currentHeight() + 1
 }
 
+func (f *fsm) IsStuck(num uint64) (uint64, bool) {
+	return f.n.isStuck(num)
+}
+
 func (f *fsm) BuildBlock() (*ibft.Proposal, error) {
 	proposal := &ibft.Proposal{
 		Data: []byte{byte(f.nextHeight())},
@@ -43,6 +63,9 @@ func (f *fsm) Validate(proposal []byte) ([]byte, error) {
 }
 
 func (f *fsm) Insert(pp *ibft.Proposal2) error {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
 	f.proposals = append(f.proposals, pp)
 	return nil
 }
