@@ -269,40 +269,6 @@ func (n *node) isStuck(num uint64) (uint64, bool) {
 	return 0, false
 }
 
-/*
-func (n *node) Run() {
-	// since we already know we are synced
-
-	fmt.Println("-- initial sync --")
-	fmt.Println(n.c.syncWithNetwork(n.name))
-
-	// this mocks the sync protocl we have to start the view with the initial block
-	// that we just synced up with
-	n.ibft.SetSequence(0)
-
-	ctx, cancelFn := context.WithCancel(context.Background())
-	go func() {
-		<-n.closeCh
-		cancelFn()
-	}()
-
-	// we need to do more stuff here.
-
-	go func() {
-		n.ibft.Run(ctx)
-		fmt.Println("- sync done -")
-
-		time.Sleep(5 * time.Second)
-
-		fmt.Println("-- sync --")
-		fmt.Println(n.c.syncWithNetwork(n.name))
-
-		panic("X")
-		// panic("done??")
-	}()
-}
-*/
-
 func (n *node) Start() {
 	if n.cancelFn != nil {
 		panic("already started")
