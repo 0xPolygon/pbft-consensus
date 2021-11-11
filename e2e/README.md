@@ -1,9 +1,9 @@
 
-# Fuzzy IBFT
+# E2E IBFT
 
 # Jaeger
 
-Fuzzy uses OpenTracing to profile the execution of the IBFT state machine among the nodes in the cluster. It uses Jaeger to collect the tracing metrics, setup the Jaeger collector with:
+E2E tests uses OpenTracing to profile the execution of the IBFT state machine among the nodes in the cluster. It uses Jaeger to collect the tracing metrics, setup the Jaeger collector with:
 
 ```
 $ docker run --net=host jaegertracing/all-in-one:1.27
@@ -17,6 +17,12 @@ $ docker run --net=host -v "${PWD}/otel-jaeger-config.yaml":/otel-local-config.y
 
 ## Tests
 
-### TestIBFT_NoIssue
+### TestE2E_NoIssue
 
 Simple cluster with 5 machines.
+
+### TestE2E_LeaderDrop
+
+### TestE2E_Partition_OneMajority
+
+### TestE2E_Partition_NoMajority

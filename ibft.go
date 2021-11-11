@@ -279,7 +279,7 @@ func (i *Ibft) createKey() error {
 }
 */
 
-const IbftKeyName = "validator.key"
+// const IbftKeyName = "validator.key"
 
 // start starts the IBFT consensus state machine
 func (i *Ibft) Run(ctx context.Context) {
@@ -595,7 +595,7 @@ func (i *Ibft) buildBlock(snap *Snapshot, parent *types.Header) (*types.Block, e
 // it moves back to the Sync state. On the other hand, if the node is a validator, it calculates the proposer.
 // If it turns out that the current node is the proposer, it builds a block, and sends preprepare and then prepare messages.
 func (i *Ibft) runAcceptState(ctx context.Context) { // start new round
-	ctx, span := i.tracer.Start(ctx, "AcceptState")
+	_, span := i.tracer.Start(ctx, "AcceptState")
 	defer span.End()
 
 	i.logger.Printf("[INFO] accept state: sequence %d", i.state.view.Sequence)
@@ -1155,7 +1155,7 @@ func (i *Ibft) getState() IbftState {
 }
 
 // isState checks if the node is in the passed in state
-func (i *Ibft) isState(s IbftState) bool {
+func (i *Ibft) IsState(s IbftState) bool {
 	return i.state.getState() == s
 }
 

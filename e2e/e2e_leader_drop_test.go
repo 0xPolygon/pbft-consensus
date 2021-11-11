@@ -1,11 +1,11 @@
-package fuzzy
+package e2e
 
 import (
 	"testing"
 	"time"
 )
 
-func TestFuzz_LeaderDrop(t *testing.T) {
+func TestE2E_LeaderDrop(t *testing.T) {
 	c := newIBFTCluster(t, "leader_drop", 5)
 	c.Start()
 

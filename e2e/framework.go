@@ -1,9 +1,10 @@
-package fuzzy
+package e2e
 
 import (
 	"context"
+	"crypto/sha1"
 	"fmt"
-	"math/rand"
+	"sync"
 	"testing"
 	"time"
 
@@ -60,6 +61,7 @@ type cluster struct {
 	t      *testing.T
 	nodes  map[string]*node
 	tracer *sdktrace.TracerProvider
+	hook   transportHook
 }
 
 func newIBFTCluster(t *testing.T, prefix string, count int, hook ...transportHook) *cluster {
@@ -77,6 +79,7 @@ func newIBFTCluster(t *testing.T, prefix string, count int, hook ...transportHoo
 		t:      t,
 		nodes:  map[string]*node{},
 		tracer: initTracer("fuzzy_" + prefix),
+		hook:   tt.hook,
 	}
 	for _, name := range names {
 		trace := c.tracer.Tracer(name)
@@ -95,6 +98,13 @@ func (c *cluster) syncWithNetwork(ourselves string) (uint64, []*ibft.Proposal2) 
 		if n.name == ourselves {
 			continue
 		}
+		if c.hook != nil {
+			// we need to see if this transport does allow those two nodes to be connected
+			// Otherwise, that node should not be elegible to sync
+			if !c.hook.Connects(ibft.NodeID(ourselves), ibft.NodeID(n.name)) {
+				continue
+			}
+		}
 		localHeight, data := n.fsm.getProposals()
 		if localHeight > height {
 			height = localHeight
@@ -112,27 +122,78 @@ func (c *cluster) printHeight() {
 	}
 }
 
-func (c *cluster) WaitForHeight(num uint64, timeout time.Duration) {
+func (c *cluster) resolveNodes(nodes ...[]string) []string {
+	queryNodes := []string{}
+	if len(nodes) == 1 {
+		for _, n := range nodes[0] {
+			if _, ok := c.nodes[n]; !ok {
+				panic("node not found in query")
+			}
+		}
+		queryNodes = nodes[0]
+	} else {
+		for n := range c.nodes {
+			queryNodes = append(queryNodes, n)
+		}
+	}
+	return queryNodes
+}
+
+func (c *cluster) IsStuck(timeout time.Duration, nodes ...[]string) {
+	queryNodes := c.resolveNodes(nodes...)
+
+	nodeHeight := map[string]uint64{}
+	isStuck := func() bool {
+		for _, n := range queryNodes {
+			height := c.nodes[n].fsm.currentHeight()
+			if lastHeight, ok := nodeHeight[n]; ok {
+				if lastHeight != height {
+					return false
+				}
+			} else {
+				nodeHeight[n] = height
+			}
+		}
+		return true
+	}
+
+	timer := time.NewTimer(timeout)
+	for {
+		select {
+		case <-time.After(200 * time.Millisecond):
+			if !isStuck() {
+				c.t.Fatal("it is not stuck")
+			}
+		case <-timer.C:
+			return
+		}
+	}
+}
+
+func (c *cluster) WaitForHeight(num uint64, timeout time.Duration, nodes ...[]string) {
 	// we need to check every node in the ensemble?
 	// yes, this should test if everyone can agree on the final set.
 	// note, if we include drops, we need to do sync otherwise this will never work
 
+	queryNodes := c.resolveNodes(nodes...)
+
 	enough := func() bool {
-		for _, n := range c.nodes {
-			if n.fsm.currentHeight() < num {
+		for _, name := range queryNodes {
+			if c.nodes[name].fsm.currentHeight() < num {
 				return false
 			}
 		}
 		return true
 	}
 
+	timer := time.NewTimer(timeout)
 	for {
 		select {
 		case <-time.After(100 * time.Millisecond):
 			if enough() {
 				return
 			}
-		case <-time.After(timeout):
+		case <-timer.C:
 			c.t.Fatal("timeout")
 		}
 	}
@@ -295,100 +356,136 @@ func (k key) Sign(b []byte) ([]byte, error) {
 	return b, nil
 }
 
-type transport struct {
-	nodes map[ibft.NodeID]transportHandler
-	hook  transportHook
+// -- fsm --
+
+type fsm struct {
+	n         *node
+	nodes     []string
+	proposals []*ibft.Proposal2
+	lock      sync.Mutex
 }
 
-func (t *transport) addHook(hook transportHook) {
-	t.hook = hook
-}
+func (f *fsm) getProposals() (uint64, []*ibft.Proposal2) {
+	f.lock.Lock()
+	defer f.lock.Unlock()
 
-type transportHandler func(*ibft.MessageReq)
-
-func (t *transport) Register(name ibft.NodeID, handler transportHandler) {
-	if t.nodes == nil {
-		t.nodes = map[ibft.NodeID]transportHandler{}
+	res := []*ibft.Proposal2{}
+	for _, r := range f.proposals {
+		res = append(res, r)
 	}
-	t.nodes[name] = handler
+	number := uint64(0)
+	if len(res) != 0 {
+		number = uint64(res[len(res)-1].Number)
+	}
+	return number, res
 }
 
-func (t *transport) Gossip(msg *ibft.MessageReq) error {
-	for to, handler := range t.nodes {
-		go func(to ibft.NodeID, handler transportHandler) {
-			// this is the best idea so far to mock async messages
-			if t.hook != nil {
-				t.hook.Gossip(msg.From, to, msg)
-			}
-			handler(msg)
-		}(to, handler)
+func (f *fsm) currentHeight() uint64 {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
+	number := uint64(1) // initial height is always 1 since 0 is the genesis
+	if len(f.proposals) != 0 {
+		number = f.proposals[len(f.proposals)-1].Number
 	}
+	return number
+}
+
+func (f *fsm) nextHeight() uint64 {
+	return f.currentHeight() + 1
+}
+
+func (f *fsm) IsStuck(num uint64) (uint64, bool) {
+	return f.n.isStuck(num)
+}
+
+func (f *fsm) BuildBlock() (*ibft.Proposal, error) {
+	proposal := &ibft.Proposal{
+		Data: []byte{byte(f.nextHeight())},
+		Time: time.Now().Add(1 * time.Second),
+	}
+	return proposal, nil
+}
+
+func (f *fsm) Validate(proposal []byte) ([]byte, error) {
+	// always validate for now
+	return nil, nil
+}
+
+func (f *fsm) Insert(pp *ibft.Proposal2) error {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
+	f.proposals = append(f.proposals, pp)
 	return nil
 }
 
-type transportHook interface {
-	Gossip(from, to ibft.NodeID, msg *ibft.MessageReq)
-}
-
-// latency transport
-type randomTransport struct {
-	jitterMax time.Duration
-}
-
-func newRandomTransport(jitterMax time.Duration) transportHook {
-	return &randomTransport{jitterMax: jitterMax}
-}
-
-func (r *randomTransport) Gossip(from, to ibft.NodeID, msg *ibft.MessageReq) {
-	// adds random latency between the queries
-	if r.jitterMax != 0 {
-		tt := timeJitter(r.jitterMax)
-		fmt.Println("- sleep ", tt)
-
-		time.Sleep(tt)
+func (f *fsm) ValidatorSet() (*ibft.Snapshot, error) {
+	valsAsNode := []ibft.NodeID{}
+	for _, i := range f.nodes {
+		valsAsNode = append(valsAsNode, ibft.NodeID(i))
 	}
-}
-
-/*
-type daemon struct {
-	r *rand.Rand
-	c *cluster
-}
-
-func (d *daemon) Start() {
-	go d.start()
-}
-
-func (d *daemon) failProb(ratio float64) bool {
-	return d.r.Float64() < ratio
-}
-
-func randomInt(min, max int) int {
-	return min + rand.Intn(max-min)
-}
-
-func (d *daemon) dropPeer() {
-
-}
-
-func (d *daemon) start() {
-	scenarios := []func(){
-		d.dropPeer,
+	vv := valString{
+		nodes: valsAsNode,
+	}
+	// set the last proposer if any
+	if len(f.proposals) != 0 {
+		vv.lastProposer = f.proposals[len(f.proposals)-1].Proposer
 	}
 
-	for {
-		// TODO: close it
-		<-time.After(1 * time.Second)
+	// get the current number from last proposal if any (otherwise 0)
+	snap := &ibft.Snapshot{
+		ValidatorSet: &vv,
+		Number:       f.nextHeight(),
+	}
+	return snap, nil
+}
 
-		if d.failProb(0.10) {
-			// 10% change of messing with the ensemble
-			indx := randomInt(0, len(scenarios))
-			scenarios[indx]()
+func (f *fsm) Hash(p []byte) ([]byte, error) {
+	h := sha1.New()
+	h.Write(p)
+	return h.Sum(nil), nil
+}
+
+type valString struct {
+	nodes        []ibft.NodeID
+	lastProposer ibft.NodeID
+}
+
+func (v *valString) CalcProposer(round uint64) ibft.NodeID {
+	seed := uint64(0)
+	if v.lastProposer == ibft.NodeID("") {
+		seed = round
+	} else {
+		offset := 0
+		if indx := v.Index(v.lastProposer); indx != -1 {
+			offset = indx
+		}
+		seed = uint64(offset) + round + 1
+	}
+
+	pick := seed % uint64(v.Len())
+	return (v.nodes)[pick]
+}
+
+func (v *valString) Index(addr ibft.NodeID) int {
+	for indx, i := range v.nodes {
+		if i == addr {
+			return indx
 		}
 	}
+	return -1
 }
-*/
 
-func timeJitter(jitterMax time.Duration) time.Duration {
-	return time.Duration(uint64(rand.Int63()) % uint64(jitterMax))
+func (v *valString) Includes(id ibft.NodeID) bool {
+	for _, i := range v.nodes {
+		if i == id {
+			return true
+		}
+	}
+	return false
+}
+
+func (v *valString) Len() int {
+	return len(v.nodes)
 }
