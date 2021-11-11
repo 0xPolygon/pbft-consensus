@@ -15,6 +15,64 @@ import (
 )
 
 type Config struct {
+	// ProposalTimeout is the time to wait for the proposal
+	// from the validator. It defaults to Timeout
+	ProposalTimeout time.Duration
+
+	// Timeout is the time to wait for validation and
+	// round change messages
+	Timeout time.Duration
+
+	// Logger is the logger to output info
+	Logger *log.Logger
+
+	// Tracer is the OpenTelemetry tracer to log traces
+	Tracer trace.Tracer
+}
+
+type ConfigOption func(*Config)
+
+func WithTimeout(p time.Duration) ConfigOption {
+	return func(c *Config) {
+		c.Timeout = p
+	}
+}
+
+func WithProposalTimeout(p time.Duration) ConfigOption {
+	return func(c *Config) {
+		c.ProposalTimeout = p
+	}
+}
+
+func WithLogger(l *log.Logger) ConfigOption {
+	return func(c *Config) {
+		c.Logger = l
+	}
+}
+
+func WithTracer(t trace.Tracer) ConfigOption {
+	return func(c *Config) {
+		c.Tracer = t
+	}
+}
+
+const (
+	defaultTimeout = 2 * time.Second
+)
+
+func DefaultConfig() *Config {
+	return &Config{
+		Timeout:         defaultTimeout,
+		ProposalTimeout: defaultTimeout,
+		Logger:          log.New(os.Stderr, "", log.LstdFlags),
+		Tracer:          trace.NewNoopTracerProvider().Tracer(""),
+	}
+}
+
+func (c *Config) ApplyOps(opts ...ConfigOption) {
+	for _, opt := range opts {
+		opt(c)
+	}
 }
 
 type Proposal2 struct {
@@ -28,27 +86,40 @@ type Interface interface {
 	BuildBlock() (*Proposal, error)
 	Validate(proposal []byte) ([]byte, error)
 	Insert(p *Proposal2) error
-	ValidatorSet() (*Snapshot, error)
+	Height() uint64
+	ValidatorSet() (ValidatorSetInterface, error)
 	Hash(p []byte) ([]byte, error)
 	IsStuck(num uint64) (uint64, bool)
 }
 
-type Snapshot struct {
-	Number       uint64
-	ValidatorSet ValidatorSetInterface
-}
-
 // Ibft represents the IBFT consensus mechanism object
 type Ibft struct {
-	inter          Interface
-	logger         *log.Logger   // Output logger
-	state          *currentState // Reference to the current state
-	closeCh        chan struct{} // Channel for closing
-	validator      SignKey
-	msgQueue       *msgQueue     // Structure containing different message queues
-	updateCh       chan struct{} // Update channel
-	transport      Transport
-	tracer         trace.Tracer
+	// Output logger
+	logger *log.Logger
+
+	// Config is the configuration of the consensus
+	config *Config
+
+	inter Interface
+
+	// state is the reference to the current state machine
+	state *currentState
+
+	closeCh   chan struct{} // Channel for closing
+	validator SignKey
+
+	// msgQueue is a queue that stores all the incomming gossip messages
+	msgQueue *msgQueue
+
+	// updateCh is a channel used to notify when a new gossip message arrives
+	updateCh chan struct{}
+
+	// Transport is the interface for the gossip transport
+	transport Transport
+
+	// tracer is a reference to the OpenTelemetry tracer
+	tracer trace.Tracer
+
 	forceTimeoutCh bool
 }
 
@@ -57,76 +128,64 @@ type SignKey interface {
 	Sign(b []byte) ([]byte, error)
 }
 
-// Factory implements the base consensus Factory method
-func Factory(logger *log.Logger /*, config *Config*/, inter Interface, validator SignKey, transport Transport) (*Ibft, error) {
-	if logger == nil {
-		logger = log.New(os.Stderr, "", log.LstdFlags)
-	}
+// New creates a new instance of the IBFT state machine
+func New(validator SignKey, transport Transport, opts ...ConfigOption) *Ibft {
+	config := DefaultConfig()
+	config.ApplyOps(opts...)
 
 	p := &Ibft{
-		inter:     inter,
-		logger:    logger,
 		closeCh:   make(chan struct{}),
 		validator: validator,
-		state:     &currentState{},
+		state:     newState(),
 		transport: transport,
 		msgQueue:  newMsgQueue(),
 		updateCh:  make(chan struct{}),
+		config:    config,
+		logger:    config.Logger,
+		tracer:    config.Tracer,
 	}
 
 	p.logger.Printf("[INFO] validator key: addr=%s\n", p.validator.NodeID())
-	return p, nil
+	return p
 }
 
-func (i *Ibft) SetTrace(trace trace.Tracer) {
-	i.tracer = trace
+// FIND A BETTER NAME FOR THIS
+func (i *Ibft) SetInterface(inter Interface) error {
+	i.inter = inter
+
+	// set the next current sequence for this iteration
+	i.setSequence(i.inter.Height())
+
+	// set the current set of validators
+	validatorSet, err := i.inter.ValidatorSet()
+	if err != nil {
+		return err
+	}
+
+	i.state.validators = validatorSet
+	return nil
 }
 
 // start starts the IBFT consensus state machine
 func (i *Ibft) Run(ctx context.Context) {
-	// set the tracer to noop if nothing set
-	if i.tracer == nil {
-		i.tracer = trace.NewNoopTracerProvider().Tracer("")
-	}
-
-	// if we have arrive at this point we are assuming that we are synced
-	// since this will assume we are good we have first to move to its initial
-	// state for consensus that is the AcceptState
+	// the iteration always starts with the AcceptState.
+	// AcceptState stages will reset the rest of the message queues.
 	i.setState(AcceptState)
 
-	var sequenceCtx context.Context
-	var span trace.Span
-	var sequence uint64
+	// start the trace span
+	spanCtx, span := i.tracer.Start(context.Background(), fmt.Sprintf("Sequence-%d", i.state.view.Sequence))
+	defer span.End()
 
-	checkSpanChange := func() {
-		currentSequence := i.state.GetSequence()
-		if sequence == currentSequence && sequenceCtx != nil {
-			return
-		}
-		if span != nil {
-			// finish the current span
-			span.End()
-		}
-		// create a new span
-		sequence = currentSequence
-		sequenceCtx, span = i.tracer.Start(context.Background(), fmt.Sprintf("Sequence-%d", sequence))
-	}
-
-	// first init the context and span
-	checkSpanChange()
-
-	for i.getState() != SyncState {
+	// loop until we reach the DoneState or it closes the channel
+	for i.getState() != DoneState && i.getState() != SyncState {
 		select {
 		case <-ctx.Done():
 			return
-		default: // Default is here because we would block until we receive something in the closeCh
+		default:
 		}
 
 		// Start the state machine loop
-		i.runCycle(sequenceCtx)
-
-		//span.End()
-		checkSpanChange()
+		i.runCycle(spanCtx)
 	}
 }
 
@@ -150,10 +209,13 @@ func (i *Ibft) runCycle(ctx context.Context) {
 
 	case CommitState:
 		i.runCommitState(ctx)
+
+	case DoneState:
+		panic("BUG: We cannot iterate on DoneState")
 	}
 }
 
-func (i *Ibft) SetSequence(sequence uint64) {
+func (i *Ibft) setSequence(sequence uint64) {
 	i.state.view = &View{
 		Round:    0,
 		Sequence: sequence,
@@ -171,20 +233,12 @@ func (i *Ibft) runAcceptState(ctx context.Context) { // start new round
 
 	i.logger.Printf("[INFO] accept state: sequence %d", i.state.view.Sequence)
 
-	snap, err := i.inter.ValidatorSet()
-	if err != nil {
-		i.setState(SyncState)
-		return
-	}
-	if !snap.ValidatorSet.Includes(i.validator.NodeID()) {
+	if !i.state.validators.Includes(i.validator.NodeID()) {
 		// we are not a validator anymore, move back to sync state
 		i.logger.Printf("[INFO] we are not a validator anymore")
 		i.setState(SyncState)
 		return
 	}
-
-	i.state.snap = snap
-	i.state.validators = snap.ValidatorSet
 
 	// reset round messages
 	i.state.resetRoundMsgs()
@@ -198,6 +252,8 @@ func (i *Ibft) runAcceptState(ctx context.Context) { // start new round
 		attribute.Bool("locked", i.state.locked),
 		attribute.String("proposer", string(i.state.proposer)),
 	)
+
+	var err error
 
 	if isProposer {
 		i.logger.Printf("[INFO] we are the proposer")
@@ -233,7 +289,7 @@ func (i *Ibft) runAcceptState(ctx context.Context) { // start new round
 		return
 	}
 
-	i.logger.Printf("[INFO] proposer calculated: proposer=%s, sequence=%d", i.state.proposer, snap.Number)
+	i.logger.Printf("[INFO] proposer calculated: proposer=%s, sequence=%d", i.state.proposer, i.state.view.Sequence)
 
 	// we are NOT a proposer for the block. Then, we have to wait
 	// for a pre-prepare message from the proposer
@@ -260,14 +316,12 @@ func (i *Ibft) runAcceptState(ctx context.Context) { // start new round
 
 		// retrieve the block proposal
 		if _, err := i.inter.Validate(msg.Proposal); err != nil {
-			i.logger.Print("[ERROR] failed to unmarshal block", "err", err)
+			i.logger.Printf("[ERROR] failed to validate proposal: %v", err)
 			i.setState(RoundChangeState)
 			return
 		}
 
 		if i.state.locked {
-			fmt.Println("Xxx")
-
 			hash1, _ := i.inter.Hash(msg.Proposal)
 			hash2, _ := i.inter.Hash(i.state.proposal.Data)
 
@@ -419,7 +473,7 @@ func (i *Ibft) runCommitState(ctx context.Context) {
 		Proposal:       proposal,
 		CommittedSeals: committedSeals,
 		Proposer:       i.state.proposer,
-		Number:         i.state.snap.Number,
+		Number:         i.state.view.Sequence,
 	}
 	if err := i.inter.Insert(pp); err != nil {
 		// start a new round with the state unlocked since we need to
@@ -427,10 +481,10 @@ func (i *Ibft) runCommitState(ctx context.Context) {
 		i.logger.Print("[ERROR] failed to insert proposal", "err", err)
 		i.handleStateErr(errFailedToInsertBlock)
 	} else {
-		i.SetSequence(i.state.snap.Number + 1)
+		i.setSequence(i.state.view.Sequence + 1)
 
-		// move ahead to the next block
-		i.setState(AcceptState)
+		// move to done state to finish the current iteration of the state machine
+		i.setState(DoneState)
 	}
 }
 
@@ -450,7 +504,7 @@ func (i *Ibft) runRoundChangeState(ctx context.Context) {
 	defer span.End()
 
 	sendRoundChange := func(round uint64) {
-		i.logger.Print("[DEBUG] local round change", "round", round)
+		i.logger.Printf("[DEBUG] local round change: round=%d", round)
 		// set the new round
 		i.state.view.Round = round
 		// clean the round
@@ -626,9 +680,12 @@ func (i *Ibft) forceTimeout() {
 }
 
 // randomTimeout calculates the timeout duration depending on the current round
-func (i *Ibft) randomTimeout() time.Duration {
-	// timeout := time.Duration(2000) * time.Millisecond
+func (i *Ibft) randomTimeout(inputTimeout ...time.Duration) time.Duration {
 	timeout := 2 * time.Second
+	if len(inputTimeout) == 1 {
+		timeout = inputTimeout[0]
+	}
+
 	round := i.state.view.Round
 	if round > 0 {
 		timeout += time.Duration(math.Pow(2, float64(round))) * time.Second

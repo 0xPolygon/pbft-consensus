@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"fmt"
 	"strconv"
 	"testing"
 
@@ -25,9 +26,14 @@ func TestState_FaultyNodes(t *testing.T) {
 		{9, 2},
 	}
 	for _, c := range cases {
-		pool := newTesterAccountPool(int(c.Network))
-		vals := pool.ValidatorSet()
-		assert.Equal(t, vals.MaxFaultyNodes(), int(c.Faulty))
+		acct := []string{}
+		for i := 0; i < int(c.Network); i++ {
+			acct = append(acct, fmt.Sprintf("acct_%d", i))
+		}
+		s := newState()
+		s.validators = newMockValidatorSet(acct)
+
+		assert.Equal(t, s.MaxFaultyNodes(), int(c.Faulty))
 	}
 }
 
@@ -36,11 +42,11 @@ func TestState_AddMessages(t *testing.T) {
 	pool.add("A", "B", "C", "D")
 
 	c := newState()
-	// c.validators = pool.ValidatorSet()
+	c.validators = pool.validatorSet()
 
 	msg := func(acct string, typ MsgType, round ...uint64) *MessageReq {
 		msg := &MessageReq{
-			From: pool.get(acct).Address(),
+			From: NodeID(pool.get(acct).alias),
 			Type: typ,
 			View: &View{Round: 0},
 		}
@@ -76,13 +82,8 @@ func (t *testerAccount) NodeID() NodeID {
 	return NodeID(t.alias)
 }
 
-func (t *testerAccount) Address() NodeID {
-	return ""
-	// return crypto.PubKeyToAddress(&t.priv.PublicKey)
-}
-
 func (t *testerAccount) Sign(b []byte) ([]byte, error) {
-	// h, _ = writeSeal(t.priv, h)
+	// TODO:
 	return nil, nil
 }
 
@@ -126,12 +127,12 @@ func (ap *testerAccountPool) get(name string) *testerAccount {
 	return nil
 }
 
-func (ap *testerAccountPool) ValidatorSet() ValidatorSet {
-	v := ValidatorSet{}
+func (ap *testerAccountPool) validatorSet() ValidatorSetInterface {
+	acct := []string{}
 	for _, i := range ap.accounts {
-		v = append(v, i.Address())
+		acct = append(acct, i.alias)
 	}
-	return v
+	return newMockValidatorSet(acct)
 }
 
 func generateKey() *ecdsa.PrivateKey {
@@ -140,4 +141,50 @@ func generateKey() *ecdsa.PrivateKey {
 		panic(err)
 	}
 	return prv
+}
+
+func newMockValidatorSet(a []string) ValidatorSetInterface {
+	valsAsNode := []NodeID{}
+	for _, i := range a {
+		valsAsNode = append(valsAsNode, NodeID(i))
+	}
+	set := valString(valsAsNode)
+	return &set
+}
+
+type valString []NodeID
+
+func (v *valString) CalcProposer(round uint64) NodeID {
+	seed := uint64(0)
+
+	offset := 0
+	// add last proposer
+
+	seed = uint64(offset) + round
+	pick := seed % uint64(v.Len())
+
+	return (*v)[pick]
+}
+
+func (v *valString) Index(addr NodeID) int {
+	for indx, i := range *v {
+		if i == addr {
+			return indx
+		}
+	}
+
+	return -1
+}
+
+func (v *valString) Includes(id NodeID) bool {
+	for _, i := range *v {
+		if i == id {
+			return true
+		}
+	}
+	return false
+}
+
+func (v *valString) Len() int {
+	return len(*v)
 }

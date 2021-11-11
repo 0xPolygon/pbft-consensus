@@ -3,7 +3,6 @@ package ibft
 import (
 	"context"
 	"crypto/sha1"
-	"fmt"
 	"log"
 	"os"
 	"testing"
@@ -61,36 +60,29 @@ func TestTransition_ValidateState_CommitFastTrack(t *testing.T) {
 	// even when we do not have yet the preprepare messages
 	i := newMockIbft(t, []string{"A", "B", "C", "D"}, "A")
 
-	// seal := hex.EncodeToHex(make([]byte, IstanbulExtraSeal))
-
 	i.setState(ValidateState)
 	i.state.view = ViewMsg(1, 0)
-	// i.state.block = i.DummyBlock()
 	i.state.locked = true
 
 	i.emitMsg(&MessageReq{
 		From: "A",
 		Type: MessageReq_Commit,
 		View: ViewMsg(1, 0),
-		//Seal: seal,
 	})
 	i.emitMsg(&MessageReq{
 		From: "B",
 		Type: MessageReq_Commit,
 		View: ViewMsg(1, 0),
-		//Seal: seal,
 	})
 	i.emitMsg(&MessageReq{
 		From: "B",
 		Type: MessageReq_Commit,
 		View: ViewMsg(1, 0),
-		//Seal: seal,
 	})
 	i.emitMsg(&MessageReq{
 		From: "C",
 		Type: MessageReq_Commit,
 		View: ViewMsg(1, 0),
-		//Seal: seal,
 	})
 
 	i.runCycle(context.Background())
@@ -168,23 +160,12 @@ func TestTransition_AcceptState_Proposer_Locked(t *testing.T) {
 		outgoing: 2, // preprepare and prepare
 	})
 	assert.Equal(t, i.state.proposal.Data, mockProposal)
-
-	/*
-		if i.state.block.Number() != 10 {
-			t.Fatal("bad block")
-		}
-	*/
 }
 
 func TestTransition_AcceptState_Validator_VerifyCorrect(t *testing.T) {
 	i := newMockIbft(t, []string{"A", "B", "C"}, "B")
 	i.state.view = ViewMsg(1, 0)
 	i.setState(AcceptState)
-
-	//block := i.DummyBlock()
-	//header, err := writeSeal(i.pool.get("A").priv, block.Header)
-	//assert.NoError(t, err)
-	//block.Header = header
 
 	// A sends the message
 	i.emitMsg(&MessageReq{
@@ -210,18 +191,11 @@ func TestTransition_AcceptState_Validator_VerifyFails(t *testing.T) {
 	i.state.view = ViewMsg(1, 0)
 	i.setState(AcceptState)
 
-	block := mockProposal
-	// block.Header.MixHash = types.Hash{} // invalidates the block
-
-	//header, err := writeSeal(i.pool.get("A").priv, block.Header)
-	//assert.NoError(t, err)
-	//block.Header = header
-
 	// A sends the message
 	i.emitMsg(&MessageReq{
 		From:     "A",
 		Type:     MessageReq_Preprepare,
-		Proposal: block,
+		Proposal: mockProposal,
 		View:     ViewMsg(1, 0),
 	})
 
@@ -266,19 +240,12 @@ func TestTransition_AcceptState_Validator_LockWrong(t *testing.T) {
 	i.setState(AcceptState)
 
 	// locked block
-
-	//block.Header.Number = 1
-	//block.Header.ComputeHash()
-
 	i.state.proposal = &Proposal{
 		Data: mockProposal,
 	}
 	i.state.locked = true
 
-	// proposed block
-	//block1.Header.Number = 2
-	//block1.Header.ComputeHash()
-
+	// emit the wrong locked proposal
 	i.emitMsg(&MessageReq{
 		From:     "A",
 		Type:     MessageReq_Preprepare,
@@ -303,8 +270,6 @@ func TestTransition_AcceptState_Validator_LockCorrect(t *testing.T) {
 
 	// locked block
 	proposal := mockProposal
-	//block.Header.Number = 1
-	//block.Header.ComputeHash()
 
 	i.state.proposal = &Proposal{Data: proposal}
 	i.state.locked = true
@@ -442,8 +407,6 @@ func TestTransition_RoundChangeState_StartNewRound(t *testing.T) {
 	m := newMockIbft(t, []string{"A", "B"}, "A")
 	m.Close()
 
-	m.state.view.Sequence = 1
-
 	m.setState(RoundChangeState)
 	m.runCycle(context.Background())
 
@@ -482,46 +445,14 @@ func TestTransition_RoundChangeState_MaxRound(t *testing.T) {
 }
 
 type mockIbft struct {
-	t *testing.T
 	*Ibft
 
-	//blockchain *blockchain.Blockchain
-	pool    *testerAccountPool
-	respMsg []*MessageReq
-
-	mockB *mockB
+	t        *testing.T
+	pool     *testerAccountPool
+	respMsg  []*MessageReq
+	proposal *Proposal
+	sequence uint64
 }
-
-/*
-func (m *mockIbft) DummyBlock() []byte {
-	return nil
-
-		//parent, _ := m.blockchain.GetHeaderByNumber(0)
-		block := &types.Block{
-			Header: &types.Header{
-				//ExtraData:  parent.ExtraData,
-				//MixHash:    IstanbulDigest,
-				Sha3Uncles: types.EmptyUncleHash,
-			},
-		}
-		return block
-
-}
-*/
-
-/*
-func (m *mockIbft) Header() *types.Header {
-	return m.blockchain.Header()
-}
-
-func (m *mockIbft) GetHeaderByNumber(i uint64) (*types.Header, bool) {
-	return m.blockchain.GetHeaderByNumber(i)
-}
-
-func (m *mockIbft) WriteBlocks(blocks []*types.Block) error {
-	return nil
-}
-*/
 
 func (m *mockIbft) emitMsg(msg *MessageReq) {
 	// convert the address from the address pool
@@ -548,66 +479,39 @@ func newMockIbft(t *testing.T, accounts []string, account string) *mockIbft {
 	pool := newTesterAccountPool()
 	pool.add(accounts...)
 
-	valsAsNode := []NodeID{}
-	for _, i := range accounts {
-		valsAsNode = append(valsAsNode, NodeID(i))
-	}
-
-	fmt.Println("--cc")
-	fmt.Println(valsAsNode)
+	validatorSet := newMockValidatorSet(accounts).(*valString)
 
 	m := &mockIbft{
-		t:    t,
-		pool: pool,
-		//blockchain: blockchain.TestBlockchain(t, pool.genesis()),
-		respMsg: []*MessageReq{},
-		mockB: &mockB{
-			validators: valString(valsAsNode),
-		},
+		t:        t,
+		pool:     pool,
+		respMsg:  []*MessageReq{},
+		sequence: 1, // use by default sequence=1
 	}
 
+	backend := &mockB{
+		mock:       m,
+		validators: validatorSet,
+	}
+
+	// initialize the signing account
 	var acct *testerAccount
 	if account == "" {
-		// account not in validator set, create a new one that is not part
-		// of the genesis
+		// not in validator set, create a new one (not part of the validator set)
 		pool.add("xx")
 		acct = pool.get("xx")
 	} else {
 		acct = pool.get(account)
 	}
-	ibft := &Ibft{
-		logger: log.New(os.Stdout, "", log.LstdFlags),
-		//logger:           hclog.NewNullLogger(),
-		//config: &consensus.Config{},
-		//blockchain:       m,
-		validator: acct,
-		closeCh:   make(chan struct{}),
-		updateCh:  make(chan struct{}),
-		//operator:         &operator{},
-		state:    newState(),
-		inter:    m.mockB,
-		msgQueue: newMsgQueue(),
-		//epochSize:        DefaultEpochSize,
-	}
 
-	// by default set the state to (1, 0)
-	ibft.state.view = ViewMsg(1, 0)
+	// initialize ibft
+	m.Ibft = New(acct, m, WithLogger(log.New(os.Stdout, "", log.LstdFlags)))
+	m.Ibft.SetInterface(backend)
 
-	m.Ibft = ibft
-
-	//assert.NoError(t, ibft.setupSnapshot())
-	//assert.NoError(t, ibft.createKey())
-
-	//set the initial validators frrom the snapshot
-	xx := valString(valsAsNode)
-	ibft.state.validators = &xx
-
-	m.Ibft.transport = m
 	return m
 }
 
 func (i *mockIbft) setProposal(p *Proposal) {
-	i.mockB.proposal = p
+	i.proposal = p
 }
 
 type expectResult struct {
@@ -653,8 +557,9 @@ func (m *mockIbft) expect(res expectResult) {
 }
 
 type mockB struct {
-	validators valString
-	proposal   *Proposal
+	mock *mockIbft
+
+	validators *valString
 }
 
 func (m *mockB) Hash(p []byte) ([]byte, error) {
@@ -664,10 +569,14 @@ func (m *mockB) Hash(p []byte) ([]byte, error) {
 }
 
 func (m *mockB) BuildBlock() (*Proposal, error) {
-	if m.proposal == nil {
+	if m.mock.proposal == nil {
 		panic("add a proposal in the test")
 	}
-	return m.proposal, nil
+	return m.mock.proposal, nil
+}
+
+func (m *mockB) Height() uint64 {
+	return m.mock.sequence
 }
 
 func (m *mockB) Validate(proposal []byte) ([]byte, error) {
@@ -683,46 +592,6 @@ func (m *mockB) Insert(pp *Proposal2) error {
 	return nil
 }
 
-func (m *mockB) ValidatorSet() (*Snapshot, error) {
-	snap := &Snapshot{
-		ValidatorSet: &m.validators,
-	}
-	return snap, nil
-}
-
-type valString []NodeID
-
-func (v *valString) CalcProposer(round uint64) NodeID {
-	seed := uint64(0)
-
-	offset := 0
-	// add last proposer
-
-	seed = uint64(offset) + round
-	pick := seed % uint64(v.Len())
-
-	return (*v)[pick]
-}
-
-func (v *valString) Index(addr NodeID) int {
-	for indx, i := range *v {
-		if i == addr {
-			return indx
-		}
-	}
-
-	return -1
-}
-
-func (v *valString) Includes(id NodeID) bool {
-	for _, i := range *v {
-		if i == id {
-			return true
-		}
-	}
-	return false
-}
-
-func (v *valString) Len() int {
-	return len(*v)
+func (m *mockB) ValidatorSet() (ValidatorSetInterface, error) {
+	return m.validators, nil
 }

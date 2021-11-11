@@ -1,4 +1,4 @@
-module github.com/0xPolygon/ibft-consensus/fuzzy
+module github.com/0xPolygon/ibft-consensus/e2e
 
 go 1.17
 

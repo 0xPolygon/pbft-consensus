@@ -64,7 +64,7 @@ type cluster struct {
 	hook   transportHook
 }
 
-func newIBFTCluster(t *testing.T, prefix string, count int, hook ...transportHook) *cluster {
+func newIBFTCluster(t *testing.T, name, prefix string, count int, hook ...transportHook) *cluster {
 	names := make([]string, count)
 	for i := 0; i < count; i++ {
 		names[i] = fmt.Sprintf("%s_%d", prefix, i)
@@ -78,7 +78,7 @@ func newIBFTCluster(t *testing.T, prefix string, count int, hook ...transportHoo
 	c := &cluster{
 		t:      t,
 		nodes:  map[string]*node{},
-		tracer: initTracer("fuzzy_" + prefix),
+		tracer: initTracer("fuzzy_" + name),
 		hook:   tt.hook,
 	}
 	for _, name := range names {
@@ -105,21 +105,13 @@ func (c *cluster) syncWithNetwork(ourselves string) (uint64, []*ibft.Proposal2) 
 				continue
 			}
 		}
-		localHeight, data := n.fsm.getProposals()
+		localHeight, data := n.getProposals()
 		if localHeight > height {
 			height = localHeight
 			proposals = data
 		}
 	}
 	return height, proposals
-}
-
-func (c *cluster) printHeight() {
-	fmt.Println("- height -")
-
-	for _, n := range c.nodes {
-		fmt.Println(n.fsm.currentHeight())
-	}
 }
 
 func (c *cluster) resolveNodes(nodes ...[]string) []string {
@@ -145,7 +137,7 @@ func (c *cluster) IsStuck(timeout time.Duration, nodes ...[]string) {
 	nodeHeight := map[string]uint64{}
 	isStuck := func() bool {
 		for _, n := range queryNodes {
-			height := c.nodes[n].fsm.currentHeight()
+			height := c.nodes[n].currentHeight()
 			if lastHeight, ok := nodeHeight[n]; ok {
 				if lastHeight != height {
 					return false
@@ -179,7 +171,7 @@ func (c *cluster) WaitForHeight(num uint64, timeout time.Duration, nodes ...[]st
 
 	enough := func() bool {
 		for _, name := range queryNodes {
-			if c.nodes[name].fsm.currentHeight() < num {
+			if c.nodes[name].currentHeight() < num {
 				return false
 			}
 		}
@@ -223,25 +215,25 @@ func (c *cluster) Stop() {
 }
 
 type node struct {
+	lock sync.Mutex
+
 	c *cluster
 
 	name     string
-	fsm      *fsm
 	ibft     *ibft.Ibft
 	cancelFn context.CancelFunc
 	stopped  uint64
+
+	// validator nodes
+	nodes []string
+
+	// list of proposals
+	proposals []*ibft.Proposal2
 }
 
 func newIBFTNode(name string, nodes []string, trace trace.Tracer, tt *transport) (*node, error) {
 	kk := key(name)
-	fsm := &fsm{
-		nodes: nodes,
-		// number:    1, // next sequence
-		proposals: []*ibft.Proposal2{},
-	}
-
-	con, _ := ibft.Factory(nil, fsm, kk, tt)
-	con.SetTrace(trace)
+	con := ibft.New(kk, tt, ibft.WithTracer(trace))
 
 	tt.Register(ibft.NodeID(name), func(msg *ibft.MessageReq) {
 		// pipe messages from mock transport to ibft
@@ -249,17 +241,16 @@ func newIBFTNode(name string, nodes []string, trace trace.Tracer, tt *transport)
 	})
 
 	n := &node{
-		name:    name,
-		ibft:    con,
-		fsm:     fsm,
-		stopped: 0,
+		nodes:     nodes,
+		proposals: []*ibft.Proposal2{},
+		name:      name,
+		ibft:      con,
+		stopped:   0,
 	}
-	fsm.n = n
 	return n, nil
 }
 
 func (n *node) isStuck(num uint64) (uint64, bool) {
-
 	// get max heigh in the network
 	height, _ := n.c.syncWithNetwork(n.name)
 
@@ -267,6 +258,47 @@ func (n *node) isStuck(num uint64) (uint64, bool) {
 		return height, true
 	}
 	return 0, false
+}
+
+func (n *node) lastProposer() ibft.NodeID {
+	lastProposer := ibft.NodeID("")
+	if len(n.proposals) != 0 {
+		lastProposer = n.proposals[len(n.proposals)-1].Proposer
+	}
+	return lastProposer
+}
+
+func (n *node) getProposals() (uint64, []*ibft.Proposal2) {
+	n.lock.Lock()
+	defer n.lock.Unlock()
+
+	res := []*ibft.Proposal2{}
+	res = append(res, n.proposals...)
+
+	number := uint64(0)
+	if len(res) != 0 {
+		number = uint64(res[len(res)-1].Number)
+	}
+	return number, res
+}
+
+func (n *node) currentHeight() uint64 {
+	n.lock.Lock()
+	defer n.lock.Unlock()
+
+	number := uint64(1) // initial height is always 1 since 0 is the genesis
+	if len(n.proposals) != 0 {
+		number = n.proposals[len(n.proposals)-1].Number
+	}
+	return number
+}
+
+func (n *node) Insert(pp *ibft.Proposal2) error {
+	n.lock.Lock()
+	defer n.lock.Unlock()
+
+	n.proposals = append(n.proposals, pp)
+	return nil
 }
 
 func (n *node) Start() {
@@ -280,22 +312,36 @@ func (n *node) Start() {
 
 	go func() {
 	SYNC:
-		// try to sync with the network
+		// 'sync up' with the network
 		_, history := n.c.syncWithNetwork(n.name)
-		n.fsm.proposals = history
+		n.proposals = history
 
-		// reset the ibft protocol, I think this is already done
+		for {
+			fsm := &fsm{
+				n:            n,
+				nodes:        n.nodes,
+				lastProposer: n.lastProposer(),
 
-		// set the current target height for the ibft
-		n.ibft.SetSequence(n.fsm.currentHeight() + 1)
+				// important: in this iteration of the fsm we have increased our height
+				height: n.currentHeight() + 1,
+			}
+			if err := n.ibft.SetInterface(fsm); err != nil {
+				panic(err)
+			}
 
-		// start the execution
-		n.ibft.Run(ctx)
+			// start the execution
+			n.ibft.Run(ctx)
 
-		// ibft stopped, it can either be a node stop (from cancel context)
-		// or it is stucked
-		if n.ibft.GetState() == ibft.SyncState {
-			goto SYNC
+			switch n.ibft.GetState() {
+			case ibft.SyncState:
+				// we need to go back to sync
+				goto SYNC
+			case ibft.DoneState:
+				// everything worked, move to the next iteration
+			default:
+				// stopped
+				return
+			}
 		}
 	}()
 }
@@ -325,40 +371,14 @@ func (k key) Sign(b []byte) ([]byte, error) {
 // -- fsm --
 
 type fsm struct {
-	n         *node
-	nodes     []string
-	proposals []*ibft.Proposal2
-	lock      sync.Mutex
+	n            *node
+	nodes        []string
+	lastProposer ibft.NodeID
+	height       uint64
 }
 
-func (f *fsm) getProposals() (uint64, []*ibft.Proposal2) {
-	f.lock.Lock()
-	defer f.lock.Unlock()
-
-	res := []*ibft.Proposal2{}
-	for _, r := range f.proposals {
-		res = append(res, r)
-	}
-	number := uint64(0)
-	if len(res) != 0 {
-		number = uint64(res[len(res)-1].Number)
-	}
-	return number, res
-}
-
-func (f *fsm) currentHeight() uint64 {
-	f.lock.Lock()
-	defer f.lock.Unlock()
-
-	number := uint64(1) // initial height is always 1 since 0 is the genesis
-	if len(f.proposals) != 0 {
-		number = f.proposals[len(f.proposals)-1].Number
-	}
-	return number
-}
-
-func (f *fsm) nextHeight() uint64 {
-	return f.currentHeight() + 1
+func (f *fsm) Height() uint64 {
+	return f.height
 }
 
 func (f *fsm) IsStuck(num uint64) (uint64, bool) {
@@ -367,7 +387,7 @@ func (f *fsm) IsStuck(num uint64) (uint64, bool) {
 
 func (f *fsm) BuildBlock() (*ibft.Proposal, error) {
 	proposal := &ibft.Proposal{
-		Data: []byte{byte(f.nextHeight())},
+		Data: []byte{byte(f.Height())},
 		Time: time.Now().Add(1 * time.Second),
 	}
 	return proposal, nil
@@ -379,32 +399,19 @@ func (f *fsm) Validate(proposal []byte) ([]byte, error) {
 }
 
 func (f *fsm) Insert(pp *ibft.Proposal2) error {
-	f.lock.Lock()
-	defer f.lock.Unlock()
-
-	f.proposals = append(f.proposals, pp)
-	return nil
+	return f.n.Insert(pp)
 }
 
-func (f *fsm) ValidatorSet() (*ibft.Snapshot, error) {
+func (f *fsm) ValidatorSet() (ibft.ValidatorSetInterface, error) {
 	valsAsNode := []ibft.NodeID{}
 	for _, i := range f.nodes {
 		valsAsNode = append(valsAsNode, ibft.NodeID(i))
 	}
 	vv := valString{
-		nodes: valsAsNode,
+		nodes:        valsAsNode,
+		lastProposer: f.lastProposer,
 	}
-	// set the last proposer if any
-	if len(f.proposals) != 0 {
-		vv.lastProposer = f.proposals[len(f.proposals)-1].Proposer
-	}
-
-	// get the current number from last proposal if any (otherwise 0)
-	snap := &ibft.Snapshot{
-		ValidatorSet: &vv,
-		Number:       f.nextHeight(),
-	}
-	return snap, nil
+	return &vv, nil
 }
 
 func (f *fsm) Hash(p []byte) ([]byte, error) {

@@ -1,7 +1,6 @@
 package e2e
 
 import (
-	"fmt"
 	"math/rand"
 	"sync"
 	"time"
@@ -64,8 +63,6 @@ func (r *randomTransport) Gossip(from, to ibft.NodeID, msg *ibft.MessageReq) boo
 	// adds random latency between the queries
 	if r.jitterMax != 0 {
 		tt := timeJitter(r.jitterMax)
-		fmt.Println("- sleep ", tt)
-
 		time.Sleep(tt)
 	}
 	return true
@@ -133,8 +130,6 @@ func (p *partitionTransport) Partition(subsets ...[]string) {
 }
 
 func (p *partitionTransport) Gossip(from, to ibft.NodeID, msg *ibft.MessageReq) bool {
-	// var duration time.Duration
-
 	p.lock.Lock()
 	isConnected := p.isConnected(from, to)
 	p.lock.Unlock()
@@ -145,79 +140,7 @@ func (p *partitionTransport) Gossip(from, to ibft.NodeID, msg *ibft.MessageReq) 
 
 	time.Sleep(timeJitter(p.jitterMax))
 	return true
-
-	/*
-		if subset, ok := p.subsets[string(from)]; ok {
-			found := false
-			for _, i := range subset {
-				if i == string(to) {
-					found = true
-					break
-				}
-			}
-			fmt.Println(from, to, found)
-
-			// if not found drop the message
-			if found {
-				// add normal jitter
-				duration = timeJitter(p.jitterMax)
-			}
-		} else {
-			// if nothing subset yet, assume a healthy network
-			duration = timeJitter(p.jitterMax)
-		}
-
-		// make sure we unlock before sleeping
-		p.lock.Unlock()
-
-		if duration == 0 {
-			return false
-		}
-
-		time.Sleep(duration)
-		return true
-	*/
 }
-
-/*
-type daemon struct {
-	r *rand.Rand
-	c *cluster
-}
-
-func (d *daemon) Start() {
-	go d.start()
-}
-
-func (d *daemon) failProb(ratio float64) bool {
-	return d.r.Float64() < ratio
-}
-
-func randomInt(min, max int) int {
-	return min + rand.Intn(max-min)
-}
-
-func (d *daemon) dropPeer() {
-
-}
-
-func (d *daemon) start() {
-	scenarios := []func(){
-		d.dropPeer,
-	}
-
-	for {
-		// TODO: close it
-		<-time.After(1 * time.Second)
-
-		if d.failProb(0.10) {
-			// 10% change of messing with the ensemble
-			indx := randomInt(0, len(scenarios))
-			scenarios[indx]()
-		}
-	}
-}
-*/
 
 func timeJitter(jitterMax time.Duration) time.Duration {
 	return time.Duration(uint64(rand.Int63()) % uint64(jitterMax))

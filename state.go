@@ -1,13 +1,10 @@
 package ibft
 
 import (
-	"encoding/hex"
 	"fmt"
 	"math"
 	"sync/atomic"
 	"time"
-
-	"go.opentelemetry.io/otel/attribute"
 )
 
 type MsgType int32
@@ -41,7 +38,7 @@ type MessageReq struct {
 	// from is the address of the sender
 	From NodeID
 
-	// seal is the committed seal if message is commit
+	// seal is the committed seal for the proposal (only for commit messages)
 	Seal []byte
 
 	// view is the view assigned to the message
@@ -50,12 +47,8 @@ type MessageReq struct {
 	// hash of the locked block
 	Digest string
 
-	// proposal is the rlp encoded block in preprepare messages
+	// proposal is the arbitrary data proposal (only for preprepare messages)
 	Proposal []byte
-}
-
-func (m *MessageReq) ToAttributes() []attribute.KeyValue {
-	return nil
 }
 
 func (m *MessageReq) SetProposal(b []byte) {
@@ -106,6 +99,7 @@ const (
 	ValidateState
 	CommitState
 	SyncState
+	DoneState
 )
 
 // String returns the string representation of the passed in state
@@ -121,6 +115,8 @@ func (i IbftState) String() string {
 		return "CommitState"
 	case SyncState:
 		return "SyncState"
+	case DoneState:
+		return "DoneState"
 	}
 	panic(fmt.Sprintf("BUG: Ibft state not found %d", i))
 }
@@ -137,8 +133,6 @@ type Proposal struct {
 type currentState struct {
 	// validators represent the current validator set
 	validators ValidatorSetInterface
-
-	snap *Snapshot
 
 	// state is the current state
 	state uint64
@@ -324,90 +318,4 @@ type ValidatorSetInterface interface {
 	CalcProposer(round uint64) NodeID
 	Includes(id NodeID) bool
 	Len() int
-}
-
-type ValidatorSet []NodeID
-
-// CalcProposer calculates the address of the next proposer, from the validator set
-func (v *ValidatorSet) CalcProposer(round uint64, lastProposer NodeID) NodeID {
-	seed := uint64(0)
-	if lastProposer == "" {
-		seed = round
-	} else {
-		offset := 0
-		if indx := v.Index(lastProposer); indx != -1 {
-			offset = indx
-		}
-
-		seed = uint64(offset) + round + 1
-	}
-
-	pick := seed % uint64(v.Len())
-
-	return (*v)[pick]
-}
-
-/*
-// Add adds a new address to the validator set
-func (v *ValidatorSet) Add(addr NodeID) {
-	*v = append(*v, addr)
-}
-
-// Del removes an address from the validator set
-func (v *ValidatorSet) Del(addr NodeID) {
-	for indx, i := range *v {
-		if i == addr {
-			*v = append((*v)[:indx], (*v)[indx+1:]...)
-		}
-	}
-}
-*/
-
-// Len returns the size of the validator set
-func (v *ValidatorSet) Len() int {
-	return len(*v)
-}
-
-/*
-// Equal checks if 2 validator sets are equal
-func (v *ValidatorSet) Equal(vv *ValidatorSet) bool {
-	if len(*v) != len(*vv) {
-		return false
-	}
-	for indx := range *v {
-		if (*v)[indx] != (*vv)[indx] {
-			return false
-		}
-	}
-
-	return true
-}
-*/
-
-// Index returns the index of the passed in address in the validator set.
-// Returns -1 if not found
-func (v *ValidatorSet) Index(addr NodeID) int {
-	for indx, i := range *v {
-		if i == addr {
-			return indx
-		}
-	}
-
-	return -1
-}
-
-// Includes checks if the address is in the validator set
-func (v *ValidatorSet) Includes(addr NodeID) bool {
-	return v.Index(addr) != -1
-}
-
-// MaxFaultyNodes returns the maximum number of allowed faulty nodes, based on the current validator set
-func (v *ValidatorSet) MaxFaultyNodes() int {
-	// numberOfValidators / 3
-	return int(math.Ceil(float64(len(*v))/3)) - 1
-}
-
-// EncodeToHex generates a hex string based on the byte representation, with the '0x' prefix
-func EncodeToHex(str []byte) string {
-	return "0x" + hex.EncodeToString(str)
 }
