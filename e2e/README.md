@@ -21,8 +21,10 @@ $ docker run --net=host -v "${PWD}/otel-jaeger-config.yaml":/otel-local-config.y
 
 Simple cluster with 5 machines.
 
-### TestE2E_LeaderDrop
+### TestE2E_NodeDrop
+
+Cluster starts and then one node fails.
 
 ### TestE2E_Partition_OneMajority
 
-### TestE2E_Partition_NoMajority
+Cluster of 5 is partitioned in two sets, one with the majority (3) and one without (2).
