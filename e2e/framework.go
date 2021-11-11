@@ -4,6 +4,10 @@ import (
 	"context"
 	"crypto/sha1"
 	"fmt"
+	"io"
+	"io/ioutil"
+	"log"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -16,7 +20,6 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.7.0"
 	"go.opentelemetry.io/otel/trace"
-	"google.golang.org/grpc"
 )
 
 func initTracer(name string) *sdktrace.TracerProvider {
@@ -36,7 +39,6 @@ func initTracer(name string) *sdktrace.TracerProvider {
 	traceExporter, err := otlptracegrpc.New(ctx,
 		otlptracegrpc.WithInsecure(),
 		otlptracegrpc.WithEndpoint("localhost:4317"),
-		otlptracegrpc.WithDialOption(grpc.WithBlock()),
 	)
 	if err != nil {
 		panic("failed to trace exporter")
@@ -181,7 +183,7 @@ func (c *cluster) WaitForHeight(num uint64, timeout time.Duration, nodes ...[]st
 	timer := time.NewTimer(timeout)
 	for {
 		select {
-		case <-time.After(100 * time.Millisecond):
+		case <-time.After(200 * time.Millisecond):
 			if enough() {
 				return
 			}
@@ -232,8 +234,15 @@ type node struct {
 }
 
 func newIBFTNode(name string, nodes []string, trace trace.Tracer, tt *transport) (*node, error) {
+	var loggerOutput io.Writer
+	if os.Getenv("SILENT") == "true" {
+		loggerOutput = ioutil.Discard
+	} else {
+		loggerOutput = os.Stdout
+	}
+
 	kk := key(name)
-	con := ibft.New(kk, tt, ibft.WithTracer(trace))
+	con := ibft.New(kk, tt, ibft.WithTracer(trace), ibft.WithLogger(log.New(loggerOutput, "", log.LstdFlags)))
 
 	tt.Register(ibft.NodeID(name), func(msg *ibft.MessageReq) {
 		// pipe messages from mock transport to ibft

@@ -3,6 +3,8 @@ package ibft
 import (
 	"context"
 	"crypto/sha1"
+	"io"
+	"io/ioutil"
 	"log"
 	"os"
 	"testing"
@@ -502,8 +504,15 @@ func newMockIbft(t *testing.T, accounts []string, account string) *mockIbft {
 		acct = pool.get(account)
 	}
 
+	var loggerOutput io.Writer
+	if os.Getenv("SILENT") == "true" {
+		loggerOutput = ioutil.Discard
+	} else {
+		loggerOutput = os.Stdout
+	}
+
 	// initialize ibft
-	m.Ibft = New(acct, m, WithLogger(log.New(os.Stdout, "", log.LstdFlags)))
+	m.Ibft = New(acct, m, WithLogger(log.New(loggerOutput, "", log.LstdFlags)))
 	m.Ibft.SetBackend(backend)
 
 	ctx, cancelFn := context.WithCancel(context.Background())
