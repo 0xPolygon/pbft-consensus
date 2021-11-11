@@ -9,7 +9,7 @@ func TestE2E_NodeDrop(t *testing.T) {
 	c := newIBFTCluster(t, "node_drop", "ptr", 5)
 	c.Start()
 
-	// wait for two blocks and stop node 1
+	// wait for two heights and stop node 1
 	c.WaitForHeight(2, 1*time.Minute)
 
 	c.StopNode("ptr_0")

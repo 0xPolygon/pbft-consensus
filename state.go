@@ -44,7 +44,7 @@ type MessageReq struct {
 	// view is the view assigned to the message
 	View *View
 
-	// hash of the locked block
+	// hash of the locked proposal
 	Digest string
 
 	// proposal is the arbitrary data proposal (only for preprepare messages)
@@ -132,12 +132,12 @@ type Proposal struct {
 // currentState defines the current state object in IBFT
 type currentState struct {
 	// validators represent the current validator set
-	validators ValidatorSetInterface
+	validators ValidatorSet
 
 	// state is the current state
 	state uint64
 
-	// The proposed block of arbitrary data
+	// proposal stores information about the height proposal
 	proposal *Proposal
 
 	// The selected proposer
@@ -314,7 +314,7 @@ func (c *currentState) numCommitted() int {
 	return len(c.committed)
 }
 
-type ValidatorSetInterface interface {
+type ValidatorSet interface {
 	CalcProposer(round uint64) NodeID
 	Includes(id NodeID) bool
 	Len() int

@@ -127,7 +127,7 @@ func (ap *testerAccountPool) get(name string) *testerAccount {
 	return nil
 }
 
-func (ap *testerAccountPool) validatorSet() ValidatorSetInterface {
+func (ap *testerAccountPool) validatorSet() ValidatorSet {
 	acct := []string{}
 	for _, i := range ap.accounts {
 		acct = append(acct, i.alias)
@@ -143,7 +143,7 @@ func generateKey() *ecdsa.PrivateKey {
 	return prv
 }
 
-func newMockValidatorSet(a []string) ValidatorSetInterface {
+func newMockValidatorSet(a []string) ValidatorSet {
 	valsAsNode := []NodeID{}
 	for _, i := range a {
 		valsAsNode = append(valsAsNode, NodeID(i))

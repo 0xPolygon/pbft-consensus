@@ -1,8 +1,10 @@
 
-# Istambul BFT consensus
+# Practical-BFT consensus
 
 ## Tracing
 
-Each span will represent a height/sequence.
+You can use OpenTracing to trace the execution of the protocol. Each trace span represents a height/sequence.
 
-## Fuzzing
+## E2E
+
+This repo includes integration tests under [/e2e](./e2e)

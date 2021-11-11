@@ -75,20 +75,33 @@ func (c *Config) ApplyOps(opts ...ConfigOption) {
 	}
 }
 
-type Proposal2 struct {
+type SealedProposal struct {
 	Proposal       []byte
 	CommittedSeals [][]byte
 	Proposer       NodeID
 	Number         uint64
 }
 
-type Interface interface {
-	BuildBlock() (*Proposal, error)
-	Validate(proposal []byte) ([]byte, error)
-	Insert(p *Proposal2) error
+type Backend interface {
+	// BuildProposal builds a proposal for the current round (used if proposer)
+	BuildProposal() (*Proposal, error)
+
+	// Validate validates a raw proposal (used if non-proposer)
+	Validate(proposal []byte) error
+
+	// Insert inserts the sealed proposal
+	Insert(p *SealedProposal) error
+
+	// Height returns the height for the current round
 	Height() uint64
-	ValidatorSet() (ValidatorSetInterface, error)
-	Hash(p []byte) ([]byte, error)
+
+	// ValidatorSet returns the validator set for the current round
+	ValidatorSet() ValidatorSet
+
+	// Hash hashes the proposal bytes
+	Hash(p []byte) []byte
+
+	// IsStuck returns whether the ibft is stucked
 	IsStuck(num uint64) (uint64, bool)
 }
 
@@ -100,13 +113,17 @@ type Ibft struct {
 	// Config is the configuration of the consensus
 	config *Config
 
-	inter Interface
+	// inter is the interface with the runtime
+	backend Backend
 
 	// state is the reference to the current state machine
 	state *currentState
 
-	closeCh   chan struct{} // Channel for closing
+	// validator is the signing key for this instance
 	validator SignKey
+
+	// ctx is the current execution context for an ibft round
+	ctx context.Context
 
 	// msgQueue is a queue that stores all the incomming gossip messages
 	msgQueue *msgQueue
@@ -134,7 +151,6 @@ func New(validator SignKey, transport Transport, opts ...ConfigOption) *Ibft {
 	config.ApplyOps(opts...)
 
 	p := &Ibft{
-		closeCh:   make(chan struct{}),
 		validator: validator,
 		state:     newState(),
 		transport: transport,
@@ -149,25 +165,22 @@ func New(validator SignKey, transport Transport, opts ...ConfigOption) *Ibft {
 	return p
 }
 
-// FIND A BETTER NAME FOR THIS
-func (i *Ibft) SetInterface(inter Interface) error {
-	i.inter = inter
+func (i *Ibft) SetBackend(backend Backend) error {
+	i.backend = backend
 
 	// set the next current sequence for this iteration
-	i.setSequence(i.inter.Height())
+	i.setSequence(i.backend.Height())
 
 	// set the current set of validators
-	validatorSet, err := i.inter.ValidatorSet()
-	if err != nil {
-		return err
-	}
+	i.state.validators = i.backend.ValidatorSet()
 
-	i.state.validators = validatorSet
 	return nil
 }
 
 // start starts the IBFT consensus state machine
 func (i *Ibft) Run(ctx context.Context) {
+	i.ctx = ctx
+
 	// the iteration always starts with the AcceptState.
 	// AcceptState stages will reset the rest of the message queues.
 	i.setState(AcceptState)
@@ -176,7 +189,7 @@ func (i *Ibft) Run(ctx context.Context) {
 	spanCtx, span := i.tracer.Start(context.Background(), fmt.Sprintf("Sequence-%d", i.state.view.Sequence))
 	defer span.End()
 
-	// loop until we reach the DoneState or it closes the channel
+	// loop until we reach the a finish state
 	for i.getState() != DoneState && i.getState() != SyncState {
 		select {
 		case <-ctx.Done():
@@ -226,7 +239,7 @@ func (i *Ibft) setSequence(sequence uint64) {
 //
 // The Accept state always checks the snapshot, and the validator set. If the current node is not in the validators set,
 // it moves back to the Sync state. On the other hand, if the node is a validator, it calculates the proposer.
-// If it turns out that the current node is the proposer, it builds a block, and sends preprepare and then prepare messages.
+// If it turns out that the current node is the proposer, it builds a proposal, and sends preprepare and then prepare messages.
 func (i *Ibft) runAcceptState(ctx context.Context) { // start new round
 	_, span := i.tracer.Start(ctx, "AcceptState")
 	defer span.End()
@@ -260,25 +273,25 @@ func (i *Ibft) runAcceptState(ctx context.Context) { // start new round
 
 		if !i.state.locked {
 			// since the state is not locked, we need to build a new proposal
-			i.state.proposal, err = i.inter.BuildBlock( /*snap, parent*/ )
+			i.state.proposal, err = i.backend.BuildProposal()
 			if err != nil {
-				i.logger.Print("[ERROR] failed to build block", "err", err)
+				i.logger.Printf("[ERROR] failed to build proposal: %v", err)
 				i.setState(RoundChangeState)
 				return
 			}
 
-			// calculate how much time do we have to wait to mine the block
+			// calculate how much time do we have to wait to gossip the proposal
 			delay := time.Until(i.state.proposal.Time)
 
 			select {
 			case <-time.After(delay):
-			case <-i.closeCh:
+			case <-i.ctx.Done():
 				return
 			}
 
 		}
 
-		// send the preprepare message as an RLP encoded block
+		// send the preprepare message
 		i.sendPreprepareMsg()
 
 		// send the prepare message since we are ready to move the state
@@ -291,7 +304,7 @@ func (i *Ibft) runAcceptState(ctx context.Context) { // start new round
 
 	i.logger.Printf("[INFO] proposer calculated: proposer=%s, sequence=%d", i.state.proposer, i.state.view.Sequence)
 
-	// we are NOT a proposer for the block. Then, we have to wait
+	// we are NOT a proposer for this height/round. Then, we have to wait
 	// for a pre-prepare message from the proposer
 
 	timeout := i.randomTimeout()
@@ -314,18 +327,18 @@ func (i *Ibft) runAcceptState(ctx context.Context) { // start new round
 			continue
 		}
 
-		// retrieve the block proposal
-		if _, err := i.inter.Validate(msg.Proposal); err != nil {
+		// retrieve the proposal
+		if err := i.backend.Validate(msg.Proposal); err != nil {
 			i.logger.Printf("[ERROR] failed to validate proposal: %v", err)
 			i.setState(RoundChangeState)
 			return
 		}
 
 		if i.state.locked {
-			hash1, _ := i.inter.Hash(msg.Proposal)
-			hash2, _ := i.inter.Hash(i.state.proposal.Data)
+			hash1 := i.backend.Hash(msg.Proposal)
+			hash2 := i.backend.Hash(i.state.proposal.Data)
 
-			// the state is locked, we need to receive the same block
+			// the state is locked, we need to receive the same proposal
 			if bytes.Equal(hash1, hash2) {
 				// fast-track and send a commit message and wait for validations
 				i.sendCommitMsg()
@@ -334,21 +347,12 @@ func (i *Ibft) runAcceptState(ctx context.Context) { // start new round
 				i.handleStateErr(errIncorrectLockedProposal)
 			}
 		} else {
-			/*
-				// since its a new block, we have to verify it first
-				if err := i.verifyHeaderImpl(snap, parent, block.Header); err != nil {
-					i.logger.Printf("[ERROR] block verification failed", "err", err)
-					i.handleStateErr(errBlockVerificationFailed)
-				} else {
-			*/
 			i.state.proposal = &Proposal{
 				Data: msg.Proposal,
 			}
 
-			// send prepare message and wait for validations
 			i.sendPrepareMsg()
 			i.setState(ValidateState)
-			//}
 		}
 	}
 }
@@ -363,7 +367,7 @@ func (i *Ibft) runValidateState(ctx context.Context) { // start new round
 	hasCommitted := false
 	sendCommit := func(span trace.Span) {
 		// at this point either we have enough prepare messages
-		// or commit messages so we can lock the block
+		// or commit messages so we can lock the proposal
 		i.state.lock()
 
 		if !hasCommitted {
@@ -466,20 +470,20 @@ func (i *Ibft) runCommitState(ctx context.Context) {
 	proposal := i.state.proposal.Data
 
 	// at this point either if it works or not we need to unlock the state
-	// to allow for other block to be produced if it insertion fails
+	// to allow for other proposals to be produced if it insertion fails
 	i.state.unlock()
 
-	pp := &Proposal2{
+	pp := &SealedProposal{
 		Proposal:       proposal,
 		CommittedSeals: committedSeals,
 		Proposer:       i.state.proposer,
 		Number:         i.state.view.Sequence,
 	}
-	if err := i.inter.Insert(pp); err != nil {
+	if err := i.backend.Insert(pp); err != nil {
 		// start a new round with the state unlocked since we need to
-		// be able to propose/validate a different block
+		// be able to propose/validate a different proposal
 		i.logger.Print("[ERROR] failed to insert proposal", "err", err)
-		i.handleStateErr(errFailedToInsertBlock)
+		i.handleStateErr(errFailedToInsertProposal)
 	} else {
 		i.setSequence(i.state.view.Sequence + 1)
 
@@ -490,8 +494,8 @@ func (i *Ibft) runCommitState(ctx context.Context) {
 
 var (
 	errIncorrectLockedProposal = fmt.Errorf("locked proposal is incorrect")
-	errBlockVerificationFailed = fmt.Errorf("block verification failed")
-	errFailedToInsertBlock     = fmt.Errorf("failed to insert block")
+	errVerificationFailed      = fmt.Errorf("proposal verification failed")
+	errFailedToInsertProposal  = fmt.Errorf("failed to insert proposal")
 )
 
 func (i *Ibft) handleStateErr(err error) {
@@ -520,7 +524,7 @@ func (i *Ibft) runRoundChangeState(ctx context.Context) {
 		// At this point we might be stuck in the network if:
 		// - We have advanced the round but everyone else passed.
 		//   We are removing those messages since they are old now.
-		if bestHeight, stucked := i.inter.IsStuck(i.state.view.Sequence); stucked {
+		if bestHeight, stucked := i.backend.IsStuck(i.state.view.Sequence); stucked {
 			span.AddEvent("OutOfSync", trace.WithAttributes(
 				// our local height
 				attribute.Int64("local", int64(i.state.view.Sequence)),
@@ -621,7 +625,7 @@ func (i *Ibft) gossip(typ MsgType) {
 	// add View
 	msg.View = i.state.view.Copy()
 
-	// if we are sending a preprepare message we need to include the proposed block
+	// if we are sending a preprepare message we need to include the proposal
 	if msg.Type == MessageReq_Preprepare {
 		msg.SetProposal(i.state.proposal.Data)
 	}
@@ -629,7 +633,7 @@ func (i *Ibft) gossip(typ MsgType) {
 	// if the message is commit, we need to add the committed seal
 	if msg.Type == MessageReq_Commit {
 		// seal the hash of the proposal
-		hash, _ := i.inter.Hash(i.state.proposal.Data)
+		hash := i.backend.Hash(i.state.proposal.Data)
 
 		seal, err := i.validator.Sign(hash)
 		if err != nil {
@@ -693,12 +697,6 @@ func (i *Ibft) randomTimeout(inputTimeout ...time.Duration) time.Duration {
 	return timeout
 }
 
-// Close closes the IBFT consensus mechanism, and does write back to disk
-func (i *Ibft) Close() error {
-	close(i.closeCh)
-	return nil
-}
-
 // getNextMessage reads a new message from the message queue
 func (i *Ibft) getNextMessage(span trace.Span, timeout time.Duration) (*MessageReq, bool) {
 	timeoutCh := time.After(timeout)
@@ -726,7 +724,7 @@ func (i *Ibft) getNextMessage(span trace.Span, timeout time.Duration) (*MessageR
 		case <-timeoutCh:
 			span.AddEvent("Timeout")
 			return nil, true
-		case <-i.closeCh:
+		case <-i.ctx.Done():
 			return nil, false
 		case <-i.updateCh:
 		}

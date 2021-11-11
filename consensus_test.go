@@ -14,7 +14,7 @@ import (
 func TestTransition_ValidateState_Prepare(t *testing.T) {
 	t.Skip()
 
-	// we receive enough prepare messages to lock and commit the block
+	// we receive enough prepare messages to lock and commit the proposal
 	i := newMockIbft(t, []string{"A", "B", "C", "D"}, "A")
 	i.setState(ValidateState)
 
@@ -39,7 +39,6 @@ func TestTransition_ValidateState_Prepare(t *testing.T) {
 		Type: MessageReq_Prepare,
 		View: ViewMsg(1, 0),
 	})
-	i.Close()
 
 	i.runCycle(context.Background())
 
@@ -100,7 +99,6 @@ func TestTransition_AcceptState_ToSyncState(t *testing.T) {
 	// means that we have been removed as validator, move to sync state
 	i := newMockIbft(t, []string{"A", "B", "C", "D"}, "")
 	i.setState(AcceptState)
-	i.Close()
 
 	i.runCycle(context.Background())
 
@@ -115,9 +113,9 @@ var (
 	mockProposal1 = []byte{0x1, 0x2, 0x3, 0x4}
 )
 
-func TestTransition_AcceptState_Proposer_ProposeBlock(t *testing.T) {
+func TestTransition_AcceptState_Proposer_Propose(t *testing.T) {
 	// we are in AcceptState and we are the proposer, it needs to:
-	// 1. create a block
+	// 1. create a proposal
 	// 2. wait for the delay
 	// 3. send a preprepare message
 	// 4. send a prepare message
@@ -142,7 +140,7 @@ func TestTransition_AcceptState_Proposer_ProposeBlock(t *testing.T) {
 
 func TestTransition_AcceptState_Proposer_Locked(t *testing.T) {
 	// we are in AcceptState, we are the proposer but the value is locked.
-	// it needs to send the locked block again
+	// it needs to send the locked proposal again
 	i := newMockIbft(t, []string{"A", "B", "C", "D"}, "A")
 	i.setState(AcceptState)
 
@@ -204,7 +202,7 @@ func TestTransition_AcceptState_Validator_VerifyFails(t *testing.T) {
 	i.expect(expectResult{
 		sequence: 1,
 		state:    RoundChangeState,
-		err:      errBlockVerificationFailed,
+		err:      errVerificationFailed,
 	})
 }
 
@@ -239,7 +237,7 @@ func TestTransition_AcceptState_Validator_LockWrong(t *testing.T) {
 	i.state.view = ViewMsg(1, 0)
 	i.setState(AcceptState)
 
-	// locked block
+	// locked proposal
 	i.state.proposal = &Proposal{
 		Data: mockProposal,
 	}
@@ -268,7 +266,7 @@ func TestTransition_AcceptState_Validator_LockCorrect(t *testing.T) {
 	i.state.view = ViewMsg(1, 0)
 	i.setState(AcceptState)
 
-	// locked block
+	// locked proposal
 	proposal := mockProposal
 
 	i.state.proposal = &Proposal{Data: proposal}
@@ -388,7 +386,7 @@ func TestTransition_RoundChangeState_ErrStartNewRound(t *testing.T) {
 	m := newMockIbft(t, []string{"A", "B"}, "A")
 	m.Close()
 
-	m.state.err = errBlockVerificationFailed
+	m.state.err = errVerificationFailed
 
 	m.setState(RoundChangeState)
 	m.runCycle(context.Background())
@@ -452,6 +450,7 @@ type mockIbft struct {
 	respMsg  []*MessageReq
 	proposal *Proposal
 	sequence uint64
+	cancelFn context.CancelFunc
 }
 
 func (m *mockIbft) emitMsg(msg *MessageReq) {
@@ -505,9 +504,17 @@ func newMockIbft(t *testing.T, accounts []string, account string) *mockIbft {
 
 	// initialize ibft
 	m.Ibft = New(acct, m, WithLogger(log.New(os.Stdout, "", log.LstdFlags)))
-	m.Ibft.SetInterface(backend)
+	m.Ibft.SetBackend(backend)
+
+	ctx, cancelFn := context.WithCancel(context.Background())
+	m.Ibft.ctx = ctx
+	m.cancelFn = cancelFn
 
 	return m
+}
+
+func (i *mockIbft) Close() {
+	i.cancelFn()
 }
 
 func (i *mockIbft) setProposal(p *Proposal) {
@@ -562,13 +569,13 @@ type mockB struct {
 	validators *valString
 }
 
-func (m *mockB) Hash(p []byte) ([]byte, error) {
+func (m *mockB) Hash(p []byte) []byte {
 	h := sha1.New()
 	h.Write(p)
-	return h.Sum(nil), nil
+	return h.Sum(nil)
 }
 
-func (m *mockB) BuildBlock() (*Proposal, error) {
+func (m *mockB) BuildProposal() (*Proposal, error) {
 	if m.mock.proposal == nil {
 		panic("add a proposal in the test")
 	}
@@ -579,19 +586,19 @@ func (m *mockB) Height() uint64 {
 	return m.mock.sequence
 }
 
-func (m *mockB) Validate(proposal []byte) ([]byte, error) {
-	return nil, nil
+func (m *mockB) Validate(proposal []byte) error {
+	return nil
 }
 
 func (m *mockB) IsStuck(num uint64) (uint64, bool) {
 	return 0, false
 }
 
-func (m *mockB) Insert(pp *Proposal2) error {
+func (m *mockB) Insert(pp *SealedProposal) error {
 	// TODO
 	return nil
 }
 
-func (m *mockB) ValidatorSet() (ValidatorSetInterface, error) {
-	return m.validators, nil
+func (m *mockB) ValidatorSet() ValidatorSet {
+	return m.validators
 }

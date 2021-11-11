@@ -90,9 +90,9 @@ func newIBFTCluster(t *testing.T, name, prefix string, count int, hook ...transp
 	return c
 }
 
-func (c *cluster) syncWithNetwork(ourselves string) (uint64, []*ibft.Proposal2) {
+func (c *cluster) syncWithNetwork(ourselves string) (uint64, []*ibft.SealedProposal) {
 	var height uint64
-	var proposals []*ibft.Proposal2
+	var proposals []*ibft.SealedProposal
 
 	for _, n := range c.nodes {
 		if n.name == ourselves {
@@ -228,7 +228,7 @@ type node struct {
 	nodes []string
 
 	// list of proposals
-	proposals []*ibft.Proposal2
+	proposals []*ibft.SealedProposal
 }
 
 func newIBFTNode(name string, nodes []string, trace trace.Tracer, tt *transport) (*node, error) {
@@ -242,7 +242,7 @@ func newIBFTNode(name string, nodes []string, trace trace.Tracer, tt *transport)
 
 	n := &node{
 		nodes:     nodes,
-		proposals: []*ibft.Proposal2{},
+		proposals: []*ibft.SealedProposal{},
 		name:      name,
 		ibft:      con,
 		stopped:   0,
@@ -268,11 +268,11 @@ func (n *node) lastProposer() ibft.NodeID {
 	return lastProposer
 }
 
-func (n *node) getProposals() (uint64, []*ibft.Proposal2) {
+func (n *node) getProposals() (uint64, []*ibft.SealedProposal) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 
-	res := []*ibft.Proposal2{}
+	res := []*ibft.SealedProposal{}
 	res = append(res, n.proposals...)
 
 	number := uint64(0)
@@ -293,7 +293,7 @@ func (n *node) currentHeight() uint64 {
 	return number
 }
 
-func (n *node) Insert(pp *ibft.Proposal2) error {
+func (n *node) Insert(pp *ibft.SealedProposal) error {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 
@@ -325,7 +325,7 @@ func (n *node) Start() {
 				// important: in this iteration of the fsm we have increased our height
 				height: n.currentHeight() + 1,
 			}
-			if err := n.ibft.SetInterface(fsm); err != nil {
+			if err := n.ibft.SetBackend(fsm); err != nil {
 				panic(err)
 			}
 
@@ -385,7 +385,7 @@ func (f *fsm) IsStuck(num uint64) (uint64, bool) {
 	return f.n.isStuck(num)
 }
 
-func (f *fsm) BuildBlock() (*ibft.Proposal, error) {
+func (f *fsm) BuildProposal() (*ibft.Proposal, error) {
 	proposal := &ibft.Proposal{
 		Data: []byte{byte(f.Height())},
 		Time: time.Now().Add(1 * time.Second),
@@ -393,16 +393,16 @@ func (f *fsm) BuildBlock() (*ibft.Proposal, error) {
 	return proposal, nil
 }
 
-func (f *fsm) Validate(proposal []byte) ([]byte, error) {
+func (f *fsm) Validate(proposal []byte) error {
 	// always validate for now
-	return nil, nil
+	return nil
 }
 
-func (f *fsm) Insert(pp *ibft.Proposal2) error {
+func (f *fsm) Insert(pp *ibft.SealedProposal) error {
 	return f.n.Insert(pp)
 }
 
-func (f *fsm) ValidatorSet() (ibft.ValidatorSetInterface, error) {
+func (f *fsm) ValidatorSet() ibft.ValidatorSet {
 	valsAsNode := []ibft.NodeID{}
 	for _, i := range f.nodes {
 		valsAsNode = append(valsAsNode, ibft.NodeID(i))
@@ -411,13 +411,13 @@ func (f *fsm) ValidatorSet() (ibft.ValidatorSetInterface, error) {
 		nodes:        valsAsNode,
 		lastProposer: f.lastProposer,
 	}
-	return &vv, nil
+	return &vv
 }
 
-func (f *fsm) Hash(p []byte) ([]byte, error) {
+func (f *fsm) Hash(p []byte) []byte {
 	h := sha1.New()
 	h.Write(p)
-	return h.Sum(nil), nil
+	return h.Sum(nil)
 }
 
 type valString struct {
