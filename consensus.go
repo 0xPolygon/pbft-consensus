@@ -10,24 +10,9 @@ import (
 	"reflect"
 	"time"
 
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
-
-/*
-const (
-	DefaultEpochSize = 100000
-)
-*/
-
-/*
-type blockchainInterface interface {
-	Header() *types.Header
-	GetHeaderByNumber(i uint64) (*types.Header, bool)
-	WriteBlocks(blocks []*types.Block) error
-}
-*/
 
 type Config struct {
 }
@@ -55,41 +40,15 @@ type Snapshot struct {
 
 // Ibft represents the IBFT consensus mechanism object
 type Ibft struct {
-	//sealing bool // Flag indicating if the node is a sealer
-
-	inter Interface
-
-	logger *log.Logger // Output logger
-	// config *Config       // Consensus configuration
-	state *currentState // Reference to the current state
-
-	//blockchain blockchainInterface // Interface exposed by the blockchain layer
-	//executor   *state.Executor     // Reference to the state executor
-	closeCh chan struct{} // Channel for closing
-
-	validator SignKey
-
-	//validatorKey     *ecdsa.PrivateKey // Private key for the validator
-	//validatorKeyAddr NodeID
-
-	//txpool *txpool.TxPool // Reference to the transaction pool
-
-	//store *snapshotStore // Snapshot store that keeps track of all snapshots
-	//epochSize uint64
-
-	msgQueue *msgQueue     // Structure containing different message queues
-	updateCh chan struct{} // Update channel
-
-	//syncer       *protocol.Syncer // Reference to the sync protocol
-	//syncNotifyCh chan bool        // Sync protocol notification channel
-
-	//network   *network.Server // Reference to the networking layer
-	transport Transport // Reference to the transport protocol
-
-	//operator *operator
-
-	tracer trace.Tracer
-	// aux test methods
+	inter          Interface
+	logger         *log.Logger   // Output logger
+	state          *currentState // Reference to the current state
+	closeCh        chan struct{} // Channel for closing
+	validator      SignKey
+	msgQueue       *msgQueue     // Structure containing different message queues
+	updateCh       chan struct{} // Update channel
+	transport      Transport
+	tracer         trace.Tracer
 	forceTimeoutCh bool
 }
 
@@ -104,182 +63,24 @@ func Factory(logger *log.Logger /*, config *Config*/, inter Interface, validator
 		logger = log.New(os.Stderr, "", log.LstdFlags)
 	}
 
-	fmt.Println("XXX")
-	fmt.Println(otel.GetTracerProvider())
-
-	/*
-		// work begins
-		ctx, span := tracer.Start(
-			context.Background(),
-			"CollectorExporter-Example")
-		defer span.End()
-
-		for i := 0; i < 10; i++ {
-			_, iSpan := tracer.Start(ctx, fmt.Sprintf("Sample-%d", i))
-			log.Printf("Doing really hard work (%d / 10)\n", i+1)
-
-			<-time.After(time.Second)
-			iSpan.End()
-		}
-
-		log.Printf("Done!")
-
-		panic("X")
-	*/
-
-	// tracer := otel.Tracer("ibft")
-
 	p := &Ibft{
-		inter:  inter,
-		logger: logger,
-		//tracer: tracer,
-		// logger: logger.Named("ibft"),
-		// config: config,
-		//blockchain: blockchain,
-		//executor:     executor,
-		closeCh: make(chan struct{}),
-		//txpool:       txpool,
+		inter:     inter,
+		logger:    logger,
+		closeCh:   make(chan struct{}),
 		validator: validator,
 		state:     &currentState{},
 		transport: transport,
-		//network:      network,
-		//epochSize: DefaultEpochSize,
-		//syncNotifyCh: make(chan bool),
-		//sealing:      sealing,
-		msgQueue: newMsgQueue(),
-		updateCh: make(chan struct{}),
+		msgQueue:  newMsgQueue(),
+		updateCh:  make(chan struct{}),
 	}
 
-	// Istanbul requires a different header hash function
-	//types.HeaderHash = istanbulHeaderHash
-
-	//p.syncer = protocol.NewSyncer(logger, network, blockchain)
-
-	// register the grpc operator
-	//p.operator = &operator{ibft: p}
-	//proto.RegisterIbftOperatorServer(srv, p.operator)
-
-	/*
-		if err := p.createKey(); err != nil {
-			return nil, err
-		}
-	*/
-
 	p.logger.Printf("[INFO] validator key: addr=%s\n", p.validator.NodeID())
-
-	/*
-		// start the transport protocol
-		if err := p.setupTransport(); err != nil {
-			return nil, err
-		}
-	*/
-
 	return p, nil
 }
 
 func (i *Ibft) SetTrace(trace trace.Tracer) {
 	i.tracer = trace
 }
-
-/*
-// Start starts the IBFT consensus
-func (i *Ibft) Start() error {
-	// Start the syncer
-	i.syncer.Start()
-
-	// Set up the snapshots
-	if err := i.setupSnapshot(); err != nil {
-		return err
-	}
-
-	// Start the actual IBFT protocol
-	go i.start()
-
-	return nil
-}
-*/
-
-/*
-// Define the IBFT libp2p protocol
-var ibftProto = "/ibft/0.1"
-
-type gossipTransport struct {
-	topic *network.Topic
-}
-
-// Gossip publishes a new message to the topic
-func (g *gossipTransport) Gossip(msg *MessageReq) error {
-	return g.topic.Publish(msg)
-}
-
-// setupTransport sets up the gossip transport protocol
-func (i *Ibft) setupTransport() error {
-	// Define a new topic
-	topic, err := i.network.NewTopic(ibftProto, &MessageReq{})
-	if err != nil {
-		return err
-	}
-
-	// Subscribe to the newly created topic
-	err = topic.Subscribe(func(obj interface{}) {
-		msg := obj.(*MessageReq)
-
-		if !i.isSealing() {
-			// if we are not sealing we do not care about the messages
-			// but we need to subscribe to propagate the messages
-			return
-		}
-
-		// decode sender
-		if err := validateMsg(msg); err != nil {
-			i.logger.Printf("[ERROR] failed to validate msg", "err", err)
-
-			return
-		}
-
-		if msg.From == i.validatorKeyAddr.String() {
-			// we are the sender, skip this message since we already
-			// relay our own messages internally.
-			return
-		}
-
-		i.pushMessage(msg)
-	})
-
-	if err != nil {
-		return err
-	}
-
-	i.transport = &gossipTransport{topic: topic}
-
-	return nil
-}
-*/
-
-/*
-// createKey sets the validator's private key, from the file path
-func (i *Ibft) createKey() error {
-	// i.msgQueue = msgQueueImpl{}
-	i.msgQueue = newMsgQueue()
-	i.closeCh = make(chan struct{})
-	i.updateCh = make(chan struct{})
-
-	if i.validatorKey == nil {
-		// generate a validator private key
-		validatorKey, err := crypto.GenerateOrReadPrivateKey(filepath.Join(i.config.Path, IbftKeyName))
-		if err != nil {
-			return err
-		}
-
-		i.validatorKey = validatorKey
-		i.validatorKeyAddr = crypto.PubKeyToAddress(&validatorKey.PublicKey)
-	}
-
-	return nil
-}
-*/
-
-// const IbftKeyName = "validator.key"
 
 // start starts the IBFT consensus state machine
 func (i *Ibft) Run(ctx context.Context) {
@@ -292,16 +93,6 @@ func (i *Ibft) Run(ctx context.Context) {
 	// since this will assume we are good we have first to move to its initial
 	// state for consensus that is the AcceptState
 	i.setState(AcceptState)
-
-	// consensus always starts in SyncState mode in case it needs
-	// to sync with other nodes.
-	// i.setState(SyncState)
-
-	/*
-		// Grab the latest header
-		header := i.blockchain.Header()
-		i.logger.Printf("[DEBUG] current sequence", "sequence", header.Number+1)
-	*/
 
 	var sequenceCtx context.Context
 	var span trace.Span
@@ -331,11 +122,6 @@ func (i *Ibft) Run(ctx context.Context) {
 		default: // Default is here because we would block until we receive something in the closeCh
 		}
 
-		// trace each state change
-		//cycleCtx, span := i.tracer.Start(sequenceCtx, i.getState().String())
-
-		//span.AddEvent("XXXXX")
-
 		// Start the state machine loop
 		i.runCycle(sequenceCtx)
 
@@ -351,32 +137,6 @@ func (i *Ibft) runCycle(ctx context.Context) {
 		i.logger.Printf("[DEBUG] cycle: state=%s, sequence=%d, round=%d", i.getState(), i.state.view.Sequence, i.state.view.Round)
 	}
 
-	/*
-		ctx, span := i.tracer.Start(
-			context.Background(),
-			"CollectorExporter-Example")
-		// defer span.End()
-	*/
-
-	/*
-		for j := 0; j < 10; j++ {
-			_, iSpan := i.tracer.Start(ctx, fmt.Sprintf("Sample-%d", j))
-			log.Printf("Doing really hard work (%d / 10)\n", j+1)
-
-			<-time.After(time.Second)
-			iSpan.End()
-		}
-	*/
-
-	log.Printf("Done!")
-
-	/*
-		fmt.Println("==>")
-		_, span := i.tracer.Start(context.Background(), "cycle", trace.WithAttributes(attribute.String("state", i.getState().String())))
-
-		span.End()
-	*/
-
 	// Based on the current state, execute the corresponding section
 	switch i.getState() {
 	case AcceptState:
@@ -390,43 +150,8 @@ func (i *Ibft) runCycle(ctx context.Context) {
 
 	case CommitState:
 		i.runCommitState(ctx)
-
-		/*
-			case SyncState:
-				i.runSyncState()
-		*/
 	}
-
-	fmt.Println("<<<=== end")
-	//span.End()
 }
-
-/*
-// isValidSnapshot checks if the current node is in the validator set for the latest snapshot
-func (i *Ibft) isValidSnapshot() bool {
-		if !i.isSealing() {
-			return false
-		}
-
-		// check if we are a validator and enabled
-		header := i.blockchain.Header()
-		snap, err := i.getSnapshot(header.Number)
-		if err != nil {
-			return false
-		}
-
-		if snap.Set.Includes(i.validatorKeyAddr) {
-			i.state.view = &View{
-				Sequence: header.Number + 1,
-				Round:    0,
-			}
-
-			return true
-		}
-
-	return false
-}
-*/
 
 func (i *Ibft) SetSequence(sequence uint64) {
 	i.state.view = &View{
@@ -434,160 +159,6 @@ func (i *Ibft) SetSequence(sequence uint64) {
 		Sequence: sequence,
 	}
 }
-
-/*
-// runSyncState implements the Sync state loop.
-//
-// It fetches fresh data from the blockchain. Checks if the current node is a validator and resolves any pending blocks
-func (i *Ibft) runSyncState() {
-	for i.isState(SyncState) {
-
-			// try to sync with some target peer
-			p := i.syncer.BestPeer()
-			if p == nil {
-				// if we do not have any peers and we have been a validator
-				// we can start now. In case we start on another fork this will be
-				// reverted later
-				if i.isValidSnapshot() {
-					// initialize the round and sequence
-					header := i.blockchain.Header()
-					i.state.view = &View{
-						Round:    0,
-						Sequence: header.Number + 1,
-					}
-					i.setState(AcceptState)
-				} else {
-					time.Sleep(1 * time.Second)
-				}
-				continue
-			}
-
-			if err := i.syncer.BulkSyncWithPeer(p); err != nil {
-				i.logger.Printf("[ERROR] failed to bulk sync", "err", err)
-				continue
-			}
-
-			// if we are a validator we do not even want to wait here
-			// we can just move ahead
-			if i.isValidSnapshot() {
-				i.setState(AcceptState)
-				continue
-			}
-
-
-		// start watch mode
-		var isValidator bool
-
-			i.syncer.WatchSyncWithPeer(p, func(b *types.Block) bool {
-				i.syncer.Broadcast(b)
-				isValidator = i.isValidSnapshot()
-
-				return !isValidator
-			})
-
-
-		if isValidator {
-			// at this point, we are in sync with the latest chain we know of
-			// and we are a validator of that chain so we need to change to AcceptState
-			// so that we can start to do some stuff there
-			i.setState(AcceptState)
-		}
-	}
-}
-*/
-
-/*
-var defaultBlockPeriod = 2 * time.Second
-
-// buildBlock builds the block, based on the passed in snapshot and parent header
-func (i *Ibft) buildBlock(snap *Snapshot, parent *types.Header) (*types.Block, error) {
-	header := &types.Header{
-		ParentHash: parent.Hash,
-		Number:     parent.Number + 1,
-		Miner:      types.Address{},
-		Nonce:      types.Nonce{},
-		MixHash:    IstanbulDigest,
-		Difficulty: parent.Number + 1,   // we need to do this because blockchain needs difficulty to organize blocks and forks
-		StateRoot:  types.EmptyRootHash, // this avoids needing state for now
-		Sha3Uncles: types.EmptyUncleHash,
-		GasLimit:   parent.GasLimit, // Inherit from parent for now, will need to adjust dynamically later.
-	}
-
-	// try to pick a candidate
-	if candidate := i.operator.getNextCandidate(snap); candidate != nil {
-		header.Miner = types.StringToAddress(candidate.Address)
-		if candidate.Auth {
-			header.Nonce = nonceAuthVote
-		} else {
-			header.Nonce = nonceDropVote
-		}
-	}
-
-	// set the timestamp
-	parentTime := time.Unix(int64(parent.Timestamp), 0)
-	headerTime := parentTime.Add(defaultBlockPeriod)
-
-	if headerTime.Before(time.Now()) {
-		headerTime = time.Now()
-	}
-	header.Timestamp = uint64(headerTime.Unix())
-
-	// we need to include in the extra field the current set of validators
-	putIbftExtraValidators(header, snap.Set)
-
-	transition, err := i.executor.BeginTxn(parent.StateRoot, header, i.validatorKeyAddr)
-	if err != nil {
-		return nil, err
-	}
-	txns := []*types.Transaction{}
-	for {
-		txn, retFn := i.txpool.Pop()
-		if txn == nil {
-			break
-		}
-
-		if txn.ExceedsBlockGasLimit(header.GasLimit) {
-			i.txpool.DecreaseAccountNonce(txn)
-		} else {
-			if err := transition.Write(txn); err != nil {
-				if appErr, ok := err.(*state.TransitionApplicationError); ok && appErr.IsRecoverable {
-					retFn()
-				} else {
-					i.txpool.DecreaseAccountNonce(txn)
-				}
-				break
-			}
-			txns = append(txns, txn)
-		}
-	}
-	i.logger.Printf("[INFO] picked out txns from pool", "num", len(txns), "remaining", i.txpool.Length())
-
-	_, root := transition.Commit()
-	header.StateRoot = root
-	header.GasUsed = transition.TotalGas()
-
-	// build the block
-	block := consensus.BuildBlock(consensus.BuildBlockParams{
-		Header:   header,
-		Txns:     txns,
-		Receipts: transition.Receipts(),
-	})
-
-	// write the seal of the block after all the fields are completed
-	header, err = writeSeal(i.validatorKey, block.Header)
-	if err != nil {
-		return nil, err
-	}
-	block.Header = header
-
-	// compute the hash, this is only a provisional hash since the final one
-	// is sealed after all the committed seals
-	block.Header.ComputeHash()
-
-	i.logger.Printf("[INFO] build block", "number", header.Number, "txns", len(txns))
-	return block, nil
-}
-*/
 
 // runAcceptState runs the Accept state loop
 //
@@ -605,35 +176,6 @@ func (i *Ibft) runAcceptState(ctx context.Context) { // start new round
 		i.setState(SyncState)
 		return
 	}
-
-	/*
-		// This is the state in which we either propose a block or wait for the pre-prepare message
-		parent := i.blockchain.Header()
-		number := parent.Number + 1
-		if number != i.state.view.Sequence {
-			i.logger.Printf("[ERROR] sequence not correct", "parent", parent.Number, "sequence", i.state.view.Sequence)
-			i.setState(SyncState)
-			return
-		}
-		snap, err := i.getSnapshot(parent.Number)
-		if err != nil {
-			i.logger.Printf("[ERROR] cannot find snapshot", "num", parent.Number)
-			i.setState(SyncState)
-			return
-		}
-
-		if !snap.Set.Includes(i.validatorKeyAddr) {
-			// we are not a validator anymore, move back to sync state
-			i.logger.Printf("[INFO] we are not a validator anymore")
-			i.setState(SyncState)
-			return
-		}
-
-		i.logger.Printf("[INFO] current snapshot", "validators", len(snap.Set), "votes", len(snap.Votes))
-	*/
-
-	fmt.Println(i.validator.NodeID())
-
 	if !snap.ValidatorSet.Includes(i.validator.NodeID()) {
 		// we are not a validator anymore, move back to sync state
 		i.logger.Printf("[INFO] we are not a validator anymore")
@@ -646,15 +188,6 @@ func (i *Ibft) runAcceptState(ctx context.Context) { // start new round
 
 	// reset round messages
 	i.state.resetRoundMsgs()
-
-	/*
-		// select the proposer of the block
-		var lastProposer types.Address
-		if parent.Number != 0 {
-			lastProposer, _ = ecrecoverFromHeader(parent)
-		}
-	*/
-
 	i.state.CalcProposer()
 
 	isProposer := i.state.proposer == i.validator.NodeID()
@@ -667,9 +200,7 @@ func (i *Ibft) runAcceptState(ctx context.Context) { // start new round
 	)
 
 	if isProposer {
-		// span.AddEvent("proposer")
-
-		// i.logger.Printf("[INFO] we are the proposer", "block", number)
+		i.logger.Printf("[INFO] we are the proposer")
 
 		if !i.state.locked {
 			// since the state is not locked, we need to build a new proposal
@@ -713,16 +244,10 @@ func (i *Ibft) runAcceptState(ctx context.Context) { // start new round
 	// However, since we can receive bad Prepare messages we have to wait (or timeout) until
 	// we get the message from the correct proposer.
 	for i.getState() == AcceptState {
-		fmt.Println("X")
-
 		msg, ok := i.getNextMessage(span, timeout)
 		if !ok {
 			return
 		}
-
-		fmt.Println("-- msg --")
-		fmt.Println(msg)
-
 		if msg == nil {
 			i.setState(RoundChangeState)
 			continue
@@ -752,7 +277,7 @@ func (i *Ibft) runAcceptState(ctx context.Context) { // start new round
 				i.sendCommitMsg()
 				i.setState(ValidateState)
 			} else {
-				i.handleStateErr(errIncorrectBlockLocked)
+				i.handleStateErr(errIncorrectLockedProposal)
 			}
 		} else {
 			/*
@@ -909,60 +434,8 @@ func (i *Ibft) runCommitState(ctx context.Context) {
 	}
 }
 
-/*
-TODO:
-- Validate seal
-*/
-
-/*
-func (i *Ibft) insertBlock(block *types.Block) error {
-	committedSeals := [][]byte{}
-	for _, commit := range i.state.committed {
-		// no need to check the format of seal here because writeCommittedSeals will check
-		committedSeals = append(committedSeals, hex.MustDecodeHex(commit.Seal))
-	}
-
-	header, err := writeCommittedSeals(block.Header, committedSeals)
-	if err != nil {
-		return err
-	}
-
-	// we need to recompute the hash since we have change extra-data
-	block.Header = header
-	block.Header.ComputeHash()
-
-	if err := i.blockchain.WriteBlocks([]*types.Block{block}); err != nil {
-		return err
-	}
-
-	i.logger.Printf(
-[INFO] 		"block committed",
-		"sequence", i.state.view.Sequence,
-		"hash", block.Hash(),
-		"validators", len(i.state.validators),
-		"rounds", i.state.view.Round+1,
-		"committed", i.state.numCommitted(),
-	)
-
-	// increase the sequence number and reset the round if any
-	i.state.view = &View{
-		Sequence: header.Number + 1,
-		Round:    0,
-	}
-
-	// broadcast the new block
-	i.syncer.Broadcast(block)
-
-	// after the block has been written we reset the txpool so that
-	// the old transactions are removed
-	i.txpool.ResetWithHeader(block.Header)
-
-	return nil
-}
-*/
-
 var (
-	errIncorrectBlockLocked    = fmt.Errorf("block locked is incorrect")
+	errIncorrectLockedProposal = fmt.Errorf("locked proposal is incorrect")
 	errBlockVerificationFailed = fmt.Errorf("block verification failed")
 	errFailedToInsertBlock     = fmt.Errorf("failed to insert block")
 )
@@ -990,29 +463,10 @@ func (i *Ibft) runRoundChangeState(ctx context.Context) {
 	}
 
 	checkTimeout := func() {
-		/*
-			// check if there is any peer that is really advanced and we might need to sync with it first
-			if i.syncer != nil {
-				bestPeer := i.syncer.BestPeer()
-				if bestPeer != nil {
-					lastProposal := i.blockchain.Header()
-					if bestPeer.Number() > lastProposal.Number {
-						i.logger.Printf("[DEBUG] it has found a better peer to connect", "local", lastProposal.Number, "remote", bestPeer.Number())
-						// we need to catch up with the last sequence
-						i.setState(SyncState)
-						return
-					}
-				}
-			}
-		*/
-
 		// At this point we might be stuck in the network if:
 		// - We have advanced the round but everyone else passed.
 		//   We are removing those messages since they are old now.
 		if bestHeight, stucked := i.inter.IsStuck(i.state.view.Sequence); stucked {
-
-			fmt.Println("\n\n\n\n\nSTUCKKK\n\n\n\n\n")
-
 			span.AddEvent("OutOfSync", trace.WithAttributes(
 				// our local height
 				attribute.Int64("local", int64(i.state.view.Sequence)),
@@ -1027,9 +481,6 @@ func (i *Ibft) runRoundChangeState(ctx context.Context) {
 		// and we should start a new round
 		sendNextRoundChange()
 	}
-
-	fmt.Println("- state -")
-	fmt.Println(i.state)
 
 	// if the round was triggered due to an error, we send our own
 	// next round change
@@ -1089,7 +540,7 @@ func (i *Ibft) runRoundChangeState(ctx context.Context) {
 	}
 }
 
-// --- com wrappers ---
+// --- communication wrappers ---
 
 func (i *Ibft) sendRoundChange() {
 	i.gossip(MessageReq_RoundChange)
@@ -1110,7 +561,7 @@ func (i *Ibft) sendCommitMsg() {
 func (i *Ibft) gossip(typ MsgType) {
 	msg := &MessageReq{
 		Type: typ,
-		From: i.validator.NodeID(), // not sure if this goes in gossip?
+		From: i.validator.NodeID(),
 	}
 
 	// add View
@@ -1182,82 +633,8 @@ func (i *Ibft) randomTimeout() time.Duration {
 	if round > 0 {
 		timeout += time.Duration(math.Pow(2, float64(round))) * time.Second
 	}
-	fmt.Println("-- timeout --")
-	fmt.Println(timeout)
 	return timeout
 }
-
-/*
-// isSealing checks if the current node is sealing blocks
-func (i *Ibft) isSealing() bool {
-	return i.sealing
-}
-
-// verifyHeaderImpl implements the actual header verification logic
-func (i *Ibft) verifyHeaderImpl(snap *Snapshot, parent, header *types.Header) error {
-	// ensure the extra data is correctly formatted
-	if _, err := getIbftExtra(header); err != nil {
-		return err
-	}
-
-	// Because you must specify either AUTH or DROP vote, it is confusing how to have a block without any votes.
-	// 		This is achieved by specifying the miner field to zeroes,
-	// 		because then the value in the Nonce will not be taken into consideration.
-	if header.Nonce != nonceDropVote && header.Nonce != nonceAuthVote {
-		return fmt.Errorf("invalid nonce")
-	}
-
-	if header.MixHash != IstanbulDigest {
-		return fmt.Errorf("invalid mixhash")
-	}
-
-	if header.Sha3Uncles != types.EmptyUncleHash {
-		return fmt.Errorf("invalid sha3 uncles")
-	}
-
-	// difficulty has to match number
-	if header.Difficulty != header.Number {
-		return fmt.Errorf("wrong difficulty")
-	}
-
-	// verify the sealer
-	if err := verifySigner(snap, header); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// VerifyHeader wrapper for verifying headers
-func (i *Ibft) VerifyHeader(parent, header *types.Header) error {
-	snap, err := i.getSnapshot(parent.Number)
-	if err != nil {
-		return err
-	}
-
-	// verify all the header fields + seal
-	if err := i.verifyHeaderImpl(snap, parent, header); err != nil {
-		return err
-	}
-
-	// verify the commited seals
-	if err := verifyCommitedFields(snap, header); err != nil {
-		return err
-	}
-
-	// process the new block in order to update the snapshot
-	if err := i.processHeaders([]*types.Header{header}); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// GetBlockCreator retrieves the block signer from the extra data field
-func (i *Ibft) GetBlockCreator(header *types.Header) (types.Address, error) {
-	return ecrecoverFromHeader(header)
-}
-*/
 
 // Close closes the IBFT consensus mechanism, and does write back to disk
 func (i *Ibft) Close() error {
