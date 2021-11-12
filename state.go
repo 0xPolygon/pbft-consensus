@@ -4,10 +4,91 @@ import (
 	"fmt"
 	"math"
 	"sync/atomic"
-
-	"github.com/0xPolygon/polygon-sdk/consensus/ibft/proto"
-	"github.com/0xPolygon/polygon-sdk/types"
+	"time"
 )
+
+type MsgType int32
+
+const (
+	MessageReq_RoundChange MsgType = 0
+	MessageReq_Preprepare  MsgType = 1
+	MessageReq_Commit      MsgType = 2
+	MessageReq_Prepare     MsgType = 3
+)
+
+func (m MsgType) String() string {
+	switch m {
+	case MessageReq_RoundChange:
+		return "RoundChange"
+	case MessageReq_Preprepare:
+		return "Preprepare"
+	case MessageReq_Commit:
+		return "Commit"
+	case MessageReq_Prepare:
+		return "Prepare"
+	default:
+		panic(fmt.Sprintf("BUG: Bad msgtype %d", m))
+	}
+}
+
+type MessageReq struct {
+	// type is the type of the message
+	Type MsgType
+
+	// from is the address of the sender
+	From NodeID
+
+	// seal is the committed seal for the proposal (only for commit messages)
+	Seal []byte
+
+	// view is the view assigned to the message
+	View *View
+
+	// hash of the locked proposal
+	Digest string
+
+	// proposal is the arbitrary data proposal (only for preprepare messages)
+	Proposal []byte
+}
+
+func (m *MessageReq) SetProposal(b []byte) {
+	m.Proposal = append([]byte{}, b...)
+}
+
+func (m *MessageReq) Copy() *MessageReq {
+	mm := new(MessageReq)
+	*mm = *m
+	if m.View != nil {
+		mm.View = m.View.Copy()
+	}
+	if m.Proposal != nil {
+		mm.Proposal = append([]byte{}, m.Proposal...)
+	}
+	return mm
+}
+
+type View struct {
+	// round is the current round/height being finalized
+	Round uint64
+
+	// Sequence is a sequence number inside the round
+	Sequence uint64
+}
+
+func (v *View) Copy() *View {
+	vv := new(View)
+	*vv = *v
+	return vv
+}
+
+func ViewMsg(sequence, round uint64) *View {
+	return &View{
+		Round:    round,
+		Sequence: sequence,
+	}
+}
+
+type NodeID string
 
 type IbftState uint32
 
@@ -18,6 +99,7 @@ const (
 	ValidateState
 	CommitState
 	SyncState
+	DoneState
 )
 
 // String returns the string representation of the passed in state
@@ -25,21 +107,26 @@ func (i IbftState) String() string {
 	switch i {
 	case AcceptState:
 		return "AcceptState"
-
 	case RoundChangeState:
 		return "RoundChangeState"
-
 	case ValidateState:
 		return "ValidateState"
-
 	case CommitState:
 		return "CommitState"
-
 	case SyncState:
 		return "SyncState"
+	case DoneState:
+		return "DoneState"
 	}
-
 	panic(fmt.Sprintf("BUG: Ibft state not found %d", i))
+}
+
+type Proposal struct {
+	// Data is an arbitrary set of data to approve in consensus
+	Data []byte
+
+	// Time is the time to create the proposal
+	Time time.Time
 }
 
 // currentState defines the current state object in IBFT
@@ -50,23 +137,23 @@ type currentState struct {
 	// state is the current state
 	state uint64
 
-	// The proposed block
-	block *types.Block
+	// proposal stores information about the height proposal
+	proposal *Proposal
 
 	// The selected proposer
-	proposer types.Address
+	proposer NodeID
 
 	// Current view
-	view *proto.View
+	view *View
 
 	// List of prepared messages
-	prepared map[types.Address]*proto.MessageReq
+	prepared map[NodeID]*MessageReq
 
 	// List of committed messages
-	committed map[types.Address]*proto.MessageReq
+	committed map[NodeID]*MessageReq
 
 	// List of round change messages
-	roundMessages map[uint64]map[types.Address]*proto.MessageReq
+	roundMessages map[uint64]map[NodeID]*MessageReq
 
 	// Locked signals whether the proposal is locked
 	locked bool
@@ -83,6 +170,18 @@ func newState() *currentState {
 	return c
 }
 
+func (c *currentState) GetSequence() uint64 {
+	return c.view.Sequence
+}
+
+func (c *currentState) getCommittedSeals() [][]byte {
+	committedSeals := [][]byte{}
+	for _, commit := range c.committed {
+		committedSeals = append(committedSeals, commit.Seal)
+	}
+	return committedSeals
+}
+
 // getState returns the current state
 func (c *currentState) getState() IbftState {
 	stateAddr := (*uint64)(&c.state)
@@ -97,9 +196,13 @@ func (c *currentState) setState(s IbftState) {
 	atomic.StoreUint64(stateAddr, uint64(s))
 }
 
+func (c *currentState) MaxFaultyNodes() int {
+	return int(math.Ceil(float64(c.validators.Len())/3)) - 1
+}
+
 // NumValid returns the number of required messages
 func (c *currentState) NumValid() int {
-	return 2 * c.validators.MaxFaultyNodes()
+	return 2 * c.MaxFaultyNodes()
 }
 
 // getErr returns the current error, if any, and consumes it
@@ -111,7 +214,7 @@ func (c *currentState) getErr() error {
 }
 
 func (c *currentState) maxRound() (maxRound uint64, found bool) {
-	num := c.validators.MaxFaultyNodes() + 1
+	num := c.MaxFaultyNodes() + 1
 
 	for k, round := range c.roundMessages {
 		if len(round) < num {
@@ -127,14 +230,14 @@ func (c *currentState) maxRound() (maxRound uint64, found bool) {
 
 // resetRoundMsgs resets the prepared, committed and round messages in the current state
 func (c *currentState) resetRoundMsgs() {
-	c.prepared = map[types.Address]*proto.MessageReq{}
-	c.committed = map[types.Address]*proto.MessageReq{}
-	c.roundMessages = map[uint64]map[types.Address]*proto.MessageReq{}
+	c.prepared = map[NodeID]*MessageReq{}
+	c.committed = map[NodeID]*MessageReq{}
+	c.roundMessages = map[uint64]map[NodeID]*MessageReq{}
 }
 
 // CalcProposer calculates the proposer and sets it to the state
-func (c *currentState) CalcProposer(lastProposer types.Address) {
-	c.proposer = c.validators.CalcProposer(c.view.Round, lastProposer)
+func (c *currentState) CalcProposer() {
+	c.proposer = c.validators.CalcProposer(c.view.Round)
 }
 
 func (c *currentState) lock() {
@@ -142,7 +245,7 @@ func (c *currentState) lock() {
 }
 
 func (c *currentState) unlock() {
-	c.block = nil
+	c.proposal = nil
 	c.locked = false
 }
 
@@ -152,8 +255,8 @@ func (c *currentState) cleanRound(round uint64) {
 }
 
 // AddRoundMessage adds a message to the round, and returns the round message size
-func (c *currentState) AddRoundMessage(msg *proto.MessageReq) int {
-	if msg.Type != proto.MessageReq_RoundChange {
+func (c *currentState) AddRoundMessage(msg *MessageReq) int {
+	if msg.Type != MessageReq_RoundChange {
 		return 0
 	}
 	c.addMessage(msg)
@@ -162,8 +265,8 @@ func (c *currentState) AddRoundMessage(msg *proto.MessageReq) int {
 }
 
 // addPrepared adds a prepared message
-func (c *currentState) addPrepared(msg *proto.MessageReq) {
-	if msg.Type != proto.MessageReq_Prepare {
+func (c *currentState) addPrepared(msg *MessageReq) {
+	if msg.Type != MessageReq_Prepare {
 		return
 	}
 
@@ -171,8 +274,8 @@ func (c *currentState) addPrepared(msg *proto.MessageReq) {
 }
 
 // addCommitted adds a committed message
-func (c *currentState) addCommitted(msg *proto.MessageReq) {
-	if msg.Type != proto.MessageReq_Commit {
+func (c *currentState) addCommitted(msg *MessageReq) {
+	if msg.Type != MessageReq_Commit {
 		return
 	}
 
@@ -180,21 +283,21 @@ func (c *currentState) addCommitted(msg *proto.MessageReq) {
 }
 
 // addMessage adds a new message to one of the following message lists: committed, prepared, roundMessages
-func (c *currentState) addMessage(msg *proto.MessageReq) {
-	addr := msg.FromAddr()
+func (c *currentState) addMessage(msg *MessageReq) {
+	addr := NodeID(msg.From)
 	if !c.validators.Includes(addr) {
 		// only include messages from validators
 		return
 	}
 
-	if msg.Type == proto.MessageReq_Commit {
+	if msg.Type == MessageReq_Commit {
 		c.committed[addr] = msg
-	} else if msg.Type == proto.MessageReq_Prepare {
+	} else if msg.Type == MessageReq_Prepare {
 		c.prepared[addr] = msg
-	} else if msg.Type == proto.MessageReq_RoundChange {
+	} else if msg.Type == MessageReq_RoundChange {
 		view := msg.View
 		if _, ok := c.roundMessages[view.Round]; !ok {
-			c.roundMessages[view.Round] = map[types.Address]*proto.MessageReq{}
+			c.roundMessages[view.Round] = map[NodeID]*MessageReq{}
 		}
 
 		c.roundMessages[view.Round][addr] = msg
@@ -211,79 +314,8 @@ func (c *currentState) numCommitted() int {
 	return len(c.committed)
 }
 
-type ValidatorSet []types.Address
-
-// CalcProposer calculates the address of the next proposer, from the validator set
-func (v *ValidatorSet) CalcProposer(round uint64, lastProposer types.Address) types.Address {
-	seed := uint64(0)
-	if lastProposer == types.ZeroAddress {
-		seed = round
-	} else {
-		offset := 0
-		if indx := v.Index(lastProposer); indx != -1 {
-			offset = indx
-		}
-
-		seed = uint64(offset) + round + 1
-	}
-
-	pick := seed % uint64(v.Len())
-
-	return (*v)[pick]
-}
-
-// Add adds a new address to the validator set
-func (v *ValidatorSet) Add(addr types.Address) {
-	*v = append(*v, addr)
-}
-
-// Del removes an address from the validator set
-func (v *ValidatorSet) Del(addr types.Address) {
-	for indx, i := range *v {
-		if i == addr {
-			*v = append((*v)[:indx], (*v)[indx+1:]...)
-		}
-	}
-}
-
-// Len returns the size of the validator set
-func (v *ValidatorSet) Len() int {
-	return len(*v)
-}
-
-// Equal checks if 2 validator sets are equal
-func (v *ValidatorSet) Equal(vv *ValidatorSet) bool {
-	if len(*v) != len(*vv) {
-		return false
-	}
-	for indx := range *v {
-		if (*v)[indx] != (*vv)[indx] {
-			return false
-		}
-	}
-
-	return true
-}
-
-// Index returns the index of the passed in address in the validator set.
-// Returns -1 if not found
-func (v *ValidatorSet) Index(addr types.Address) int {
-	for indx, i := range *v {
-		if i == addr {
-			return indx
-		}
-	}
-
-	return -1
-}
-
-// Includes checks if the address is in the validator set
-func (v *ValidatorSet) Includes(addr types.Address) bool {
-	return v.Index(addr) != -1
-}
-
-// MaxFaultyNodes returns the maximum number of allowed faulty nodes, based on the current validator set
-func (v *ValidatorSet) MaxFaultyNodes() int {
-	// numberOfValidators / 3
-	return int(math.Ceil(float64(len(*v))/3)) - 1
+type ValidatorSet interface {
+	CalcProposer(round uint64) NodeID
+	Includes(id NodeID) bool
+	Len() int
 }

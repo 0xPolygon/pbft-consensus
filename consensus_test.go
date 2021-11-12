@@ -1,49 +1,48 @@
 package ibft
 
 import (
+	"context"
+	"crypto/sha1"
+	"io"
+	"io/ioutil"
+	"log"
+	"os"
 	"testing"
+	"time"
 
-	"github.com/0xPolygon/polygon-sdk/blockchain"
-	"github.com/0xPolygon/polygon-sdk/consensus"
-	"github.com/0xPolygon/polygon-sdk/consensus/ibft/proto"
-	"github.com/0xPolygon/polygon-sdk/helper/hex"
-	"github.com/0xPolygon/polygon-sdk/types"
-	"github.com/hashicorp/go-hclog"
 	"github.com/stretchr/testify/assert"
-	any "google.golang.org/protobuf/types/known/anypb"
 )
 
 func TestTransition_ValidateState_Prepare(t *testing.T) {
 	t.Skip()
 
-	// we receive enough prepare messages to lock and commit the block
+	// we receive enough prepare messages to lock and commit the proposal
 	i := newMockIbft(t, []string{"A", "B", "C", "D"}, "A")
 	i.setState(ValidateState)
 
-	i.emitMsg(&proto.MessageReq{
+	i.emitMsg(&MessageReq{
 		From: "A",
-		Type: proto.MessageReq_Prepare,
-		View: proto.ViewMsg(1, 0),
+		Type: MessageReq_Prepare,
+		View: ViewMsg(1, 0),
 	})
-	i.emitMsg(&proto.MessageReq{
+	i.emitMsg(&MessageReq{
 		From: "B",
-		Type: proto.MessageReq_Prepare,
-		View: proto.ViewMsg(1, 0),
+		Type: MessageReq_Prepare,
+		View: ViewMsg(1, 0),
 	})
 	// repeated message is not included
-	i.emitMsg(&proto.MessageReq{
+	i.emitMsg(&MessageReq{
 		From: "B",
-		Type: proto.MessageReq_Prepare,
-		View: proto.ViewMsg(1, 0),
+		Type: MessageReq_Prepare,
+		View: ViewMsg(1, 0),
 	})
-	i.emitMsg(&proto.MessageReq{
+	i.emitMsg(&MessageReq{
 		From: "C",
-		Type: proto.MessageReq_Prepare,
-		View: proto.ViewMsg(1, 0),
+		Type: MessageReq_Prepare,
+		View: ViewMsg(1, 0),
 	})
-	i.Close()
 
-	i.runCycle()
+	i.runCycle(context.Background())
 
 	i.expect(expectResult{
 		sequence:    1,
@@ -62,39 +61,32 @@ func TestTransition_ValidateState_CommitFastTrack(t *testing.T) {
 	// even when we do not have yet the preprepare messages
 	i := newMockIbft(t, []string{"A", "B", "C", "D"}, "A")
 
-	seal := hex.EncodeToHex(make([]byte, IstanbulExtraSeal))
-
 	i.setState(ValidateState)
-	i.state.view = proto.ViewMsg(1, 0)
-	i.state.block = i.DummyBlock()
+	i.state.view = ViewMsg(1, 0)
 	i.state.locked = true
 
-	i.emitMsg(&proto.MessageReq{
+	i.emitMsg(&MessageReq{
 		From: "A",
-		Type: proto.MessageReq_Commit,
-		View: proto.ViewMsg(1, 0),
-		Seal: seal,
+		Type: MessageReq_Commit,
+		View: ViewMsg(1, 0),
 	})
-	i.emitMsg(&proto.MessageReq{
+	i.emitMsg(&MessageReq{
 		From: "B",
-		Type: proto.MessageReq_Commit,
-		View: proto.ViewMsg(1, 0),
-		Seal: seal,
+		Type: MessageReq_Commit,
+		View: ViewMsg(1, 0),
 	})
-	i.emitMsg(&proto.MessageReq{
+	i.emitMsg(&MessageReq{
 		From: "B",
-		Type: proto.MessageReq_Commit,
-		View: proto.ViewMsg(1, 0),
-		Seal: seal,
+		Type: MessageReq_Commit,
+		View: ViewMsg(1, 0),
 	})
-	i.emitMsg(&proto.MessageReq{
+	i.emitMsg(&MessageReq{
 		From: "C",
-		Type: proto.MessageReq_Commit,
-		View: proto.ViewMsg(1, 0),
-		Seal: seal,
+		Type: MessageReq_Commit,
+		View: ViewMsg(1, 0),
 	})
 
-	i.runCycle()
+	i.runCycle(context.Background())
 
 	i.expect(expectResult{
 		sequence:   1,
@@ -104,15 +96,13 @@ func TestTransition_ValidateState_CommitFastTrack(t *testing.T) {
 	})
 }
 
-func TestTransition_AcceptState_ToSync(t *testing.T) {
+func TestTransition_AcceptState_ToSyncState(t *testing.T) {
 	// we are in AcceptState and we are not in the validators list
 	// means that we have been removed as validator, move to sync state
 	i := newMockIbft(t, []string{"A", "B", "C", "D"}, "")
 	i.setState(AcceptState)
-	i.Close()
 
-	// we are the proposer and we need to build a block
-	i.runCycle()
+	i.runCycle(context.Background())
 
 	i.expect(expectResult{
 		sequence: 1,
@@ -120,19 +110,48 @@ func TestTransition_AcceptState_ToSync(t *testing.T) {
 	})
 }
 
+var (
+	mockProposal  = []byte{0x1, 0x2, 0x3}
+	mockProposal1 = []byte{0x1, 0x2, 0x3, 0x4}
+)
+
+func TestTransition_AcceptState_Proposer_Propose(t *testing.T) {
+	// we are in AcceptState and we are the proposer, it needs to:
+	// 1. create a proposal
+	// 2. wait for the delay
+	// 3. send a preprepare message
+	// 4. send a prepare message
+	// 5. move to ValidateState
+
+	i := newMockIbft(t, []string{"A", "B", "C", "D"}, "A")
+	i.setState(AcceptState)
+
+	i.setProposal(&Proposal{
+		Data: mockProposal,
+		Time: time.Now().Add(1 * time.Second),
+	})
+
+	i.runCycle(context.Background())
+
+	i.expect(expectResult{
+		sequence: 1,
+		outgoing: 2, // preprepare and prepare
+		state:    ValidateState,
+	})
+}
+
 func TestTransition_AcceptState_Proposer_Locked(t *testing.T) {
-	// If we are the proposer and there is a lock value we need to propose it
+	// we are in AcceptState, we are the proposer but the value is locked.
+	// it needs to send the locked proposal again
 	i := newMockIbft(t, []string{"A", "B", "C", "D"}, "A")
 	i.setState(AcceptState)
 
 	i.state.locked = true
-	i.state.block = &types.Block{
-		Header: &types.Header{
-			Number: 10,
-		},
+	i.state.proposal = &Proposal{
+		Data: mockProposal,
 	}
 
-	i.runCycle()
+	i.runCycle(context.Background())
 
 	i.expect(expectResult{
 		sequence: 1,
@@ -140,32 +159,23 @@ func TestTransition_AcceptState_Proposer_Locked(t *testing.T) {
 		locked:   true,
 		outgoing: 2, // preprepare and prepare
 	})
-	if i.state.block.Number() != 10 {
-		t.Fatal("bad block")
-	}
+	assert.Equal(t, i.state.proposal.Data, mockProposal)
 }
 
 func TestTransition_AcceptState_Validator_VerifyCorrect(t *testing.T) {
 	i := newMockIbft(t, []string{"A", "B", "C"}, "B")
-	i.state.view = proto.ViewMsg(1, 0)
+	i.state.view = ViewMsg(1, 0)
 	i.setState(AcceptState)
 
-	block := i.DummyBlock()
-	header, err := writeSeal(i.pool.get("A").priv, block.Header)
-	assert.NoError(t, err)
-	block.Header = header
-
 	// A sends the message
-	i.emitMsg(&proto.MessageReq{
-		From: "A",
-		Type: proto.MessageReq_Preprepare,
-		Proposal: &any.Any{
-			Value: block.MarshalRLP(),
-		},
-		View: proto.ViewMsg(1, 0),
+	i.emitMsg(&MessageReq{
+		From:     "A",
+		Type:     MessageReq_Preprepare,
+		Proposal: mockProposal,
+		View:     ViewMsg(1, 0),
 	})
 
-	i.runCycle()
+	i.runCycle(context.Background())
 
 	i.expect(expectResult{
 		sequence: 1,
@@ -175,54 +185,45 @@ func TestTransition_AcceptState_Validator_VerifyCorrect(t *testing.T) {
 }
 
 func TestTransition_AcceptState_Validator_VerifyFails(t *testing.T) {
+	t.Skip("involves validation of hash that is not done yet")
+
 	i := newMockIbft(t, []string{"A", "B", "C"}, "B")
-	i.state.view = proto.ViewMsg(1, 0)
+	i.state.view = ViewMsg(1, 0)
 	i.setState(AcceptState)
 
-	block := i.DummyBlock()
-	block.Header.MixHash = types.Hash{} // invalidates the block
-
-	header, err := writeSeal(i.pool.get("A").priv, block.Header)
-	assert.NoError(t, err)
-	block.Header = header
-
 	// A sends the message
-	i.emitMsg(&proto.MessageReq{
-		From: "A",
-		Type: proto.MessageReq_Preprepare,
-		Proposal: &any.Any{
-			Value: block.MarshalRLP(),
-		},
-		View: proto.ViewMsg(1, 0),
+	i.emitMsg(&MessageReq{
+		From:     "A",
+		Type:     MessageReq_Preprepare,
+		Proposal: mockProposal,
+		View:     ViewMsg(1, 0),
 	})
 
-	i.runCycle()
+	i.runCycle(context.Background())
 
 	i.expect(expectResult{
 		sequence: 1,
 		state:    RoundChangeState,
-		err:      errBlockVerificationFailed,
+		err:      errVerificationFailed,
 	})
 }
 
 func TestTransition_AcceptState_Validator_ProposerInvalid(t *testing.T) {
 	i := newMockIbft(t, []string{"A", "B", "C"}, "B")
-	i.state.view = proto.ViewMsg(1, 0)
+	i.state.view = ViewMsg(1, 0)
 	i.setState(AcceptState)
 
 	// A is the proposer but C sends the propose, we do not fail
 	// but wait for timeout to move to roundChange state
-	i.emitMsg(&proto.MessageReq{
-		From: "C",
-		Type: proto.MessageReq_Preprepare,
-		Proposal: &any.Any{
-			Value: i.DummyBlock().MarshalRLP(),
-		},
-		View: proto.ViewMsg(1, 0),
+	i.emitMsg(&MessageReq{
+		From:     "C",
+		Type:     MessageReq_Preprepare,
+		Proposal: mockProposal,
+		View:     ViewMsg(1, 0),
 	})
 	i.forceTimeout()
 
-	i.runCycle()
+	i.runCycle(context.Background())
 
 	i.expect(expectResult{
 		sequence: 1,
@@ -231,65 +232,56 @@ func TestTransition_AcceptState_Validator_ProposerInvalid(t *testing.T) {
 }
 
 func TestTransition_AcceptState_Validator_LockWrong(t *testing.T) {
+	// we are a validator and have a locked state in 'proposal1'.
+	// We receive an invalid proposal 'proposal2' with different data.
+
 	i := newMockIbft(t, []string{"A", "B", "C"}, "B")
-	i.state.view = proto.ViewMsg(1, 0)
+	i.state.view = ViewMsg(1, 0)
 	i.setState(AcceptState)
 
-	// locked block
-	block := i.DummyBlock()
-	block.Header.Number = 1
-	block.Header.ComputeHash()
-
-	i.state.block = block
+	// locked proposal
+	i.state.proposal = &Proposal{
+		Data: mockProposal,
+	}
 	i.state.locked = true
 
-	// proposed block
-	block1 := i.DummyBlock()
-	block1.Header.Number = 2
-	block1.Header.ComputeHash()
-
-	i.emitMsg(&proto.MessageReq{
-		From: "A",
-		Type: proto.MessageReq_Preprepare,
-		Proposal: &any.Any{
-			Value: block1.MarshalRLP(),
-		},
-		View: proto.ViewMsg(1, 0),
+	// emit the wrong locked proposal
+	i.emitMsg(&MessageReq{
+		From:     "A",
+		Type:     MessageReq_Preprepare,
+		Proposal: mockProposal1,
+		View:     ViewMsg(1, 0),
 	})
 
-	i.runCycle()
+	i.runCycle(context.Background())
 
 	i.expect(expectResult{
 		sequence: 1,
 		state:    RoundChangeState,
 		locked:   true,
-		err:      errIncorrectBlockLocked,
+		err:      errIncorrectLockedProposal,
 	})
 }
 
 func TestTransition_AcceptState_Validator_LockCorrect(t *testing.T) {
 	i := newMockIbft(t, []string{"A", "B", "C"}, "B")
-	i.state.view = proto.ViewMsg(1, 0)
+	i.state.view = ViewMsg(1, 0)
 	i.setState(AcceptState)
 
-	// locked block
-	block := i.DummyBlock()
-	block.Header.Number = 1
-	block.Header.ComputeHash()
+	// locked proposal
+	proposal := mockProposal
 
-	i.state.block = block
+	i.state.proposal = &Proposal{Data: proposal}
 	i.state.locked = true
 
-	i.emitMsg(&proto.MessageReq{
-		From: "A",
-		Type: proto.MessageReq_Preprepare,
-		Proposal: &any.Any{
-			Value: block.MarshalRLP(),
-		},
-		View: proto.ViewMsg(1, 0),
+	i.emitMsg(&MessageReq{
+		From:     "A",
+		Type:     MessageReq_Preprepare,
+		Proposal: proposal,
+		View:     ViewMsg(1, 0),
 	})
 
-	i.runCycle()
+	i.runCycle(context.Background())
 
 	i.expect(expectResult{
 		sequence: 1,
@@ -304,20 +296,20 @@ func TestTransition_RoundChangeState_CatchupRound(t *testing.T) {
 	m.setState(RoundChangeState)
 
 	// new messages arrive with round number 2
-	m.emitMsg(&proto.MessageReq{
+	m.emitMsg(&MessageReq{
 		From: "B",
-		Type: proto.MessageReq_RoundChange,
-		View: proto.ViewMsg(1, 2),
+		Type: MessageReq_RoundChange,
+		View: ViewMsg(1, 2),
 	})
-	m.emitMsg(&proto.MessageReq{
+	m.emitMsg(&MessageReq{
 		From: "C",
-		Type: proto.MessageReq_RoundChange,
-		View: proto.ViewMsg(1, 2),
+		Type: MessageReq_RoundChange,
+		View: ViewMsg(1, 2),
 	})
-	m.emitMsg(&proto.MessageReq{
+	m.emitMsg(&MessageReq{
 		From: "D",
-		Type: proto.MessageReq_RoundChange,
-		View: proto.ViewMsg(1, 2),
+		Type: MessageReq_RoundChange,
+		View: ViewMsg(1, 2),
 	})
 	m.Close()
 
@@ -325,7 +317,7 @@ func TestTransition_RoundChangeState_CatchupRound(t *testing.T) {
 	// not processed all the messages yet.
 	// After it receives 3 Round change messages higher than his own
 	// round it will change round again and move to accept
-	m.runCycle()
+	m.runCycle(context.Background())
 
 	m.expect(expectResult{
 		sequence: 1,
@@ -346,7 +338,7 @@ func TestTransition_RoundChangeState_Timeout(t *testing.T) {
 	// one RoundChange message.
 	// After the timeout, it increases to round 2 and sends another
 	/// RoundChange message.
-	m.runCycle()
+	m.runCycle(context.Background())
 
 	m.expect(expectResult{
 		sequence: 1,
@@ -363,24 +355,24 @@ func TestTransition_RoundChangeState_WeakCertificate(t *testing.T) {
 
 	// send three roundChange messages which are enough to force a
 	// weak change where the client moves to that new round state
-	m.emitMsg(&proto.MessageReq{
+	m.emitMsg(&MessageReq{
 		From: "B",
-		Type: proto.MessageReq_RoundChange,
-		View: proto.ViewMsg(1, 2),
+		Type: MessageReq_RoundChange,
+		View: ViewMsg(1, 2),
 	})
-	m.emitMsg(&proto.MessageReq{
+	m.emitMsg(&MessageReq{
 		From: "C",
-		Type: proto.MessageReq_RoundChange,
-		View: proto.ViewMsg(1, 2),
+		Type: MessageReq_RoundChange,
+		View: ViewMsg(1, 2),
 	})
-	m.emitMsg(&proto.MessageReq{
+	m.emitMsg(&MessageReq{
 		From: "D",
-		Type: proto.MessageReq_RoundChange,
-		View: proto.ViewMsg(1, 2),
+		Type: MessageReq_RoundChange,
+		View: ViewMsg(1, 2),
 	})
 	m.Close()
 
-	m.runCycle()
+	m.runCycle(context.Background())
 
 	m.expect(expectResult{
 		sequence: 1,
@@ -396,10 +388,10 @@ func TestTransition_RoundChangeState_ErrStartNewRound(t *testing.T) {
 	m := newMockIbft(t, []string{"A", "B"}, "A")
 	m.Close()
 
-	m.state.err = errBlockVerificationFailed
+	m.state.err = errVerificationFailed
 
 	m.setState(RoundChangeState)
-	m.runCycle()
+	m.runCycle(context.Background())
 
 	m.expect(expectResult{
 		sequence: 1,
@@ -415,10 +407,8 @@ func TestTransition_RoundChangeState_StartNewRound(t *testing.T) {
 	m := newMockIbft(t, []string{"A", "B"}, "A")
 	m.Close()
 
-	m.state.view.Sequence = 1
-
 	m.setState(RoundChangeState)
-	m.runCycle()
+	m.runCycle(context.Background())
 
 	m.expect(expectResult{
 		sequence: 1,
@@ -434,17 +424,17 @@ func TestTransition_RoundChangeState_MaxRound(t *testing.T) {
 	m := newMockIbft(t, []string{"A", "B", "C"}, "A")
 	m.Close()
 
-	m.addMessage(&proto.MessageReq{
+	m.addMessage(&MessageReq{
 		From: "B",
-		Type: proto.MessageReq_RoundChange,
-		View: &proto.View{
+		Type: MessageReq_RoundChange,
+		View: &View{
 			Round:    10,
 			Sequence: 1,
 		},
 	})
 
 	m.setState(RoundChangeState)
-	m.runCycle()
+	m.runCycle(context.Background())
 
 	m.expect(expectResult{
 		sequence: 1,
@@ -455,55 +445,33 @@ func TestTransition_RoundChangeState_MaxRound(t *testing.T) {
 }
 
 type mockIbft struct {
-	t *testing.T
 	*Ibft
 
-	blockchain *blockchain.Blockchain
-	pool       *testerAccountPool
-	respMsg    []*proto.MessageReq
+	t        *testing.T
+	pool     *testerAccountPool
+	respMsg  []*MessageReq
+	proposal *Proposal
+	sequence uint64
+	cancelFn context.CancelFunc
 }
 
-func (m *mockIbft) DummyBlock() *types.Block {
-	parent, _ := m.blockchain.GetHeaderByNumber(0)
-	block := &types.Block{
-		Header: &types.Header{
-			ExtraData:  parent.ExtraData,
-			MixHash:    IstanbulDigest,
-			Sha3Uncles: types.EmptyUncleHash,
-		},
-	}
-	return block
-}
-
-func (m *mockIbft) Header() *types.Header {
-	return m.blockchain.Header()
-}
-
-func (m *mockIbft) GetHeaderByNumber(i uint64) (*types.Header, bool) {
-	return m.blockchain.GetHeaderByNumber(i)
-}
-
-func (m *mockIbft) WriteBlocks(blocks []*types.Block) error {
-	return nil
-}
-
-func (m *mockIbft) emitMsg(msg *proto.MessageReq) {
+func (m *mockIbft) emitMsg(msg *MessageReq) {
 	// convert the address from the address pool
-	from := m.pool.get(msg.From).Address()
-	msg.From = from.String()
+	// from := m.pool.get(string(msg.From)).Address()
+	// msg.From = from
 
 	m.Ibft.pushMessage(msg)
 }
 
-func (m *mockIbft) addMessage(msg *proto.MessageReq) {
+func (m *mockIbft) addMessage(msg *MessageReq) {
 	// convert the address from the address pool
-	from := m.pool.get(msg.From).Address()
-	msg.From = from.String()
+	//from := m.pool.get(string(msg.From)).Address()
+	//msg.From = from
 
 	m.state.addMessage(msg)
 }
 
-func (m *mockIbft) Gossip(msg *proto.MessageReq) error {
+func (m *mockIbft) Gossip(msg *MessageReq) error {
 	m.respMsg = append(m.respMsg, msg)
 	return nil
 }
@@ -512,48 +480,54 @@ func newMockIbft(t *testing.T, accounts []string, account string) *mockIbft {
 	pool := newTesterAccountPool()
 	pool.add(accounts...)
 
+	validatorSet := newMockValidatorSet(accounts).(*valString)
+
 	m := &mockIbft{
-		t:          t,
-		pool:       pool,
-		blockchain: blockchain.TestBlockchain(t, pool.genesis()),
-		respMsg:    []*proto.MessageReq{},
+		t:        t,
+		pool:     pool,
+		respMsg:  []*MessageReq{},
+		sequence: 1, // use by default sequence=1
 	}
 
-	var addr *testerAccount
+	backend := &mockB{
+		mock:       m,
+		validators: validatorSet,
+	}
+
+	// initialize the signing account
+	var acct *testerAccount
 	if account == "" {
-		// account not in validator set, create a new one that is not part
-		// of the genesis
+		// not in validator set, create a new one (not part of the validator set)
 		pool.add("xx")
-		addr = pool.get("xx")
+		acct = pool.get("xx")
 	} else {
-		addr = pool.get(account)
-	}
-	ibft := &Ibft{
-		logger:           hclog.NewNullLogger(),
-		config:           &consensus.Config{},
-		blockchain:       m,
-		validatorKey:     addr.priv,
-		validatorKeyAddr: addr.Address(),
-		closeCh:          make(chan struct{}),
-		updateCh:         make(chan struct{}),
-		operator:         &operator{},
-		state:            newState(),
-		epochSize:        DefaultEpochSize,
+		acct = pool.get(account)
 	}
 
-	// by default set the state to (1, 0)
-	ibft.state.view = proto.ViewMsg(1, 0)
+	var loggerOutput io.Writer
+	if os.Getenv("SILENT") == "true" {
+		loggerOutput = ioutil.Discard
+	} else {
+		loggerOutput = os.Stdout
+	}
 
-	m.Ibft = ibft
+	// initialize ibft
+	m.Ibft = New(acct, m, WithLogger(log.New(loggerOutput, "", log.LstdFlags)))
+	m.Ibft.SetBackend(backend)
 
-	assert.NoError(t, ibft.setupSnapshot())
-	assert.NoError(t, ibft.createKey())
+	ctx, cancelFn := context.WithCancel(context.Background())
+	m.Ibft.ctx = ctx
+	m.cancelFn = cancelFn
 
-	// set the initial validators frrom the snapshot
-	ibft.state.validators = pool.ValidatorSet()
-
-	m.Ibft.transport = m
 	return m
+}
+
+func (i *mockIbft) Close() {
+	i.cancelFn()
+}
+
+func (i *mockIbft) setProposal(p *Proposal) {
+	i.proposal = p
 }
 
 type expectResult struct {
@@ -596,4 +570,44 @@ func (m *mockIbft) expect(res expectResult) {
 	if m.state.err != res.err {
 		m.t.Fatalf("incorrect error %v %v", m.state.err, res.err)
 	}
+}
+
+type mockB struct {
+	mock *mockIbft
+
+	validators *valString
+}
+
+func (m *mockB) Hash(p []byte) []byte {
+	h := sha1.New()
+	h.Write(p)
+	return h.Sum(nil)
+}
+
+func (m *mockB) BuildProposal() (*Proposal, error) {
+	if m.mock.proposal == nil {
+		panic("add a proposal in the test")
+	}
+	return m.mock.proposal, nil
+}
+
+func (m *mockB) Height() uint64 {
+	return m.mock.sequence
+}
+
+func (m *mockB) Validate(proposal []byte) error {
+	return nil
+}
+
+func (m *mockB) IsStuck(num uint64) (uint64, bool) {
+	return 0, false
+}
+
+func (m *mockB) Insert(pp *SealedProposal) error {
+	// TODO
+	return nil
+}
+
+func (m *mockB) ValidatorSet() ValidatorSet {
+	return m.validators
 }

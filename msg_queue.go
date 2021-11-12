@@ -3,8 +3,6 @@ package ibft
 import (
 	"container/heap"
 	"sync"
-
-	"github.com/0xPolygon/polygon-sdk/consensus/ibft/proto"
 )
 
 // msgQueue defines the structure that holds message queues for different IBFT states
@@ -32,15 +30,21 @@ func (m *msgQueue) pushMessage(task *msgTask) {
 }
 
 // readMessage reads the message from a message queue, based on the current state and view
-func (m *msgQueue) readMessage(state IbftState, current *proto.View) *msgTask {
+func (m *msgQueue) readMessage(state IbftState, current *View) *msgTask {
+	msg, _ := m.readMessageWithDiscards(state, current)
+	return msg
+}
+
+func (m *msgQueue) readMessageWithDiscards(state IbftState, current *View) (*msgTask, []*msgTask) {
 	m.queueLock.Lock()
 	defer m.queueLock.Unlock()
 
+	discarded := []*msgTask{}
 	queue := m.getQueue(state)
 
 	for {
 		if queue.Len() == 0 {
-			return nil
+			return nil, discarded
 		}
 		msg := queue.head()
 
@@ -50,13 +54,13 @@ func (m *msgQueue) readMessage(state IbftState, current *proto.View) *msgTask {
 			// since we are interested in knowing all the possible rounds
 			if msg.view.Sequence > current.Sequence {
 				// future message
-				return nil
+				return nil, discarded
 			}
 		} else {
 			// otherwise, we compare both sequence and round
 			if cmpView(msg.view, current) > 0 {
 				// future message
-				return nil
+				return nil, discarded
 			}
 		}
 
@@ -66,11 +70,12 @@ func (m *msgQueue) readMessage(state IbftState, current *proto.View) *msgTask {
 
 		if cmpView(msg.view, current) < 0 {
 			// old value, try again
+			discarded = append(discarded, msg)
 			continue
 		}
 
 		// good value, return it
-		return msg
+		return msg, discarded
 	}
 }
 
@@ -97,28 +102,15 @@ func newMsgQueue() *msgQueue {
 	}
 }
 
-// protoTypeToMsg converts the proto message request type to a MsgType object
-func protoTypeToMsg(msgType proto.MessageReq_Type) MsgType {
-	if msgType == proto.MessageReq_Preprepare {
-		return msgPreprepare
-	} else if msgType == proto.MessageReq_Prepare {
-		return msgPrepare
-	} else if msgType == proto.MessageReq_Commit {
-		return msgCommit
-	}
-
-	return msgRoundChange
-}
-
 // msgToState converts the message type to an IbftState
 func msgToState(msg MsgType) IbftState {
-	if msg == msgRoundChange {
+	if msg == MessageReq_RoundChange {
 		// round change
 		return RoundChangeState
-	} else if msg == msgPreprepare {
+	} else if msg == MessageReq_Preprepare {
 		// preprepare
 		return AcceptState
-	} else if msg == msgPrepare || msg == msgCommit {
+	} else if msg == MessageReq_Prepare || msg == MessageReq_Commit {
 		// prepare and commit
 		return ValidateState
 	}
@@ -126,39 +118,12 @@ func msgToState(msg MsgType) IbftState {
 	panic("BUG: not expected")
 }
 
-type MsgType uint64
-
-// Define message types
-const (
-	// priority order for the messages
-	msgRoundChange MsgType = 0
-	msgPreprepare  MsgType = 1
-	msgCommit      MsgType = 2
-	msgPrepare     MsgType = 3
-)
-
-// String returns the string representation of the message type
-func (m MsgType) String() string {
-	switch m {
-	case msgRoundChange:
-		return "RoundChange"
-	case msgPrepare:
-		return "Prepare"
-	case msgPreprepare:
-		return "Preprepare"
-	case msgCommit:
-		return "Commit"
-	default:
-		panic("BUG")
-	}
-}
-
 type msgTask struct {
 	// priority
-	view *proto.View
+	view *View
 	msg  MsgType
 
-	obj *proto.MessageReq
+	obj *MessageReq
 }
 
 type msgQueueImpl []*msgTask
@@ -215,7 +180,7 @@ func (m *msgQueueImpl) Pop() interface{} {
 // If v.Sequence < y.Sequence => -1 ELSE => 1
 //
 // If v.Round < y.Round => -1 ELSE 1
-func cmpView(v, y *proto.View) int {
+func cmpView(v, y *View) int {
 	if v.Sequence != y.Sequence {
 		if v.Sequence < y.Sequence {
 			return -1
