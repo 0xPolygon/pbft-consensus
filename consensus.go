@@ -1,4 +1,4 @@
-package ibft
+package pbft
 
 import (
 	"bytes"
@@ -101,12 +101,12 @@ type Backend interface {
 	// Hash hashes the proposal bytes
 	Hash(p []byte) []byte
 
-	// IsStuck returns whether the ibft is stucked
+	// IsStuck returns whether the pbft is stucked
 	IsStuck(num uint64) (uint64, bool)
 }
 
-// Ibft represents the IBFT consensus mechanism object
-type Ibft struct {
+// Pbft represents the PBFT consensus mechanism object
+type Pbft struct {
 	// Output logger
 	logger *log.Logger
 
@@ -122,7 +122,7 @@ type Ibft struct {
 	// validator is the signing key for this instance
 	validator SignKey
 
-	// ctx is the current execution context for an ibft round
+	// ctx is the current execution context for an pbft round
 	ctx context.Context
 
 	// msgQueue is a queue that stores all the incomming gossip messages
@@ -145,12 +145,12 @@ type SignKey interface {
 	Sign(b []byte) ([]byte, error)
 }
 
-// New creates a new instance of the IBFT state machine
-func New(validator SignKey, transport Transport, opts ...ConfigOption) *Ibft {
+// New creates a new instance of the PBFT state machine
+func New(validator SignKey, transport Transport, opts ...ConfigOption) *Pbft {
 	config := DefaultConfig()
 	config.ApplyOps(opts...)
 
-	p := &Ibft{
+	p := &Pbft{
 		validator: validator,
 		state:     newState(),
 		transport: transport,
@@ -165,32 +165,32 @@ func New(validator SignKey, transport Transport, opts ...ConfigOption) *Ibft {
 	return p
 }
 
-func (i *Ibft) SetBackend(backend Backend) error {
-	i.backend = backend
+func (p *Pbft) SetBackend(backend Backend) error {
+	p.backend = backend
 
 	// set the next current sequence for this iteration
-	i.setSequence(i.backend.Height())
+	p.setSequence(p.backend.Height())
 
 	// set the current set of validators
-	i.state.validators = i.backend.ValidatorSet()
+	p.state.validators = p.backend.ValidatorSet()
 
 	return nil
 }
 
-// start starts the IBFT consensus state machine
-func (i *Ibft) Run(ctx context.Context) {
-	i.ctx = ctx
+// start starts the PBFT consensus state machine
+func (p *Pbft) Run(ctx context.Context) {
+	p.ctx = ctx
 
 	// the iteration always starts with the AcceptState.
 	// AcceptState stages will reset the rest of the message queues.
-	i.setState(AcceptState)
+	p.setState(AcceptState)
 
 	// start the trace span
-	spanCtx, span := i.tracer.Start(context.Background(), fmt.Sprintf("Sequence-%d", i.state.view.Sequence))
+	spanCtx, span := p.tracer.Start(context.Background(), fmt.Sprintf("Sequence-%d", p.state.view.Sequence))
 	defer span.End()
 
 	// loop until we reach the a finish state
-	for i.getState() != DoneState && i.getState() != SyncState {
+	for p.getState() != DoneState && p.getState() != SyncState {
 		select {
 		case <-ctx.Done():
 			return
@@ -198,38 +198,38 @@ func (i *Ibft) Run(ctx context.Context) {
 		}
 
 		// Start the state machine loop
-		i.runCycle(spanCtx)
+		p.runCycle(spanCtx)
 	}
 }
 
-// runCycle represents the IBFT state machine loop
-func (i *Ibft) runCycle(ctx context.Context) {
+// runCycle represents the PBFT state machine loop
+func (p *Pbft) runCycle(ctx context.Context) {
 	// Log to the console
-	if i.state.view != nil {
-		i.logger.Printf("[DEBUG] cycle: state=%s, sequence=%d, round=%d", i.getState(), i.state.view.Sequence, i.state.view.Round)
+	if p.state.view != nil {
+		p.logger.Printf("[DEBUG] cycle: state=%s, sequence=%d, round=%d", p.getState(), p.state.view.Sequence, p.state.view.Round)
 	}
 
 	// Based on the current state, execute the corresponding section
-	switch i.getState() {
+	switch p.getState() {
 	case AcceptState:
-		i.runAcceptState(ctx)
+		p.runAcceptState(ctx)
 
 	case ValidateState:
-		i.runValidateState(ctx)
+		p.runValidateState(ctx)
 
 	case RoundChangeState:
-		i.runRoundChangeState(ctx)
+		p.runRoundChangeState(ctx)
 
 	case CommitState:
-		i.runCommitState(ctx)
+		p.runCommitState(ctx)
 
 	case DoneState:
 		panic("BUG: We cannot iterate on DoneState")
 	}
 }
 
-func (i *Ibft) setSequence(sequence uint64) {
-	i.state.view = &View{
+func (p *Pbft) setSequence(sequence uint64) {
+	p.state.view = &View{
 		Round:    0,
 		Sequence: sequence,
 	}
@@ -240,119 +240,119 @@ func (i *Ibft) setSequence(sequence uint64) {
 // The Accept state always checks the snapshot, and the validator set. If the current node is not in the validators set,
 // it moves back to the Sync state. On the other hand, if the node is a validator, it calculates the proposer.
 // If it turns out that the current node is the proposer, it builds a proposal, and sends preprepare and then prepare messages.
-func (i *Ibft) runAcceptState(ctx context.Context) { // start new round
-	_, span := i.tracer.Start(ctx, "AcceptState")
+func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
+	_, span := p.tracer.Start(ctx, "AcceptState")
 	defer span.End()
 
-	i.logger.Printf("[INFO] accept state: sequence %d", i.state.view.Sequence)
+	p.logger.Printf("[INFO] accept state: sequence %d", p.state.view.Sequence)
 
-	if !i.state.validators.Includes(i.validator.NodeID()) {
+	if !p.state.validators.Includes(p.validator.NodeID()) {
 		// we are not a validator anymore, move back to sync state
-		i.logger.Printf("[INFO] we are not a validator anymore")
-		i.setState(SyncState)
+		p.logger.Printf("[INFO] we are not a validator anymore")
+		p.setState(SyncState)
 		return
 	}
 
 	// reset round messages
-	i.state.resetRoundMsgs()
-	i.state.CalcProposer()
+	p.state.resetRoundMsgs()
+	p.state.CalcProposer()
 
-	isProposer := i.state.proposer == i.validator.NodeID()
+	isProposer := p.state.proposer == p.validator.NodeID()
 
 	// log the current state of this span
 	span.SetAttributes(
 		attribute.Bool("isproposer", isProposer),
-		attribute.Bool("locked", i.state.locked),
-		attribute.String("proposer", string(i.state.proposer)),
+		attribute.Bool("locked", p.state.locked),
+		attribute.String("proposer", string(p.state.proposer)),
 	)
 
 	var err error
 
 	if isProposer {
-		i.logger.Printf("[INFO] we are the proposer")
+		p.logger.Printf("[INFO] we are the proposer")
 
-		if !i.state.locked {
+		if !p.state.locked {
 			// since the state is not locked, we need to build a new proposal
-			i.state.proposal, err = i.backend.BuildProposal()
+			p.state.proposal, err = p.backend.BuildProposal()
 			if err != nil {
-				i.logger.Printf("[ERROR] failed to build proposal: %v", err)
-				i.setState(RoundChangeState)
+				p.logger.Printf("[ERROR] failed to build proposal: %v", err)
+				p.setState(RoundChangeState)
 				return
 			}
 
 			// calculate how much time do we have to wait to gossip the proposal
-			delay := time.Until(i.state.proposal.Time)
+			delay := time.Until(p.state.proposal.Time)
 
 			select {
 			case <-time.After(delay):
-			case <-i.ctx.Done():
+			case <-p.ctx.Done():
 				return
 			}
 
 		}
 
 		// send the preprepare message
-		i.sendPreprepareMsg()
+		p.sendPreprepareMsg()
 
 		// send the prepare message since we are ready to move the state
-		i.sendPrepareMsg()
+		p.sendPrepareMsg()
 
 		// move to validation state for new prepare messages
-		i.setState(ValidateState)
+		p.setState(ValidateState)
 		return
 	}
 
-	i.logger.Printf("[INFO] proposer calculated: proposer=%s, sequence=%d", i.state.proposer, i.state.view.Sequence)
+	p.logger.Printf("[INFO] proposer calculated: proposer=%s, sequence=%d", p.state.proposer, p.state.view.Sequence)
 
 	// we are NOT a proposer for this height/round. Then, we have to wait
 	// for a pre-prepare message from the proposer
 
-	timeout := i.randomTimeout()
+	timeout := p.randomTimeout()
 
 	// We only need to wait here for one type of message, the Prepare message from the proposer.
 	// However, since we can receive bad Prepare messages we have to wait (or timeout) until
 	// we get the message from the correct proposer.
-	for i.getState() == AcceptState {
-		msg, ok := i.getNextMessage(span, timeout)
+	for p.getState() == AcceptState {
+		msg, ok := p.getNextMessage(span, timeout)
 		if !ok {
 			return
 		}
 		if msg == nil {
-			i.setState(RoundChangeState)
+			p.setState(RoundChangeState)
 			continue
 		}
 
-		if msg.From != i.state.proposer {
-			i.logger.Printf("[ERROR] msg received from wrong proposer: expected=%s, found=%s", i.state.proposer, msg.From)
+		if msg.From != p.state.proposer {
+			p.logger.Printf("[ERROR] msg received from wrong proposer: expected=%s, found=%s", p.state.proposer, msg.From)
 			continue
 		}
 
 		// retrieve the proposal
-		if err := i.backend.Validate(msg.Proposal); err != nil {
-			i.logger.Printf("[ERROR] failed to validate proposal: %v", err)
-			i.setState(RoundChangeState)
+		if err := p.backend.Validate(msg.Proposal); err != nil {
+			p.logger.Printf("[ERROR] failed to validate proposal: %v", err)
+			p.setState(RoundChangeState)
 			return
 		}
 
-		if i.state.locked {
-			hash1 := i.backend.Hash(msg.Proposal)
-			hash2 := i.backend.Hash(i.state.proposal.Data)
+		if p.state.locked {
+			hash1 := p.backend.Hash(msg.Proposal)
+			hash2 := p.backend.Hash(p.state.proposal.Data)
 
 			// the state is locked, we need to receive the same proposal
 			if bytes.Equal(hash1, hash2) {
 				// fast-track and send a commit message and wait for validations
-				i.sendCommitMsg()
-				i.setState(ValidateState)
+				p.sendCommitMsg()
+				p.setState(ValidateState)
 			} else {
-				i.handleStateErr(errIncorrectLockedProposal)
+				p.handleStateErr(errIncorrectLockedProposal)
 			}
 		} else {
-			i.state.proposal = &Proposal{
+			p.state.proposal = &Proposal{
 				Data: msg.Proposal,
 			}
 
-			i.sendPrepareMsg()
-			i.setState(ValidateState)
+			p.sendPrepareMsg()
+			p.setState(ValidateState)
 		}
 	}
 }
@@ -360,30 +360,30 @@ func (i *Ibft) runAcceptState(ctx context.Context) { // start new round
 // runValidateState implements the Validate state loop.
 //
 // The Validate state is rather simple - all nodes do in this state is read messages and add them to their local snapshot state
-func (i *Ibft) runValidateState(ctx context.Context) { // start new round
-	ctx, span := i.tracer.Start(ctx, "ValidateState")
+func (p *Pbft) runValidateState(ctx context.Context) { // start new round
+	ctx, span := p.tracer.Start(ctx, "ValidateState")
 	defer span.End()
 
 	hasCommitted := false
 	sendCommit := func(span trace.Span) {
 		// at this point either we have enough prepare messages
 		// or commit messages so we can lock the proposal
-		i.state.lock()
+		p.state.lock()
 
 		if !hasCommitted {
 			// send the commit message
-			i.sendCommitMsg()
+			p.sendCommitMsg()
 			hasCommitted = true
 
 			span.AddEvent("Commit")
 		}
 	}
 
-	timeout := i.randomTimeout()
-	for i.getState() == ValidateState {
-		_, span := i.tracer.Start(ctx, "ValidateState")
+	timeout := p.randomTimeout()
+	for p.getState() == ValidateState {
+		_, span := p.tracer.Start(ctx, "ValidateState")
 
-		msg, ok := i.getNextMessage(span, timeout)
+		msg, ok := p.getNextMessage(span, timeout)
 		if !ok {
 			// closing
 			span.End()
@@ -391,37 +391,37 @@ func (i *Ibft) runValidateState(ctx context.Context) { // start new round
 		}
 		if msg == nil {
 			// timeout
-			i.setState(RoundChangeState)
+			p.setState(RoundChangeState)
 			span.End()
 			continue
 		}
 
 		switch msg.Type {
 		case MessageReq_Prepare:
-			i.state.addPrepared(msg)
+			p.state.addPrepared(msg)
 
 		case MessageReq_Commit:
-			i.state.addCommitted(msg)
+			p.state.addCommitted(msg)
 
 		default:
 			panic(fmt.Sprintf("BUG: %s", reflect.TypeOf(msg.Type)))
 		}
 
-		if i.state.numPrepared() > i.state.NumValid() {
+		if p.state.numPrepared() > p.state.NumValid() {
 			// we have received enough pre-prepare messages
 			sendCommit(span)
 		}
 
-		if i.state.numCommitted() > i.state.NumValid() {
+		if p.state.numCommitted() > p.state.NumValid() {
 			// we have received enough commit messages
 			sendCommit(span)
 
 			// change to commit state just to get out of the loop
-			i.setState(CommitState)
+			p.setState(CommitState)
 		}
 
 		// set the attributes of this span once it is done
-		i.setStateSpanAttributes(span)
+		p.setStateSpanAttributes(span)
 
 		span.End()
 	}
@@ -446,49 +446,49 @@ func spanAddEventMessage(typ string, span trace.Span, msg *MessageReq) {
 	))
 }
 
-func (i *Ibft) setStateSpanAttributes(span trace.Span) {
+func (p *Pbft) setStateSpanAttributes(span trace.Span) {
 	attr := []attribute.KeyValue{}
 
 	// number of committed messages
-	attr = append(attr, attribute.Int64("committed", int64(i.state.numCommitted())))
+	attr = append(attr, attribute.Int64("committed", int64(p.state.numCommitted())))
 
 	// number of prepared messages
-	attr = append(attr, attribute.Int64("prepared", int64(i.state.numPrepared())))
+	attr = append(attr, attribute.Int64("prepared", int64(p.state.numPrepared())))
 
 	// number of change state messages per round
-	for round, msgs := range i.state.roundMessages {
+	for round, msgs := range p.state.roundMessages {
 		attr = append(attr, attribute.Int64(fmt.Sprintf("roundchange_%d", round), int64(len(msgs))))
 	}
 	span.SetAttributes(attr...)
 }
 
-func (i *Ibft) runCommitState(ctx context.Context) {
-	_, span := i.tracer.Start(ctx, "CommitState")
+func (p *Pbft) runCommitState(ctx context.Context) {
+	_, span := p.tracer.Start(ctx, "CommitState")
 	defer span.End()
 
-	committedSeals := i.state.getCommittedSeals()
-	proposal := i.state.proposal.Data
+	committedSeals := p.state.getCommittedSeals()
+	proposal := p.state.proposal.Data
 
 	// at this point either if it works or not we need to unlock the state
 	// to allow for other proposals to be produced if it insertion fails
-	i.state.unlock()
+	p.state.unlock()
 
 	pp := &SealedProposal{
 		Proposal:       proposal,
 		CommittedSeals: committedSeals,
-		Proposer:       i.state.proposer,
-		Number:         i.state.view.Sequence,
+		Proposer:       p.state.proposer,
+		Number:         p.state.view.Sequence,
 	}
-	if err := i.backend.Insert(pp); err != nil {
+	if err := p.backend.Insert(pp); err != nil {
 		// start a new round with the state unlocked since we need to
 		// be able to propose/validate a different proposal
-		i.logger.Print("[ERROR] failed to insert proposal", "err", err)
-		i.handleStateErr(errFailedToInsertProposal)
+		p.logger.Print("[ERROR] failed to insert proposal", "err", err)
+		p.handleStateErr(errFailedToInsertProposal)
 	} else {
-		i.setSequence(i.state.view.Sequence + 1)
+		p.setSequence(p.state.view.Sequence + 1)
 
 		// move to done state to finish the current iteration of the state machine
-		i.setState(DoneState)
+		p.setState(DoneState)
 	}
 }
 
@@ -498,40 +498,40 @@ var (
 	errFailedToInsertProposal  = fmt.Errorf("failed to insert proposal")
 )
 
-func (i *Ibft) handleStateErr(err error) {
-	i.state.err = err
-	i.setState(RoundChangeState)
+func (p *Pbft) handleStateErr(err error) {
+	p.state.err = err
+	p.setState(RoundChangeState)
 }
 
-func (i *Ibft) runRoundChangeState(ctx context.Context) {
-	ctx, span := i.tracer.Start(ctx, "RoundChange")
+func (p *Pbft) runRoundChangeState(ctx context.Context) {
+	ctx, span := p.tracer.Start(ctx, "RoundChange")
 	defer span.End()
 
 	sendRoundChange := func(round uint64) {
-		i.logger.Printf("[DEBUG] local round change: round=%d", round)
+		p.logger.Printf("[DEBUG] local round change: round=%d", round)
 		// set the new round
-		i.state.view.Round = round
+		p.state.view.Round = round
 		// clean the round
-		i.state.cleanRound(round)
+		p.state.cleanRound(round)
 		// send the round change message
-		i.sendRoundChange()
+		p.sendRoundChange()
 	}
 	sendNextRoundChange := func() {
-		sendRoundChange(i.state.view.Round + 1)
+		sendRoundChange(p.state.view.Round + 1)
 	}
 
 	checkTimeout := func() {
 		// At this point we might be stuck in the network if:
 		// - We have advanced the round but everyone else passed.
 		//   We are removing those messages since they are old now.
-		if bestHeight, stucked := i.backend.IsStuck(i.state.view.Sequence); stucked {
+		if bestHeight, stucked := p.backend.IsStuck(p.state.view.Sequence); stucked {
 			span.AddEvent("OutOfSync", trace.WithAttributes(
 				// our local height
-				attribute.Int64("local", int64(i.state.view.Sequence)),
+				attribute.Int64("local", int64(p.state.view.Sequence)),
 				// the best remote height
 				attribute.Int64("remote", int64(bestHeight)),
 			))
-			i.setState(SyncState)
+			p.setState(SyncState)
 			return
 		}
 
@@ -542,14 +542,14 @@ func (i *Ibft) runRoundChangeState(ctx context.Context) {
 
 	// if the round was triggered due to an error, we send our own
 	// next round change
-	if err := i.state.getErr(); err != nil {
-		i.logger.Print("[DEBUG] round change handle err", "err", err)
+	if err := p.state.getErr(); err != nil {
+		p.logger.Print("[DEBUG] round change handle err", "err", err)
 		sendNextRoundChange()
 	} else {
 		// otherwise, it is due to a timeout in any stage
 		// First, we try to sync up with any max round already available
-		if maxRound, ok := i.state.maxRound(); ok {
-			i.logger.Print("[DEBUG] round change set max round", "round", maxRound)
+		if maxRound, ok := p.state.maxRound(); ok {
+			p.logger.Print("[DEBUG] round change set max round", "round", maxRound)
 			sendRoundChange(maxRound)
 		} else {
 			// otherwise, do your best to sync up
@@ -558,86 +558,86 @@ func (i *Ibft) runRoundChangeState(ctx context.Context) {
 	}
 
 	// create a timer for the round change
-	timeout := i.randomTimeout()
-	for i.getState() == RoundChangeState {
-		_, span := i.tracer.Start(ctx, "RoundChangeState")
+	timeout := p.randomTimeout()
+	for p.getState() == RoundChangeState {
+		_, span := p.tracer.Start(ctx, "RoundChangeState")
 
-		msg, ok := i.getNextMessage(span, timeout)
+		msg, ok := p.getNextMessage(span, timeout)
 		if !ok {
 			// closing
 			span.End()
 			return
 		}
 		if msg == nil {
-			i.logger.Printf("[DEBUG] round change timeout")
+			p.logger.Printf("[DEBUG] round change timeout")
 			checkTimeout()
 			//update the timeout duration
-			timeout = i.randomTimeout()
+			timeout = p.randomTimeout()
 			span.End()
 			continue
 		}
 
 		// we only expect RoundChange messages right now
-		num := i.state.AddRoundMessage(msg)
+		num := p.state.AddRoundMessage(msg)
 
-		if num == i.state.NumValid() {
+		if num == p.state.NumValid() {
 			// start a new round inmediatly
-			i.state.view.Round = msg.View.Round
-			i.setState(AcceptState)
-		} else if num == i.state.MaxFaultyNodes()+1 {
+			p.state.view.Round = msg.View.Round
+			p.setState(AcceptState)
+		} else if num == p.state.MaxFaultyNodes()+1 {
 			// weak certificate, try to catch up if our round number is smaller
-			if i.state.view.Round < msg.View.Round {
+			if p.state.view.Round < msg.View.Round {
 				// update timer
-				timeout = i.randomTimeout()
+				timeout = p.randomTimeout()
 				sendRoundChange(msg.View.Round)
 			}
 		}
 
-		i.setStateSpanAttributes(span)
+		p.setStateSpanAttributes(span)
 		span.End()
 	}
 }
 
 // --- communication wrappers ---
 
-func (i *Ibft) sendRoundChange() {
-	i.gossip(MessageReq_RoundChange)
+func (p *Pbft) sendRoundChange() {
+	p.gossip(MessageReq_RoundChange)
 }
 
-func (i *Ibft) sendPreprepareMsg() {
-	i.gossip(MessageReq_Preprepare)
+func (p *Pbft) sendPreprepareMsg() {
+	p.gossip(MessageReq_Preprepare)
 }
 
-func (i *Ibft) sendPrepareMsg() {
-	i.gossip(MessageReq_Prepare)
+func (p *Pbft) sendPrepareMsg() {
+	p.gossip(MessageReq_Prepare)
 }
 
-func (i *Ibft) sendCommitMsg() {
-	i.gossip(MessageReq_Commit)
+func (p *Pbft) sendCommitMsg() {
+	p.gossip(MessageReq_Commit)
 }
 
-func (i *Ibft) gossip(typ MsgType) {
+func (p *Pbft) gossip(typ MsgType) {
 	msg := &MessageReq{
 		Type: typ,
-		From: i.validator.NodeID(),
+		From: p.validator.NodeID(),
 	}
 
 	// add View
-	msg.View = i.state.view.Copy()
+	msg.View = p.state.view.Copy()
 
 	// if we are sending a preprepare message we need to include the proposal
 	if msg.Type == MessageReq_Preprepare {
-		msg.SetProposal(i.state.proposal.Data)
+		msg.SetProposal(p.state.proposal.Data)
 	}
 
 	// if the message is commit, we need to add the committed seal
 	if msg.Type == MessageReq_Commit {
 		// seal the hash of the proposal
-		hash := i.backend.Hash(i.state.proposal.Data)
+		hash := p.backend.Hash(p.state.proposal.Data)
 
-		seal, err := i.validator.Sign(hash)
+		seal, err := p.validator.Sign(hash)
 		if err != nil {
-			i.logger.Print("[ERROR] failed to commit seal", "err", err)
+			p.logger.Print("[ERROR] failed to commit seal", "err", err)
 			return
 		}
 		msg.Seal = seal
@@ -646,51 +646,51 @@ func (i *Ibft) gossip(typ MsgType) {
 	if msg.Type != MessageReq_Preprepare {
 		// send a copy to ourselves so that we can process this message as well
 		msg2 := msg.Copy()
-		msg2.From = i.validator.NodeID()
-		i.pushMessage(msg2)
+		msg2.From = p.validator.NodeID()
+		p.pushMessage(msg2)
 	}
-	if err := i.transport.Gossip(msg); err != nil {
-		i.logger.Print("[ERROR] failed to gossip", "err", err)
+	if err := p.transport.Gossip(msg); err != nil {
+		p.logger.Print("[ERROR] failed to gossip", "err", err)
 	}
 }
 
-func (i *Ibft) GetState() IbftState {
-	return i.getState()
+func (p *Pbft) GetState() PbftState {
+	return p.getState()
 }
 
-// getState returns the current IBFT state
-func (i *Ibft) getState() IbftState {
-	return i.state.getState()
+// getState returns the current PBFT state
+func (p *Pbft) getState() PbftState {
+	return p.state.getState()
 }
 
 // isState checks if the node is in the passed in state
-func (i *Ibft) IsState(s IbftState) bool {
-	return i.state.getState() == s
+func (p *Pbft) IsState(s PbftState) bool {
+	return p.state.getState() == s
 }
 
-func (i *Ibft) SetState(s IbftState) {
-	i.setState(s)
+func (p *Pbft) SetState(s PbftState) {
+	p.setState(s)
 }
 
-// setState sets the IBFT state
-func (i *Ibft) setState(s IbftState) {
-	i.logger.Printf("[DEBUG] state change: '%s'", s)
-	i.state.setState(s)
+// setState sets the PBFT state
+func (p *Pbft) setState(s PbftState) {
+	p.logger.Printf("[DEBUG] state change: '%s'", s)
+	p.state.setState(s)
 }
 
 // forceTimeout sets the forceTimeoutCh flag to true
-func (i *Ibft) forceTimeout() {
-	i.forceTimeoutCh = true
+func (p *Pbft) forceTimeout() {
+	p.forceTimeoutCh = true
 }
 
 // randomTimeout calculates the timeout duration depending on the current round
-func (i *Ibft) randomTimeout(inputTimeout ...time.Duration) time.Duration {
+func (p *Pbft) randomTimeout(inputTimeout ...time.Duration) time.Duration {
 	timeout := 2 * time.Second
 	if len(inputTimeout) == 1 {
 		timeout = inputTimeout[0]
 	}
 
-	round := i.state.view.Round
+	round := p.state.view.Round
 	if round > 0 {
 		timeout += time.Duration(math.Pow(2, float64(round))) * time.Second
 	}
@@ -698,10 +698,10 @@ func (i *Ibft) randomTimeout(inputTimeout ...time.Duration) time.Duration {
 }
 
 // getNextMessage reads a new message from the message queue
-func (i *Ibft) getNextMessage(span trace.Span, timeout time.Duration) (*MessageReq, bool) {
+func (p *Pbft) getNextMessage(span trace.Span, timeout time.Duration) (*MessageReq, bool) {
 	timeoutCh := time.After(timeout)
 	for {
-		msg, discards := i.msgQueue.readMessageWithDiscards(i.getState(), i.state.view)
+		msg, discards := p.msgQueue.readMessageWithDiscards(p.getState(), p.state.view)
 		// send the discard messages
 		for _, msg := range discards {
 			spanAddEventMessage("dropMessage", span, msg.obj)
@@ -713,8 +713,8 @@ func (i *Ibft) getNextMessage(span trace.Span, timeout time.Duration) (*MessageR
 			return msg.obj, true
 		}
 
-		if i.forceTimeoutCh {
-			i.forceTimeoutCh = false
+		if p.forceTimeoutCh {
+			p.forceTimeoutCh = false
 			return nil, true
 		}
 
@@ -724,28 +724,28 @@ func (i *Ibft) getNextMessage(span trace.Span, timeout time.Duration) (*MessageR
 		case <-timeoutCh:
 			span.AddEvent("Timeout")
 			return nil, true
-		case <-i.ctx.Done():
+		case <-p.ctx.Done():
 			return nil, false
-		case <-i.updateCh:
+		case <-p.updateCh:
 		}
 	}
 }
 
-func (i *Ibft) PushMessage(msg *MessageReq) {
-	i.pushMessage(msg)
+func (p *Pbft) PushMessage(msg *MessageReq) {
+	p.pushMessage(msg)
 }
 
 // pushMessage pushes a new message to the message queue
-func (i *Ibft) pushMessage(msg *MessageReq) {
+func (p *Pbft) pushMessage(msg *MessageReq) {
 	task := &msgTask{
 		view: msg.View,
 		msg:  msg.Type,
 		obj:  msg,
 	}
-	i.msgQueue.pushMessage(task)
+	p.msgQueue.pushMessage(task)
 
 	select {
-	case i.updateCh <- struct{}{}:
+	case p.updateCh <- struct{}{}:
 	default:
 	}
 }

@@ -8,7 +8,7 @@ import (
 func TestE2E_Partition_OneMajority(t *testing.T) {
 	hook := newPartitionTransport(300 * time.Millisecond)
 
-	c := newIBFTCluster(t, "majority_partition", "prt", 5, hook)
+	c := newPBFTCluster(t, "majority_partition", "prt", 5, hook)
 	c.Start()
 
 	c.WaitForHeight(5, 1*time.Minute)

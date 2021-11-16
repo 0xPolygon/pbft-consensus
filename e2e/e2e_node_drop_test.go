@@ -6,7 +6,7 @@ import (
 )
 
 func TestE2E_NodeDrop(t *testing.T) {
-	c := newIBFTCluster(t, "node_drop", "ptr", 5)
+	c := newPBFTCluster(t, "node_drop", "ptr", 5)
 	c.Start()
 
 	// wait for two heights and stop node 1

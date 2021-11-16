@@ -5,11 +5,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/0xPolygon/ibft-consensus"
+	"github.com/0xPolygon/pbft-consensus"
 )
 
 type transport struct {
-	nodes map[ibft.NodeID]transportHandler
+	nodes map[pbft.NodeID]transportHandler
 	hook  transportHook
 }
 
@@ -17,18 +17,18 @@ func (t *transport) addHook(hook transportHook) {
 	t.hook = hook
 }
 
-type transportHandler func(*ibft.MessageReq)
+type transportHandler func(*pbft.MessageReq)
 
-func (t *transport) Register(name ibft.NodeID, handler transportHandler) {
+func (t *transport) Register(name pbft.NodeID, handler transportHandler) {
 	if t.nodes == nil {
-		t.nodes = map[ibft.NodeID]transportHandler{}
+		t.nodes = map[pbft.NodeID]transportHandler{}
 	}
 	t.nodes[name] = handler
 }
 
-func (t *transport) Gossip(msg *ibft.MessageReq) error {
+func (t *transport) Gossip(msg *pbft.MessageReq) error {
 	for to, handler := range t.nodes {
-		go func(to ibft.NodeID, handler transportHandler) {
+		go func(to pbft.NodeID, handler transportHandler) {
 			send := true
 			if t.hook != nil {
 				send = t.hook.Gossip(msg.From, to, msg)
@@ -42,8 +42,8 @@ func (t *transport) Gossip(msg *ibft.MessageReq) error {
 }
 
 type transportHook interface {
-	Connects(from, to ibft.NodeID) bool
-	Gossip(from, to ibft.NodeID, msg *ibft.MessageReq) bool
+	Connects(from, to pbft.NodeID) bool
+	Gossip(from, to pbft.NodeID, msg *pbft.MessageReq) bool
 }
 
 // latency transport
@@ -55,11 +55,11 @@ func newRandomTransport(jitterMax time.Duration) transportHook {
 	return &randomTransport{jitterMax: jitterMax}
 }
 
-func (r *randomTransport) Connects(from, to ibft.NodeID) bool {
+func (r *randomTransport) Connects(from, to pbft.NodeID) bool {
 	return true
 }
 
-func (r *randomTransport) Gossip(from, to ibft.NodeID, msg *ibft.MessageReq) bool {
+func (r *randomTransport) Gossip(from, to pbft.NodeID, msg *pbft.MessageReq) bool {
 	// adds random latency between the queries
 	if r.jitterMax != 0 {
 		tt := timeJitter(r.jitterMax)
@@ -78,7 +78,7 @@ func newPartitionTransport(jitterMax time.Duration) *partitionTransport {
 	return &partitionTransport{jitterMax: jitterMax}
 }
 
-func (p *partitionTransport) isConnected(from, to ibft.NodeID) bool {
+func (p *partitionTransport) isConnected(from, to pbft.NodeID) bool {
 	subset, ok := p.subsets[string(from)]
 	if !ok {
 		// if not set, they are connected
@@ -95,7 +95,7 @@ func (p *partitionTransport) isConnected(from, to ibft.NodeID) bool {
 	return found
 }
 
-func (p *partitionTransport) Connects(from, to ibft.NodeID) bool {
+func (p *partitionTransport) Connects(from, to pbft.NodeID) bool {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
@@ -129,7 +129,7 @@ func (p *partitionTransport) Partition(subsets ...[]string) {
 	p.lock.Unlock()
 }
 
-func (p *partitionTransport) Gossip(from, to ibft.NodeID, msg *ibft.MessageReq) bool {
+func (p *partitionTransport) Gossip(from, to pbft.NodeID, msg *pbft.MessageReq) bool {
 	p.lock.Lock()
 	isConnected := p.isConnected(from, to)
 	p.lock.Unlock()
