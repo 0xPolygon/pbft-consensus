@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/0xPolygon/ibft-consensus"
+	"github.com/0xPolygon/pbft-consensus"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
@@ -66,7 +66,7 @@ type cluster struct {
 	hook   transportHook
 }
 
-func newIBFTCluster(t *testing.T, name, prefix string, count int, hook ...transportHook) *cluster {
+func newPBFTCluster(t *testing.T, name, prefix string, count int, hook ...transportHook) *cluster {
 	names := make([]string, count)
 	for i := 0; i < count; i++ {
 		names[i] = fmt.Sprintf("%s_%d", prefix, i)
@@ -85,16 +85,16 @@ func newIBFTCluster(t *testing.T, name, prefix string, count int, hook ...transp
 	}
 	for _, name := range names {
 		trace := c.tracer.Tracer(name)
-		n, _ := newIBFTNode(name, names, trace, tt)
+		n, _ := newPBFTNode(name, names, trace, tt)
 		n.c = c
 		c.nodes[name] = n
 	}
 	return c
 }
 
-func (c *cluster) syncWithNetwork(ourselves string) (uint64, []*ibft.SealedProposal) {
+func (c *cluster) syncWithNetwork(ourselves string) (uint64, []*pbft.SealedProposal) {
 	var height uint64
-	var proposals []*ibft.SealedProposal
+	var proposals []*pbft.SealedProposal
 
 	for _, n := range c.nodes {
 		if n.name == ourselves {
@@ -103,7 +103,7 @@ func (c *cluster) syncWithNetwork(ourselves string) (uint64, []*ibft.SealedPropo
 		if c.hook != nil {
 			// we need to see if this transport does allow those two nodes to be connected
 			// Otherwise, that node should not be elegible to sync
-			if !c.hook.Connects(ibft.NodeID(ourselves), ibft.NodeID(n.name)) {
+			if !c.hook.Connects(pbft.NodeID(ourselves), pbft.NodeID(n.name)) {
 				continue
 			}
 		}
@@ -222,7 +222,7 @@ type node struct {
 	c *cluster
 
 	name     string
-	ibft     *ibft.Ibft
+	pbft     *pbft.Pbft
 	cancelFn context.CancelFunc
 	stopped  uint64
 
@@ -230,10 +230,10 @@ type node struct {
 	nodes []string
 
 	// list of proposals
-	proposals []*ibft.SealedProposal
+	proposals []*pbft.SealedProposal
 }
 
-func newIBFTNode(name string, nodes []string, trace trace.Tracer, tt *transport) (*node, error) {
+func newPBFTNode(name string, nodes []string, trace trace.Tracer, tt *transport) (*node, error) {
 	var loggerOutput io.Writer
 	if os.Getenv("SILENT") == "true" {
 		loggerOutput = ioutil.Discard
@@ -242,18 +242,18 @@ func newIBFTNode(name string, nodes []string, trace trace.Tracer, tt *transport)
 	}
 
 	kk := key(name)
-	con := ibft.New(kk, tt, ibft.WithTracer(trace), ibft.WithLogger(log.New(loggerOutput, "", log.LstdFlags)))
+	con := pbft.New(kk, tt, pbft.WithTracer(trace), pbft.WithLogger(log.New(loggerOutput, "", log.LstdFlags)))
 
-	tt.Register(ibft.NodeID(name), func(msg *ibft.MessageReq) {
-		// pipe messages from mock transport to ibft
+	tt.Register(pbft.NodeID(name), func(msg *pbft.MessageReq) {
+		// pipe messages from mock transport to pbft
 		con.PushMessage(msg)
 	})
 
 	n := &node{
 		nodes:     nodes,
-		proposals: []*ibft.SealedProposal{},
+		proposals: []*pbft.SealedProposal{},
 		name:      name,
-		ibft:      con,
+		pbft:      con,
 		stopped:   0,
 	}
 	return n, nil
@@ -269,19 +269,19 @@ func (n *node) isStuck(num uint64) (uint64, bool) {
 	return 0, false
 }
 
-func (n *node) lastProposer() ibft.NodeID {
-	lastProposer := ibft.NodeID("")
+func (n *node) lastProposer() pbft.NodeID {
+	lastProposer := pbft.NodeID("")
 	if len(n.proposals) != 0 {
 		lastProposer = n.proposals[len(n.proposals)-1].Proposer
 	}
 	return lastProposer
 }
 
-func (n *node) getProposals() (uint64, []*ibft.SealedProposal) {
+func (n *node) getProposals() (uint64, []*pbft.SealedProposal) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 
-	res := []*ibft.SealedProposal{}
+	res := []*pbft.SealedProposal{}
 	res = append(res, n.proposals...)
 
 	number := uint64(0)
@@ -302,7 +302,7 @@ func (n *node) currentHeight() uint64 {
 	return number
 }
 
-func (n *node) Insert(pp *ibft.SealedProposal) error {
+func (n *node) Insert(pp *pbft.SealedProposal) error {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 
@@ -334,18 +334,18 @@ func (n *node) Start() {
 				// important: in this iteration of the fsm we have increased our height
 				height: n.currentHeight() + 1,
 			}
-			if err := n.ibft.SetBackend(fsm); err != nil {
+			if err := n.pbft.SetBackend(fsm); err != nil {
 				panic(err)
 			}
 
 			// start the execution
-			n.ibft.Run(ctx)
+			n.pbft.Run(ctx)
 
-			switch n.ibft.GetState() {
-			case ibft.SyncState:
+			switch n.pbft.GetState() {
+			case pbft.SyncState:
 				// we need to go back to sync
 				goto SYNC
-			case ibft.DoneState:
+			case pbft.DoneState:
 				// everything worked, move to the next iteration
 			default:
 				// stopped
@@ -369,8 +369,8 @@ func (n *node) Stop() {
 
 type key string
 
-func (k key) NodeID() ibft.NodeID {
-	return ibft.NodeID(k)
+func (k key) NodeID() pbft.NodeID {
+	return pbft.NodeID(k)
 }
 
 func (k key) Sign(b []byte) ([]byte, error) {
@@ -382,7 +382,7 @@ func (k key) Sign(b []byte) ([]byte, error) {
 type fsm struct {
 	n            *node
 	nodes        []string
-	lastProposer ibft.NodeID
+	lastProposer pbft.NodeID
 	height       uint64
 }
 
@@ -394,8 +394,8 @@ func (f *fsm) IsStuck(num uint64) (uint64, bool) {
 	return f.n.isStuck(num)
 }
 
-func (f *fsm) BuildProposal() (*ibft.Proposal, error) {
-	proposal := &ibft.Proposal{
+func (f *fsm) BuildProposal() (*pbft.Proposal, error) {
+	proposal := &pbft.Proposal{
 		Data: []byte{byte(f.Height())},
 		Time: time.Now().Add(1 * time.Second),
 	}
@@ -407,14 +407,14 @@ func (f *fsm) Validate(proposal []byte) error {
 	return nil
 }
 
-func (f *fsm) Insert(pp *ibft.SealedProposal) error {
+func (f *fsm) Insert(pp *pbft.SealedProposal) error {
 	return f.n.Insert(pp)
 }
 
-func (f *fsm) ValidatorSet() ibft.ValidatorSet {
-	valsAsNode := []ibft.NodeID{}
+func (f *fsm) ValidatorSet() pbft.ValidatorSet {
+	valsAsNode := []pbft.NodeID{}
 	for _, i := range f.nodes {
-		valsAsNode = append(valsAsNode, ibft.NodeID(i))
+		valsAsNode = append(valsAsNode, pbft.NodeID(i))
 	}
 	vv := valString{
 		nodes:        valsAsNode,
@@ -430,13 +430,13 @@ func (f *fsm) Hash(p []byte) []byte {
 }
 
 type valString struct {
-	nodes        []ibft.NodeID
-	lastProposer ibft.NodeID
+	nodes        []pbft.NodeID
+	lastProposer pbft.NodeID
 }
 
-func (v *valString) CalcProposer(round uint64) ibft.NodeID {
+func (v *valString) CalcProposer(round uint64) pbft.NodeID {
 	seed := uint64(0)
-	if v.lastProposer == ibft.NodeID("") {
+	if v.lastProposer == pbft.NodeID("") {
 		seed = round
 	} else {
 		offset := 0
@@ -450,7 +450,7 @@ func (v *valString) CalcProposer(round uint64) ibft.NodeID {
 	return (v.nodes)[pick]
 }
 
-func (v *valString) Index(addr ibft.NodeID) int {
+func (v *valString) Index(addr pbft.NodeID) int {
 	for indx, i := range v.nodes {
 		if i == addr {
 			return indx
@@ -459,7 +459,7 @@ func (v *valString) Index(addr ibft.NodeID) int {
 	return -1
 }
 
-func (v *valString) Includes(id ibft.NodeID) bool {
+func (v *valString) Includes(id pbft.NodeID) bool {
 	for _, i := range v.nodes {
 		if i == id {
 			return true

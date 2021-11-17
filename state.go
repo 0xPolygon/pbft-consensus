@@ -1,4 +1,4 @@
-package ibft
+package pbft
 
 import (
 	"fmt"
@@ -90,11 +90,11 @@ func ViewMsg(sequence, round uint64) *View {
 
 type NodeID string
 
-type IbftState uint32
+type PbftState uint32
 
-// Define the states in IBFT
+// Define the states in PBFT
 const (
-	AcceptState IbftState = iota
+	AcceptState PbftState = iota
 	RoundChangeState
 	ValidateState
 	CommitState
@@ -103,7 +103,7 @@ const (
 )
 
 // String returns the string representation of the passed in state
-func (i IbftState) String() string {
+func (i PbftState) String() string {
 	switch i {
 	case AcceptState:
 		return "AcceptState"
@@ -118,7 +118,7 @@ func (i IbftState) String() string {
 	case DoneState:
 		return "DoneState"
 	}
-	panic(fmt.Sprintf("BUG: Ibft state not found %d", i))
+	panic(fmt.Sprintf("BUG: Pbft state not found %d", i))
 }
 
 type Proposal struct {
@@ -129,7 +129,7 @@ type Proposal struct {
 	Time time.Time
 }
 
-// currentState defines the current state object in IBFT
+// currentState defines the current state object in PBFT
 type currentState struct {
 	// validators represent the current validator set
 	validators ValidatorSet
@@ -183,14 +183,14 @@ func (c *currentState) getCommittedSeals() [][]byte {
 }
 
 // getState returns the current state
-func (c *currentState) getState() IbftState {
+func (c *currentState) getState() PbftState {
 	stateAddr := (*uint64)(&c.state)
 
-	return IbftState(atomic.LoadUint64(stateAddr))
+	return PbftState(atomic.LoadUint64(stateAddr))
 }
 
 // setState sets the current state
-func (c *currentState) setState(s IbftState) {
+func (c *currentState) setState(s PbftState) {
 	stateAddr := (*uint64)(&c.state)
 
 	atomic.StoreUint64(stateAddr, uint64(s))

@@ -1,4 +1,4 @@
-package ibft
+package pbft
 
 // Transport is a generic interface for a gossip transport protocol
 type Transport interface {

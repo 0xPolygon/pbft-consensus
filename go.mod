@@ -1,4 +1,4 @@
-module github.com/0xPolygon/ibft-consensus
+module github.com/0xPolygon/pbft-consensus
 
 go 1.17
 

@@ -1,11 +1,11 @@
-package ibft
+package pbft
 
 import (
 	"container/heap"
 	"sync"
 )
 
-// msgQueue defines the structure that holds message queues for different IBFT states
+// msgQueue defines the structure that holds message queues for different PBFT states
 type msgQueue struct {
 	// Heap implementation for the round change message queue
 	roundChangeStateQueue msgQueueImpl
@@ -30,12 +30,12 @@ func (m *msgQueue) pushMessage(task *msgTask) {
 }
 
 // readMessage reads the message from a message queue, based on the current state and view
-func (m *msgQueue) readMessage(state IbftState, current *View) *msgTask {
+func (m *msgQueue) readMessage(state PbftState, current *View) *msgTask {
 	msg, _ := m.readMessageWithDiscards(state, current)
 	return msg
 }
 
-func (m *msgQueue) readMessageWithDiscards(state IbftState, current *View) (*msgTask, []*msgTask) {
+func (m *msgQueue) readMessageWithDiscards(state PbftState, current *View) (*msgTask, []*msgTask) {
 	m.queueLock.Lock()
 	defer m.queueLock.Unlock()
 
@@ -80,7 +80,7 @@ func (m *msgQueue) readMessageWithDiscards(state IbftState, current *View) (*msg
 }
 
 // getQueue checks the passed in state, and returns the corresponding message queue
-func (m *msgQueue) getQueue(state IbftState) *msgQueueImpl {
+func (m *msgQueue) getQueue(state PbftState) *msgQueueImpl {
 	if state == RoundChangeState {
 		// round change
 		return &m.roundChangeStateQueue
@@ -102,8 +102,8 @@ func newMsgQueue() *msgQueue {
 	}
 }
 
-// msgToState converts the message type to an IbftState
-func msgToState(msg MsgType) IbftState {
+// msgToState converts the message type to an PbftState
+func msgToState(msg MsgType) PbftState {
 	if msg == MessageReq_RoundChange {
 		// round change
 		return RoundChangeState

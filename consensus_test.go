@@ -1,4 +1,4 @@
-package ibft
+package pbft
 
 import (
 	"context"
@@ -17,7 +17,7 @@ func TestTransition_ValidateState_Prepare(t *testing.T) {
 	t.Skip()
 
 	// we receive enough prepare messages to lock and commit the proposal
-	i := newMockIbft(t, []string{"A", "B", "C", "D"}, "A")
+	i := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
 	i.setState(ValidateState)
 
 	i.emitMsg(&MessageReq{
@@ -59,7 +59,7 @@ func TestTransition_ValidateState_CommitFastTrack(t *testing.T) {
 
 	// we can directly receive the commit messages and fast track to the commit state
 	// even when we do not have yet the preprepare messages
-	i := newMockIbft(t, []string{"A", "B", "C", "D"}, "A")
+	i := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
 
 	i.setState(ValidateState)
 	i.state.view = ViewMsg(1, 0)
@@ -99,7 +99,7 @@ func TestTransition_ValidateState_CommitFastTrack(t *testing.T) {
 func TestTransition_AcceptState_ToSyncState(t *testing.T) {
 	// we are in AcceptState and we are not in the validators list
 	// means that we have been removed as validator, move to sync state
-	i := newMockIbft(t, []string{"A", "B", "C", "D"}, "")
+	i := newMockPbft(t, []string{"A", "B", "C", "D"}, "")
 	i.setState(AcceptState)
 
 	i.runCycle(context.Background())
@@ -123,7 +123,7 @@ func TestTransition_AcceptState_Proposer_Propose(t *testing.T) {
 	// 4. send a prepare message
 	// 5. move to ValidateState
 
-	i := newMockIbft(t, []string{"A", "B", "C", "D"}, "A")
+	i := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
 	i.setState(AcceptState)
 
 	i.setProposal(&Proposal{
@@ -143,7 +143,7 @@ func TestTransition_AcceptState_Proposer_Propose(t *testing.T) {
 func TestTransition_AcceptState_Proposer_Locked(t *testing.T) {
 	// we are in AcceptState, we are the proposer but the value is locked.
 	// it needs to send the locked proposal again
-	i := newMockIbft(t, []string{"A", "B", "C", "D"}, "A")
+	i := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
 	i.setState(AcceptState)
 
 	i.state.locked = true
@@ -163,7 +163,7 @@ func TestTransition_AcceptState_Proposer_Locked(t *testing.T) {
 }
 
 func TestTransition_AcceptState_Validator_VerifyCorrect(t *testing.T) {
-	i := newMockIbft(t, []string{"A", "B", "C"}, "B")
+	i := newMockPbft(t, []string{"A", "B", "C"}, "B")
 	i.state.view = ViewMsg(1, 0)
 	i.setState(AcceptState)
 
@@ -187,7 +187,7 @@ func TestTransition_AcceptState_Validator_VerifyCorrect(t *testing.T) {
 func TestTransition_AcceptState_Validator_VerifyFails(t *testing.T) {
 	t.Skip("involves validation of hash that is not done yet")
 
-	i := newMockIbft(t, []string{"A", "B", "C"}, "B")
+	i := newMockPbft(t, []string{"A", "B", "C"}, "B")
 	i.state.view = ViewMsg(1, 0)
 	i.setState(AcceptState)
 
@@ -209,7 +209,7 @@ func TestTransition_AcceptState_Validator_VerifyFails(t *testing.T) {
 }
 
 func TestTransition_AcceptState_Validator_ProposerInvalid(t *testing.T) {
-	i := newMockIbft(t, []string{"A", "B", "C"}, "B")
+	i := newMockPbft(t, []string{"A", "B", "C"}, "B")
 	i.state.view = ViewMsg(1, 0)
 	i.setState(AcceptState)
 
@@ -235,7 +235,7 @@ func TestTransition_AcceptState_Validator_LockWrong(t *testing.T) {
 	// we are a validator and have a locked state in 'proposal1'.
 	// We receive an invalid proposal 'proposal2' with different data.
 
-	i := newMockIbft(t, []string{"A", "B", "C"}, "B")
+	i := newMockPbft(t, []string{"A", "B", "C"}, "B")
 	i.state.view = ViewMsg(1, 0)
 	i.setState(AcceptState)
 
@@ -264,7 +264,7 @@ func TestTransition_AcceptState_Validator_LockWrong(t *testing.T) {
 }
 
 func TestTransition_AcceptState_Validator_LockCorrect(t *testing.T) {
-	i := newMockIbft(t, []string{"A", "B", "C"}, "B")
+	i := newMockPbft(t, []string{"A", "B", "C"}, "B")
 	i.state.view = ViewMsg(1, 0)
 	i.setState(AcceptState)
 
@@ -292,7 +292,7 @@ func TestTransition_AcceptState_Validator_LockCorrect(t *testing.T) {
 }
 
 func TestTransition_RoundChangeState_CatchupRound(t *testing.T) {
-	m := newMockIbft(t, []string{"A", "B", "C", "D"}, "A")
+	m := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
 	m.setState(RoundChangeState)
 
 	// new messages arrive with round number 2
@@ -328,7 +328,7 @@ func TestTransition_RoundChangeState_CatchupRound(t *testing.T) {
 }
 
 func TestTransition_RoundChangeState_Timeout(t *testing.T) {
-	m := newMockIbft(t, []string{"A", "B", "C", "D"}, "A")
+	m := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
 
 	m.forceTimeout()
 	m.setState(RoundChangeState)
@@ -349,7 +349,7 @@ func TestTransition_RoundChangeState_Timeout(t *testing.T) {
 }
 
 func TestTransition_RoundChangeState_WeakCertificate(t *testing.T) {
-	m := newMockIbft(t, []string{"A", "B", "C", "D", "E", "F", "G"}, "A")
+	m := newMockPbft(t, []string{"A", "B", "C", "D", "E", "F", "G"}, "A")
 
 	m.setState(RoundChangeState)
 
@@ -385,7 +385,7 @@ func TestTransition_RoundChangeState_WeakCertificate(t *testing.T) {
 func TestTransition_RoundChangeState_ErrStartNewRound(t *testing.T) {
 	// if we start a round change because there was an error we start
 	// a new round right away
-	m := newMockIbft(t, []string{"A", "B"}, "A")
+	m := newMockPbft(t, []string{"A", "B"}, "A")
 	m.Close()
 
 	m.state.err = errVerificationFailed
@@ -404,7 +404,7 @@ func TestTransition_RoundChangeState_ErrStartNewRound(t *testing.T) {
 func TestTransition_RoundChangeState_StartNewRound(t *testing.T) {
 	// if we start round change due to a state timeout and we are on the
 	// correct sequence, we start a new round
-	m := newMockIbft(t, []string{"A", "B"}, "A")
+	m := newMockPbft(t, []string{"A", "B"}, "A")
 	m.Close()
 
 	m.setState(RoundChangeState)
@@ -421,7 +421,7 @@ func TestTransition_RoundChangeState_StartNewRound(t *testing.T) {
 func TestTransition_RoundChangeState_MaxRound(t *testing.T) {
 	// if we start round change due to a state timeout we try to catch up
 	// with the highest round seen.
-	m := newMockIbft(t, []string{"A", "B", "C"}, "A")
+	m := newMockPbft(t, []string{"A", "B", "C"}, "A")
 	m.Close()
 
 	m.addMessage(&MessageReq{
@@ -444,8 +444,8 @@ func TestTransition_RoundChangeState_MaxRound(t *testing.T) {
 	})
 }
 
-type mockIbft struct {
-	*Ibft
+type mockPbft struct {
+	*Pbft
 
 	t        *testing.T
 	pool     *testerAccountPool
@@ -455,15 +455,15 @@ type mockIbft struct {
 	cancelFn context.CancelFunc
 }
 
-func (m *mockIbft) emitMsg(msg *MessageReq) {
+func (m *mockPbft) emitMsg(msg *MessageReq) {
 	// convert the address from the address pool
 	// from := m.pool.get(string(msg.From)).Address()
 	// msg.From = from
 
-	m.Ibft.pushMessage(msg)
+	m.Pbft.pushMessage(msg)
 }
 
-func (m *mockIbft) addMessage(msg *MessageReq) {
+func (m *mockPbft) addMessage(msg *MessageReq) {
 	// convert the address from the address pool
 	//from := m.pool.get(string(msg.From)).Address()
 	//msg.From = from
@@ -471,18 +471,18 @@ func (m *mockIbft) addMessage(msg *MessageReq) {
 	m.state.addMessage(msg)
 }
 
-func (m *mockIbft) Gossip(msg *MessageReq) error {
+func (m *mockPbft) Gossip(msg *MessageReq) error {
 	m.respMsg = append(m.respMsg, msg)
 	return nil
 }
 
-func newMockIbft(t *testing.T, accounts []string, account string) *mockIbft {
+func newMockPbft(t *testing.T, accounts []string, account string) *mockPbft {
 	pool := newTesterAccountPool()
 	pool.add(accounts...)
 
 	validatorSet := newMockValidatorSet(accounts).(*valString)
 
-	m := &mockIbft{
+	m := &mockPbft{
 		t:        t,
 		pool:     pool,
 		respMsg:  []*MessageReq{},
@@ -511,27 +511,27 @@ func newMockIbft(t *testing.T, accounts []string, account string) *mockIbft {
 		loggerOutput = os.Stdout
 	}
 
-	// initialize ibft
-	m.Ibft = New(acct, m, WithLogger(log.New(loggerOutput, "", log.LstdFlags)))
-	m.Ibft.SetBackend(backend)
+	// initialize pbft
+	m.Pbft = New(acct, m, WithLogger(log.New(loggerOutput, "", log.LstdFlags)))
+	m.Pbft.SetBackend(backend)
 
 	ctx, cancelFn := context.WithCancel(context.Background())
-	m.Ibft.ctx = ctx
+	m.Pbft.ctx = ctx
 	m.cancelFn = cancelFn
 
 	return m
 }
 
-func (i *mockIbft) Close() {
+func (i *mockPbft) Close() {
 	i.cancelFn()
 }
 
-func (i *mockIbft) setProposal(p *Proposal) {
+func (i *mockPbft) setProposal(p *Proposal) {
 	i.proposal = p
 }
 
 type expectResult struct {
-	state    IbftState
+	state    PbftState
 	sequence uint64
 	round    uint64
 	locked   bool
@@ -545,7 +545,7 @@ type expectResult struct {
 	outgoing uint64
 }
 
-func (m *mockIbft) expect(res expectResult) {
+func (m *mockPbft) expect(res expectResult) {
 	if sequence := m.state.view.Sequence; sequence != res.sequence {
 		m.t.Fatalf("incorrect sequence %d %d", sequence, res.sequence)
 	}
@@ -573,7 +573,7 @@ func (m *mockIbft) expect(res expectResult) {
 }
 
 type mockB struct {
-	mock *mockIbft
+	mock *mockPbft
 
 	validators *valString
 }

@@ -1,11 +1,11 @@
-module github.com/0xPolygon/ibft-consensus/e2e
+module github.com/0xPolygon/pbft-consensus/e2e
 
 go 1.17
 
-replace github.com/0xPolygon/ibft-consensus => ../
+replace github.com/0xPolygon/pbft-consensus => ../
 
 require (
-	github.com/0xPolygon/ibft-consensus v0.0.0-20211104133347-f8d6b7df3746
+	github.com/0xPolygon/pbft-consensus v0.0.0-20211104133347-f8d6b7df3746
 	go.opentelemetry.io/otel v1.1.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.1.0
 	go.opentelemetry.io/otel/sdk v1.1.0

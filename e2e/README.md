@@ -1,15 +1,15 @@
 
-# E2E IBFT
+# E2E PBFT
 
 # Jaeger
 
-E2E tests uses OpenTracing to profile the execution of the IBFT state machine among the nodes in the cluster. It uses Jaeger to collect the tracing metrics, setup the Jaeger collector with:
+E2E tests uses OpenTracing to profile the execution of the PBFT state machine among the nodes in the cluster. It uses Jaeger to collect the tracing metrics, setup the Jaeger collector with:
 
 ```
 $ docker run --net=host jaegertracing/all-in-one:1.27
 ```
 
-You also need to run the OpenCollector to move data to Jaeger from the OpenTelemetry client in IBFT.
+You also need to run the OpenCollector to move data to Jaeger from the OpenTelemetry client in PBFT.
 
 ```
 $ docker run --net=host -v "${PWD}/otel-jaeger-config.yaml":/otel-local-config.yaml otel/opentelemetry-collector --config otel-local-config.yaml
