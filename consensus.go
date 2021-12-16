@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"math"
 	"os"
 	"reflect"
 	"time"
@@ -58,6 +57,7 @@ func WithTracer(t trace.Tracer) ConfigOption {
 
 const (
 	defaultTimeout = 2 * time.Second
+	maxTimeout     = 300 * time.Second
 )
 
 func DefaultConfig() *Config {
@@ -307,7 +307,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 	// we are NOT a proposer for this height/round. Then, we have to wait
 	// for a pre-prepare message from the proposer
 
-	timeout := p.randomTimeout()
+	timeout := p.exponentialTimeout()
 
 	// We only need to wait here for one type of message, the Prepare message from the proposer.
 	// However, since we can receive bad Prepare messages we have to wait (or timeout) until
@@ -379,7 +379,7 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 		}
 	}
 
-	timeout := p.randomTimeout()
+	timeout := p.exponentialTimeout()
 	for p.getState() == ValidateState {
 		_, span := p.tracer.Start(ctx, "ValidateState")
 
@@ -558,7 +558,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 	}
 
 	// create a timer for the round change
-	timeout := p.randomTimeout()
+	timeout := p.exponentialTimeout()
 	for p.getState() == RoundChangeState {
 		_, span := p.tracer.Start(ctx, "RoundChangeState")
 
@@ -571,8 +571,8 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 		if msg == nil {
 			p.logger.Printf("[DEBUG] round change timeout")
 			checkTimeout()
-			//update the timeout duration
-			timeout = p.randomTimeout()
+			// update the timeout duration
+			timeout = p.exponentialTimeout()
 			span.End()
 			continue
 		}
@@ -588,7 +588,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 			// weak certificate, try to catch up if our round number is smaller
 			if p.state.view.Round < msg.View.Round {
 				// update timer
-				timeout = p.randomTimeout()
+				timeout = p.exponentialTimeout()
 				sendRoundChange(msg.View.Round)
 			}
 		}
@@ -683,16 +683,14 @@ func (p *Pbft) forceTimeout() {
 	p.forceTimeoutCh = true
 }
 
-// randomTimeout calculates the timeout duration depending on the current round
-func (p *Pbft) randomTimeout(inputTimeout ...time.Duration) time.Duration {
-	timeout := 2 * time.Second
-	if len(inputTimeout) == 1 {
-		timeout = inputTimeout[0]
-	}
-
+// exponentialTimeout calculates the timeout duration depending on the current round
+func (p *Pbft) exponentialTimeout() time.Duration {
+	timeout := defaultTimeout
 	round := p.state.view.Round
-	if round > 0 {
-		timeout += time.Duration(math.Pow(2, float64(round))) * time.Second
+	if round <= 8 {
+		timeout += time.Duration(1<<round) * time.Second
+	} else {
+		timeout = maxTimeout
 	}
 	return timeout
 }
