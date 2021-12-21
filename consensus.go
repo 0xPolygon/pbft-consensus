@@ -687,6 +687,9 @@ func (p *Pbft) forceTimeout() {
 func (p *Pbft) exponentialTimeout() time.Duration {
 	timeout := defaultTimeout
 	round := p.state.view.Round
+	// limit exponent to be in range of maxTimeout (<=8) otherwise use maxTimeout
+	// this prevents calculating timeout that is greater than maxTimeout and
+	// possible overflow for calculating timeout for rounds >33 since duration is in nanoseconds stored in int64
 	if round <= 8 {
 		timeout += time.Duration(1<<round) * time.Second
 	} else {
