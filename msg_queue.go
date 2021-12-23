@@ -20,26 +20,25 @@ type msgQueue struct {
 }
 
 // pushMessage adds a new message to a message queue
-func (m *msgQueue) pushMessage(task *msgTask) {
+func (m *msgQueue) pushMessage(message *MessageReq) {
 	m.queueLock.Lock()
+	defer m.queueLock.Unlock()
 
-	queue := m.getQueue(msgToState(task.msg))
-	heap.Push(queue, task)
-
-	m.queueLock.Unlock()
+	queue := m.getQueue(msgToState(message.Type))
+	heap.Push(queue, message)
 }
 
 // readMessage reads the message from a message queue, based on the current state and view
-func (m *msgQueue) readMessage(state PbftState, current *View) *msgTask {
+func (m *msgQueue) readMessage(state PbftState, current *View) *MessageReq {
 	msg, _ := m.readMessageWithDiscards(state, current)
 	return msg
 }
 
-func (m *msgQueue) readMessageWithDiscards(state PbftState, current *View) (*msgTask, []*msgTask) {
+func (m *msgQueue) readMessageWithDiscards(state PbftState, current *View) (*MessageReq, []*MessageReq) {
 	m.queueLock.Lock()
 	defer m.queueLock.Unlock()
 
-	discarded := []*msgTask{}
+	discarded := []*MessageReq{}
 	queue := m.getQueue(state)
 
 	for {
@@ -52,13 +51,13 @@ func (m *msgQueue) readMessageWithDiscards(state PbftState, current *View) (*msg
 		if state == RoundChangeState {
 			// if we are in RoundChangeState we only care about sequence
 			// since we are interested in knowing all the possible rounds
-			if msg.view.Sequence > current.Sequence {
+			if msg.View.Sequence > current.Sequence {
 				// future message
 				return nil, discarded
 			}
 		} else {
 			// otherwise, we compare both sequence and round
-			if cmpView(msg.view, current) > 0 {
+			if cmpView(msg.View, current) > 0 {
 				// future message
 				return nil, discarded
 			}
@@ -68,7 +67,7 @@ func (m *msgQueue) readMessageWithDiscards(state PbftState, current *View) (*msg
 		// we have to remove it from the queue
 		heap.Pop(queue)
 
-		if cmpView(msg.view, current) < 0 {
+		if cmpView(msg.View, current) < 0 {
 			// old value, try again
 			discarded = append(discarded, msg)
 			continue
@@ -118,18 +117,10 @@ func msgToState(msg MsgType) PbftState {
 	panic("BUG: not expected")
 }
 
-type msgTask struct {
-	// priority
-	view *View
-	msg  MsgType
-
-	obj *MessageReq
-}
-
-type msgQueueImpl []*msgTask
+type msgQueueImpl []*MessageReq
 
 // head returns the head of the queue
-func (m msgQueueImpl) head() *msgTask {
+func (m msgQueueImpl) head() *MessageReq {
 	return m[0]
 }
 
@@ -142,15 +133,15 @@ func (m msgQueueImpl) Len() int {
 func (m msgQueueImpl) Less(i, j int) bool {
 	ti, tj := m[i], m[j]
 	// sort by sequence
-	if ti.view.Sequence != tj.view.Sequence {
-		return ti.view.Sequence < tj.view.Sequence
+	if ti.View.Sequence != tj.View.Sequence {
+		return ti.View.Sequence < tj.View.Sequence
 	}
 	// sort by round
-	if ti.view.Round != tj.view.Round {
-		return ti.view.Round < tj.view.Round
+	if ti.View.Round != tj.View.Round {
+		return ti.View.Round < tj.View.Round
 	}
 	// sort by message
-	return ti.msg < tj.msg
+	return ti.Type < tj.Type
 }
 
 // Swap swaps the places of the items at the passed-in indexes
@@ -160,7 +151,7 @@ func (m msgQueueImpl) Swap(i, j int) {
 
 // Push adds a new item to the queue
 func (m *msgQueueImpl) Push(x interface{}) {
-	*m = append(*m, x.(*msgTask))
+	*m = append(*m, x.(*MessageReq))
 }
 
 // Pop removes an item from the queue

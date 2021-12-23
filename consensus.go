@@ -705,13 +705,13 @@ func (p *Pbft) getNextMessage(span trace.Span, timeout time.Duration) (*MessageR
 		msg, discards := p.msgQueue.readMessageWithDiscards(p.getState(), p.state.view)
 		// send the discard messages
 		for _, msg := range discards {
-			spanAddEventMessage("dropMessage", span, msg.obj)
+			spanAddEventMessage("dropMessage", span, msg)
 		}
 		if msg != nil {
 			// add the event to the span
-			spanAddEventMessage("message", span, msg.obj)
+			spanAddEventMessage("message", span, msg)
 
-			return msg.obj, true
+			return msg, true
 		}
 
 		if p.forceTimeoutCh {
@@ -738,12 +738,7 @@ func (p *Pbft) PushMessage(msg *MessageReq) {
 
 // pushMessage pushes a new message to the message queue
 func (p *Pbft) pushMessage(msg *MessageReq) {
-	task := &msgTask{
-		view: msg.View,
-		msg:  msg.Type,
-		obj:  msg,
-	}
-	p.msgQueue.pushMessage(task)
+	p.msgQueue.pushMessage(msg)
 
 	select {
 	case p.updateCh <- struct{}{}:
