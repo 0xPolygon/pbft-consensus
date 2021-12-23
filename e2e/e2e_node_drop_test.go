@@ -10,8 +10,8 @@ func TestE2E_NodeDrop(t *testing.T) {
 	c.Start()
 
 	// wait for two heights and stop node 1
-	c.WaitForHeight(2, 1*time.Minute)
+	c.WaitForHeight(2, 1*time.Minute, false)
 
 	c.StopNode("ptr_0")
-	c.WaitForHeight(15, 1*time.Minute, []string{"ptr_1", "ptr_2", "ptr_3", "ptr_4"})
+	c.WaitForHeight(15, 1*time.Minute, false, generateNodeNames(1, 4, "ptr_"))
 }

@@ -6,21 +6,24 @@ import (
 )
 
 func TestE2E_Partition_OneMajority(t *testing.T) {
+	const nodesCnt = 5
+	const nodesPerPartition = 3
 	hook := newPartitionTransport(300 * time.Millisecond)
 
-	c := newPBFTCluster(t, "majority_partition", "prt", 5, hook)
+	c := newPBFTCluster(t, "majority_partition", "prt", nodesCnt, hook)
 	c.Start()
 
-	c.WaitForHeight(5, 1*time.Minute)
+	c.WaitForHeight(5, 1*time.Minute, false)
 
 	// create two partitions.
-	hook.Partition([]string{"prt_0", "prt_1", "prt_2"}, []string{"prt_3", "prt_4"})
+	partitions := getPartitions(nodesCnt, nodesPerPartition, "prt_")
+	hook.Partition(partitions...)
 
 	// only the majority partition will be able to sync
-	c.WaitForHeight(10, 1*time.Minute, []string{"prt_0", "prt_1", "prt_2"})
+	c.WaitForHeight(10, 1*time.Minute, false, partitions[0])
 
 	// the partition with two nodes is stuck
-	c.IsStuck(10*time.Second, []string{"prt_3", "prt_4"})
+	c.IsStuck(10*time.Second, partitions[1])
 
 	// TODO: Reset and check that they can sync again
 	c.Stop()
