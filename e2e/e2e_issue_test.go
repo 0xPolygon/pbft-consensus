@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -13,14 +14,9 @@ func TestE2E_Partition_MinorityCanValidate(t *testing.T) {
 	hook := newPartitionTransport(300 * time.Millisecond)
 
 	c := newPBFTCluster(t, "majority_partition", "prt", nodesCnt, hook)
-	nodesFactor := float32(nodesCnt) * 2.0 / 3.0
-	limit := int(nodesFactor) + 1 // 2F+1 nodes can Validate
+	limit := int(math.Floor(nodesCnt*2.0/3.0)) + 1 // 2F+1 nodes can Validate
 	for i, node := range c.Nodes() {
-		if i >= limit {
-			node.StartWithFsmFactory(createInvalidFsm)
-		} else {
-			node.Start()
-		}
+		node.StartWithBackendFactory(createBackend(i >= limit))
 	}
 
 	names := generateNodeNames(0, limit, "prt_")
@@ -37,23 +33,13 @@ func TestE2E_Partition_MajorityCantValidate(t *testing.T) {
 	hook := newPartitionTransport(300 * time.Millisecond)
 
 	c := newPBFTCluster(t, "majority_partition", "prt", nodesCnt, hook)
-	nodesFactor := float32(nodesCnt) * 2.0 / 3.0
-	limit := int(nodesFactor) // + 1 removed because 2F+1 nodes is majority
+	limit := int(math.Floor(nodesCnt * 2.0 / 3.0)) // + 1 removed because 2F+1 nodes is majority
 	for i, node := range c.Nodes() {
-		if i >= limit {
-			node.StartWithFsmFactory(createInvalidFsm)
-		} else {
-			node.Start()
-		}
+		node.StartWithBackendFactory(createBackend(i >= limit))
 	}
 
 	names := generateNodeNames(0, limit, "prt_")
 	c.WaitForHeight(3, 1*time.Minute, true, names)
-}
-
-func createInvalidFsm(n *node) pbft.Backend {
-	fsm := &fsmInvalid{fsm: NewFsm(n)}
-	return fsm
 }
 
 type fsmInvalid struct {
@@ -62,4 +48,16 @@ type fsmInvalid struct {
 
 func (f *fsmInvalid) Validate(proposal []byte) error {
 	return errors.New("invalid propsal")
+}
+
+func createBackend(invalid bool) func(nn *node) pbft.Backend {
+	if invalid {
+		return func(nn *node) pbft.Backend {
+			return &fsmInvalid{fsm: NewFsm(nn)}
+		}
+	}
+	return func(nn *node) pbft.Backend {
+		tmp := NewFsm(nn)
+		return &tmp
+	}
 }

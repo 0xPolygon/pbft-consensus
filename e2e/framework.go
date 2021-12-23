@@ -329,10 +329,10 @@ func (n *node) Start() {
 		result := NewFsm(nn)
 		return &result
 	}
-	n.StartWithFsmFactory(factory)
+	n.StartWithBackendFactory(factory)
 }
 
-func (n *node) StartWithFsmFactory(fsmFactory func(n *node) pbft.Backend) {
+func (n *node) StartWithBackendFactory(fsmFactory func(n *node) pbft.Backend) {
 	if n.cancelFn != nil {
 		panic("already started")
 	}

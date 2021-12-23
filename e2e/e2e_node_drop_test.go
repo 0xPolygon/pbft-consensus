@@ -27,44 +27,22 @@ func TestE2E_NetworkChurn(t *testing.T) {
 	c.Start()
 	runningNodeCount := nodeCount
 	// randomly stop nodes every 3 seconds
-	tick := time.NewTicker(3 * time.Second)
-	churnDone := make(chan struct{})
-	end := make(chan struct{})
-	go func() {
-		for {
-			select {
-			case <-tick.C:
-				nodeNo := rand.Intn(nodeCount)
-				nodeID := prefix + strconv.Itoa(nodeNo)
-				node := c.nodes[nodeID]
-				if node.IsRunning() && runningNodeCount > int(math.Ceil(float64(nodeCount/3)))-1 {
-					// node is running
-					c.StopNode(nodeID)
-					runningNodeCount--
-				} else if !node.IsRunning() {
-					// node is not running
-					c.StartNode(nodeID)
-					runningNodeCount++
-				}
-			case <-churnDone:
-				close(end)
-				return
-			}
+	executeInTimerAndWait(3*time.Second, 30*time.Second, func(_ time.Duration) {
+		nodeNo := rand.Intn(nodeCount)
+		nodeID := prefix + strconv.Itoa(nodeNo)
+		node := c.nodes[nodeID]
+		if node.IsRunning() && runningNodeCount > int(math.Ceil(float64(nodeCount)/3.0))-1 {
+			// node is running
+			c.StopNode(nodeID)
+			runningNodeCount--
+		} else if !node.IsRunning() {
+			// node is not running
+			c.StartNode(nodeID)
+			runningNodeCount++
 		}
-	}()
-
-	// stop network churn
-	after := time.After(30 * time.Second)
-	go func() {
-		select {
-		case <-after:
-			tick.Stop()
-			close(churnDone)
-		}
-	}()
+	})
 
 	// get all running nodes after random drops
-	<-end
 	var runningNodes []string
 	var stoppedNodes []string
 	for _, v := range c.nodes {

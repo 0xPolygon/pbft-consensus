@@ -1,6 +1,9 @@
 package e2e
 
-import "strconv"
+import (
+	"strconv"
+	"time"
+)
 
 func generateNodeNames(from int, count int, prefix string) []string {
 	names := make([]string, count)
@@ -25,4 +28,36 @@ func getPartitions(nodesCnt int, nodesPerPartition int, prefix string) [][]strin
 		partitions[i] = generateNodeNames(startIndex, nodesInPartition, prefix)
 	}
 	return partitions
+}
+
+func executeInTimerAndWait(tickTime time.Duration, duration time.Duration, fn func(time.Duration)) {
+	end := executeInTimer(tickTime, duration, fn)
+	<-end
+}
+
+func executeInTimer(tickTime time.Duration, duration time.Duration, fn func(time.Duration)) chan struct{} {
+	tick := time.NewTicker(tickTime)
+	tickerDone := make(chan struct{})
+	end := make(chan struct{})
+	startTime := time.Now()
+	go func() {
+		for {
+			select {
+			case v := <-tick.C:
+				ellapsedTime := v.Sub(startTime)
+				fn(ellapsedTime)
+			case <-tickerDone:
+				close(end)
+				return
+			}
+		}
+	}()
+
+	after := time.After(duration)
+	go func() {
+		<-after
+		tick.Stop()
+		close(tickerDone)
+	}()
+	return end
 }
