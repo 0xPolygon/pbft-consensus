@@ -6,14 +6,12 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func mockQueueMsg(id string, state MsgType, view *View) *msgTask {
-	return &msgTask{
-		view: view,
-		msg:  state,
-		obj: &MessageReq{
-			// use the from field to identify the msg
-			From: NodeID(id),
-		},
+func mockQueueMsg(id string, msgType MsgType, view *View) *MessageReq {
+	return &MessageReq{
+		// use the from field to identify the msg
+		From: NodeID(id),
+		View: view,
+		Type: msgType,
 	}
 }
 
@@ -46,11 +44,11 @@ func TestMsgQueue_RoundChangeState(t *testing.T) {
 
 		msg1 := m.readMessage(RoundChangeState, ViewMsg(2, 0))
 		assert.NotNil(t, msg1)
-		assert.Equal(t, msg1.obj.From, NodeID("F"))
+		assert.Equal(t, msg1.From, NodeID("F"))
 
 		msg2 := m.readMessage(RoundChangeState, ViewMsg(2, 0))
 		assert.NotNil(t, msg2)
-		assert.Equal(t, msg2.obj.From, NodeID("D"))
+		assert.Equal(t, msg2.From, NodeID("D"))
 	}
 
 	// insert future messages to the queue => such messages should not be retrieved back

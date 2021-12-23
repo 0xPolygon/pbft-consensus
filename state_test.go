@@ -41,21 +41,21 @@ func createMessagePoolSender(sender string, messageType MsgType, pool *testerAcc
 	}
 	seal := make([]byte, 2)
 	mrand.Read(seal)
-	proposal := make([]byte, 4)
+	proposal := make([]byte, 2)
 	mrand.Read(proposal)
 
-	msg := &MessageReq{
-		From:     NodeID(senderId),
-		Type:     messageType,
-		View:     &View{Round: 0},
-		Seal:     seal,
-		Proposal: proposal,
-	}
 	r := uint64(0)
 	if len(round) > 0 {
 		r = round[0]
 	}
-	msg.View.Round = r
+
+	msg := &MessageReq{
+		From:     NodeID(senderId),
+		Type:     messageType,
+		View:     &View{Round: r},
+		Seal:     seal,
+		Proposal: proposal,
+	}
 	return msg
 }
 
