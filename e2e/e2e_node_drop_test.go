@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"math"
 	"math/rand"
 	"strconv"
 	"testing"
@@ -24,7 +25,7 @@ func TestE2E_NetworkChurn(t *testing.T) {
 	const prefix = "ptr_"
 	c := newPBFTCluster(t, "network_churn", "ptr", nodeCount)
 	c.Start()
-
+	runningNodeCount := nodeCount
 	// randomly stop nodes every 3 seconds
 	tick := time.NewTicker(3 * time.Second)
 	churnDone := make(chan struct{})
@@ -36,12 +37,14 @@ func TestE2E_NetworkChurn(t *testing.T) {
 				nodeNo := rand.Intn(nodeCount)
 				nodeID := prefix + strconv.Itoa(nodeNo)
 				node := c.nodes[nodeID]
-				if node.IsRunning() {
+				if node.IsRunning() && runningNodeCount > int(math.Ceil(float64(nodeCount/3)))-1 {
 					// node is running
 					c.StopNode(nodeID)
+					runningNodeCount--
 				} else if !node.IsRunning() {
 					// node is not running
 					c.StartNode(nodeID)
+					runningNodeCount++
 				}
 			case <-churnDone:
 				close(end)
