@@ -337,7 +337,7 @@ func TestTransition_RoundChangeState_Timeout(t *testing.T) {
 	// increases to round 1 at the beginning of the round and sends
 	// one RoundChange message.
 	// After the timeout, it increases to round 2 and sends another
-	/// RoundChange message.
+	// / RoundChange message.
 	m.runCycle(context.Background())
 
 	m.expect(expectResult{
@@ -465,8 +465,8 @@ func (m *mockPbft) emitMsg(msg *MessageReq) {
 
 func (m *mockPbft) addMessage(msg *MessageReq) {
 	// convert the address from the address pool
-	//from := m.pool.get(string(msg.From)).Address()
-	//msg.From = from
+	// from := m.pool.get(string(msg.From)).Address()
+	// msg.From = from
 
 	m.state.addMessage(msg)
 }
@@ -610,4 +610,28 @@ func (m *mockB) Insert(pp *SealedProposal) error {
 
 func (m *mockB) ValidatorSet() ValidatorSet {
 	return m.validators
+}
+
+func TestExponentialTimeout(t *testing.T) {
+	testCases := []struct {
+		description string
+		exponent    uint64
+		expected    time.Duration
+	}{
+		{"for round 0 timeout 3s", 0, defaultTimeout + (1 * time.Second)},
+		{"for round 1 timeout 4s", 1, defaultTimeout + (2 * time.Second)},
+		{"for round 2 timeout 6s", 2, defaultTimeout + (4 * time.Second)},
+		{"for round 8 timeout 258s", 8, defaultTimeout + (256 * time.Second)},
+		{"for round 9 timeout 300s", 9, 300 * time.Second},
+		{"for round 10 timeout 5m", 10, 5 * time.Minute},
+		{"for round 34 timeout 5m", 34, 5 * time.Minute},
+	}
+
+	for _, test := range testCases {
+		t.Run(test.description, func(t *testing.T) {
+			ibft := Pbft{state: &currentState{view: &View{Round: test.exponent}}}
+			timeout := ibft.exponentialTimeout()
+			assert.Equal(t, test.expected, timeout)
+		})
+	}
 }
