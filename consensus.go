@@ -616,9 +616,9 @@ func (p *Pbft) sendCommitMsg() {
 	p.gossip(MessageReq_Commit)
 }
 
-func (p *Pbft) gossip(typ MsgType) {
+func (p *Pbft) gossip(msgType MsgType) {
 	msg := &MessageReq{
-		Type: typ,
+		Type: msgType,
 		From: p.validator.NodeID(),
 	}
 

@@ -6,6 +6,7 @@ import (
 	crand "crypto/rand"
 	"fmt"
 	mrand "math/rand"
+	"reflect"
 	"strconv"
 	"testing"
 	"time"
@@ -41,8 +42,6 @@ func createMessagePoolSender(sender string, messageType MsgType, pool *testerAcc
 	}
 	seal := make([]byte, 2)
 	mrand.Read(seal)
-	proposal := make([]byte, 2)
-	mrand.Read(proposal)
 
 	r := uint64(0)
 	if len(round) > 0 {
@@ -54,7 +53,7 @@ func createMessagePoolSender(sender string, messageType MsgType, pool *testerAcc
 		Type:     messageType,
 		View:     &View{Round: r},
 		Seal:     seal,
-		Proposal: proposal,
+		Proposal: mockProposal,
 	}
 	return msg
 }
@@ -271,7 +270,7 @@ func TestState_addCommitted(t *testing.T) {
 func TestState_Copy(t *testing.T) {
 	originalMsg := createMessage("validator_1", MessageReq_Preprepare, 0)
 	copyMsg := originalMsg.Copy()
-	assert.True(t, &originalMsg != &copyMsg)
+	assert.NotSame(t, originalMsg, copyMsg)
 	assert.Equal(t, originalMsg, copyMsg)
 }
 
@@ -307,12 +306,26 @@ func TestState_getCommittedSeals(t *testing.T) {
 	s.addCommitted(createMessage(validatorIds[1], MessageReq_Commit))
 	committedSeals := s.getCommittedSeals()
 
-	assert.True(t, len(committedSeals) == 2)
+	assert.Len(t, committedSeals, 2)
 	assert.True(t, &committedSeals[0] != &s.committed["A"].Seal)
-	assert.Equal(t, committedSeals[0], s.committed["A"].Seal)
+	foundSeal := false
+	for _, seal := range committedSeals {
+		if reflect.DeepEqual(seal, s.committed["A"].Seal) {
+			foundSeal = true
+		}
+	}
+	assert.True(t, &committedSeals[0] != &s.committed["A"].Seal)
+	assert.True(t, foundSeal)
+
+	foundSeal = false
+	for _, seal := range committedSeals {
+		if reflect.DeepEqual(seal, s.committed["B"].Seal) {
+			foundSeal = true
+		}
+	}
 
 	assert.True(t, &committedSeals[1] != &s.committed["B"].Seal)
-	assert.Equal(t, committedSeals[1], s.committed["B"].Seal)
+	assert.True(t, foundSeal)
 }
 
 func TestMsgType_ToString(t *testing.T) {

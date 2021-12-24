@@ -51,8 +51,8 @@ type MessageReq struct {
 	Proposal []byte
 }
 
-func (m *MessageReq) SetProposal(b []byte) {
-	m.Proposal = append([]byte{}, b...)
+func (m *MessageReq) SetProposal(proposal []byte) {
+	m.Proposal = append([]byte{}, proposal...)
 }
 
 func (m *MessageReq) Copy() *MessageReq {
@@ -60,6 +60,9 @@ func (m *MessageReq) Copy() *MessageReq {
 	*mm = *m
 	if m.View != nil {
 		mm.View = m.View.Copy()
+	}
+	if m.Proposal != nil {
+		mm.SetProposal(m.Proposal)
 	}
 	if m.Proposal != nil {
 		mm.Proposal = append([]byte{}, m.Proposal...)
