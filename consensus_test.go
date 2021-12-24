@@ -208,6 +208,40 @@ func TestDoneState_RunCycle_Panics(t *testing.T) {
 	assert.Panics(t, func() { i.runCycle(context.Background()) })
 }
 
+func TestPbft_Run(t *testing.T) {
+	i := newMockPbft(t, []string{"A", "B", "C"}, "A")
+	i.state.view = ViewMsg(1, 0)
+	i.setProposal(&Proposal{
+		Data: mockProposal,
+		Time: time.Now(),
+	})
+	// Prepare messages
+	i.emitMsg(&MessageReq{
+		From: "A",
+		Type: MessageReq_Prepare,
+		View: ViewMsg(1, 0),
+	})
+	i.emitMsg(&MessageReq{
+		From: "B",
+		Type: MessageReq_Prepare,
+		View: ViewMsg(1, 0),
+	})
+	i.emitMsg(&MessageReq{
+		From: "C",
+		Type: MessageReq_Prepare,
+		View: ViewMsg(1, 0),
+	})
+	i.Run(context.Background())
+
+	i.expect(expectResult{
+		state:       DoneState,
+		sequence:    2,
+		prepareMsgs: 1,
+		commitMsgs:  1,
+		outgoing:    3,
+	})
+}
+
 func acceptState_SyncStateTransition(t *testing.T) {
 	// we are in AcceptState and we are not in the validators list
 	// means that we have been removed as validator, move to sync state
@@ -371,6 +405,19 @@ func acceptState_ValidatorLockCorrect(t *testing.T) {
 		state:    ValidateState,
 		locked:   true,
 		outgoing: 1, // prepare message
+	})
+}
+
+func TestAcceptState_NonValidatorNode(t *testing.T) {
+	// Node sending a messages isn't among validator set, so state machine should set state to SyncState
+	i := newMockPbft(t, []string{"A", "B", "C"}, "")
+	i.state.view = ViewMsg(1, 0)
+	i.setState(AcceptState)
+	i.runCycle(context.Background())
+
+	i.expect(expectResult{
+		state:    SyncState,
+		sequence: 1,
 	})
 }
 
