@@ -24,6 +24,8 @@ func TestState_FaultyNodes(t *testing.T) {
 		{7, 2},
 		{8, 2},
 		{9, 2},
+		{99, 32},
+		{100, 33},
 	}
 	for _, c := range cases {
 		acct := []string{}
