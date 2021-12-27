@@ -4,14 +4,17 @@ import (
 	"errors"
 	"math"
 	"math/rand"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/0xPolygon/pbft-consensus"
 )
 
-func init() {
+func TestMain(m *testing.M) {
 	rand.Seed(time.Now().Unix())
+	code := m.Run()
+	os.Exit(code)
 }
 
 func TestE2E_Partition_MinorityCanValidate(t *testing.T) {
