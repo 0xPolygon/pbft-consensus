@@ -1,6 +1,7 @@
 package pbft
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha1"
 	"errors"
@@ -448,6 +449,12 @@ func acceptState_ProposerFailedBuildProposal(t *testing.T) {
 	i.state.view = ViewMsg(1, 0)
 	i.setState(AcceptState)
 
+	var buf bytes.Buffer
+	i.logger.SetOutput(&buf)
+	defer func() {
+		i.logger.SetOutput(getDefaultLoggerOutput())
+	}()
+
 	// Prepare messages
 	i.emitMsg(&MessageReq{
 		From: "A",
@@ -465,18 +472,19 @@ func acceptState_ProposerFailedBuildProposal(t *testing.T) {
 		View: ViewMsg(1, 0),
 	})
 
-	cancelCtx, cancelFn := context.WithCancel(context.Background())
 	go func() {
 		for {
 			if i.GetState() == RoundChangeState {
-				cancelFn()
+				i.cancelFn()
 				return
 			}
 		}
 	}()
 
-	i.Run(cancelCtx)
+	i.Run(i.ctx)
+	i.logger.Println(buf.String())
 
+	assert.Contains(t, buf.String(), "[ERROR] failed to build proposal", "build proposal did not fail")
 	assert.True(t, i.IsState(RoundChangeState))
 }
 
@@ -497,6 +505,12 @@ func acceptState_ValidateProposalFail(t *testing.T) {
 		Time: time.Now(),
 	})
 
+	var buf bytes.Buffer
+	i.logger.SetOutput(&buf)
+	defer func() {
+		i.logger.SetOutput(getDefaultLoggerOutput())
+	}()
+
 	// Prepare messages
 	i.emitMsg(&MessageReq{
 		From: "A",
@@ -514,17 +528,19 @@ func acceptState_ValidateProposalFail(t *testing.T) {
 		View: ViewMsg(1, 0),
 	})
 
-	cancelCtx, cancelFn := context.WithCancel(context.Background())
 	go func() {
 		for {
 			if i.GetState() == RoundChangeState {
-				cancelFn()
+				i.cancelFn()
 				return
 			}
 		}
 	}()
-	i.Run(cancelCtx)
 
+	i.Run(i.ctx)
+	t.Log(buf.String())
+
+	assert.Contains(t, buf.String(), "[ERROR] failed to validate proposal", "validate proposal did not fail")
 	assert.True(t, i.IsState(RoundChangeState))
 }
 
@@ -747,12 +763,7 @@ func newMockPbft(t *testing.T, accounts []string, account string, backendArg ...
 		acct = pool.get(account)
 	}
 
-	var loggerOutput io.Writer
-	if os.Getenv("SILENT") == "true" {
-		loggerOutput = ioutil.Discard
-	} else {
-		loggerOutput = os.Stdout
-	}
+	loggerOutput := getDefaultLoggerOutput()
 
 	// initialize pbft
 	m.Pbft = New(acct, m, WithLogger(log.New(loggerOutput, "", log.LstdFlags)))
@@ -777,6 +788,13 @@ func newMockPbft(t *testing.T, accounts []string, account string, backendArg ...
 	m.cancelFn = cancelFn
 
 	return m
+}
+
+func getDefaultLoggerOutput() io.Writer {
+	if os.Getenv("SILENT") == "true" {
+		return ioutil.Discard
+	}
+	return os.Stdout
 }
 
 func newMockBackend(validatorIds []string, mockPbft *mockPbft, buildProposal buildProposalDelegate, validateProposal validateDelegate) *mockB {
