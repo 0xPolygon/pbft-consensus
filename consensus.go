@@ -27,6 +27,9 @@ type Config struct {
 
 	// Tracer is the OpenTelemetry tracer to log traces
 	Tracer trace.Tracer
+
+	// TimeoutProvider encapsulates logic for timeout calculation
+	TimeoutProvider TimeoutProvider
 }
 
 type ConfigOption func(*Config)
@@ -55,6 +58,12 @@ func WithTracer(t trace.Tracer) ConfigOption {
 	}
 }
 
+func WithTimeoutProvider(timeoutProvider TimeoutProvider) ConfigOption {
+	return func(c *Config) {
+		c.TimeoutProvider = timeoutProvider
+	}
+}
+
 const (
 	defaultTimeout = 2 * time.Second
 	maxTimeout     = 300 * time.Second
@@ -66,6 +75,7 @@ func DefaultConfig() *Config {
 		ProposalTimeout: defaultTimeout,
 		Logger:          log.New(os.Stderr, "", log.LstdFlags),
 		Tracer:          trace.NewNoopTracerProvider().Tracer(""),
+		TimeoutProvider: &DefaultTimeoutProvider{},
 	}
 }
 
@@ -73,6 +83,13 @@ func (c *Config) ApplyOps(opts ...ConfigOption) {
 	for _, opt := range opts {
 		opt(c)
 	}
+}
+
+type DefaultTimeoutProvider struct {
+}
+
+func (t *DefaultTimeoutProvider) CalculateTimeout(round uint64) time.Duration {
+	return exponentialTimeout(round)
 }
 
 type SealedProposal struct {
@@ -103,6 +120,11 @@ type Backend interface {
 
 	// IsStuck returns whether the pbft is stucked
 	IsStuck(num uint64) (uint64, bool)
+}
+
+type TimeoutProvider interface {
+	// CalculateTimeout calculates a wait timeout for various operations
+	CalculateTimeout(round uint64) time.Duration
 }
 
 // Pbft represents the PBFT consensus mechanism object
@@ -138,6 +160,9 @@ type Pbft struct {
 	tracer trace.Tracer
 
 	forceTimeoutCh bool
+
+	// timeoutProvider encapsulates logic for timeout calculation
+	timeoutProvider TimeoutProvider
 }
 
 type SignKey interface {
@@ -151,14 +176,15 @@ func New(validator SignKey, transport Transport, opts ...ConfigOption) *Pbft {
 	config.ApplyOps(opts...)
 
 	p := &Pbft{
-		validator: validator,
-		state:     newState(),
-		transport: transport,
-		msgQueue:  newMsgQueue(),
-		updateCh:  make(chan struct{}),
-		config:    config,
-		logger:    config.Logger,
-		tracer:    config.Tracer,
+		validator:       validator,
+		state:           newState(),
+		transport:       transport,
+		msgQueue:        newMsgQueue(),
+		updateCh:        make(chan struct{}),
+		config:          config,
+		logger:          config.Logger,
+		tracer:          config.Tracer,
+		timeoutProvider: config.TimeoutProvider,
 	}
 
 	p.logger.Printf("[INFO] validator key: addr=%s\n", p.validator.NodeID())
@@ -307,7 +333,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 	// we are NOT a proposer for this height/round. Then, we have to wait
 	// for a pre-prepare message from the proposer
 
-	timeout := p.exponentialTimeout()
+	timeout := p.timeoutProvider.CalculateTimeout(p.state.view.Round)
 
 	// We only need to wait here for one type of message, the Prepare message from the proposer.
 	// However, since we can receive bad Prepare messages we have to wait (or timeout) until
@@ -379,21 +405,19 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 		}
 	}
 
-	timeout := p.exponentialTimeout()
+	timeout := p.timeoutProvider.CalculateTimeout(p.state.view.Round)
 	for p.getState() == ValidateState {
 		_, span := p.tracer.Start(ctx, "ValidateState")
 
 		msg, ok := p.getNextMessage(span, timeout)
-		if !ok {
+		if !ok || msg == nil {
+			if msg == nil {
+				// timeout
+				p.setState(RoundChangeState)
+			}
 			// closing
 			span.End()
 			return
-		}
-		if msg == nil {
-			// timeout
-			p.setState(RoundChangeState)
-			span.End()
-			continue
 		}
 
 		switch msg.Type {
@@ -523,7 +547,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 	checkTimeout := func() {
 		// At this point we might be stuck in the network if:
 		// - We have advanced the round but everyone else passed.
-		//   We are removing those messages since they are old now.
+		// - We are removing those messages since they are old now.
 		if bestHeight, stucked := p.backend.IsStuck(p.state.view.Sequence); stucked {
 			span.AddEvent("OutOfSync", trace.WithAttributes(
 				// our local height
@@ -558,7 +582,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 	}
 
 	// create a timer for the round change
-	timeout := p.exponentialTimeout()
+	timeout := p.timeoutProvider.CalculateTimeout(p.state.view.Round)
 	for p.getState() == RoundChangeState {
 		_, span := p.tracer.Start(ctx, "RoundChangeState")
 
@@ -572,7 +596,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 			p.logger.Printf("[DEBUG] round change timeout")
 			checkTimeout()
 			// update the timeout duration
-			timeout = p.exponentialTimeout()
+			timeout = p.timeoutProvider.CalculateTimeout(p.state.view.Round)
 			span.End()
 			continue
 		}
@@ -588,7 +612,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 			// weak certificate, try to catch up if our round number is smaller
 			if p.state.view.Round < msg.View.Round {
 				// update timer
-				timeout = p.exponentialTimeout()
+				timeout = p.timeoutProvider.CalculateTimeout(p.state.view.Round)
 				sendRoundChange(msg.View.Round)
 			}
 		}
@@ -687,9 +711,8 @@ func (p *Pbft) forceTimeout() {
 }
 
 // exponentialTimeout calculates the timeout duration depending on the current round
-func (p *Pbft) exponentialTimeout() time.Duration {
+func exponentialTimeout(round uint64) time.Duration {
 	timeout := defaultTimeout
-	round := p.state.view.Round
 	// limit exponent to be in range of maxTimeout (<=8) otherwise use maxTimeout
 	// this prevents calculating timeout that is greater than maxTimeout and
 	// possible overflow for calculating timeout for rounds >33 since duration is in nanoseconds stored in int64
