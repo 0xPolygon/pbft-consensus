@@ -1,10 +1,11 @@
 package e2e
 
 import (
-	"errors"
+	"fmt"
 	"math"
 	"math/rand"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -23,8 +24,8 @@ func TestE2E_Partition_MinorityCanValidate(t *testing.T) {
 
 	c := newPBFTCluster(t, "majority_partition", "prt", nodesCnt, hook)
 	limit := int(math.Floor(nodesCnt*2.0/3.0)) + 1 // 2F+1 nodes can Validate
-	for i, node := range c.Nodes() {
-		node.StartWithBackendFactory(createBackend(i >= limit))
+	for _, node := range c.Nodes() {
+		node.StartWithBackendFactory(createBackend(node.name >= "prt_"+strconv.Itoa(limit)))
 	}
 
 	names := generateNodeNames(0, limit, "prt_")
@@ -42,26 +43,30 @@ func TestE2E_Partition_MajorityCantValidate(t *testing.T) {
 
 	c := newPBFTCluster(t, "majority_partition", "prt", nodesCnt, hook)
 	limit := int(math.Floor(nodesCnt * 2.0 / 3.0)) // + 1 removed because 2F+1 nodes is majority
-	for i, node := range c.Nodes() {
-		node.StartWithBackendFactory(createBackend(i >= limit))
+	for _, node := range c.Nodes() {
+		node.StartWithBackendFactory(createBackend(node.name < "prt_"+strconv.Itoa(limit)))
 	}
-
-	names := generateNodeNames(0, limit, "prt_")
+	names := generateNodeNames(limit, nodesCnt, "prt_")
 	c.WaitForHeight(3, 1*time.Minute, true, names)
 }
 
 func TestE2E_Partition_BigMajorityCantValidate(t *testing.T) {
-	const nodesCnt = 100 // N=3F + 1, F = 2
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("Height reached for minority of nodes")
+		}
+	}()
+	const nodesCnt = 100
 	hook := newPartitionTransport(300 * time.Millisecond)
 
 	c := newPBFTCluster(t, "majority_partition", "prt", nodesCnt, hook)
 	limit := int(math.Floor(nodesCnt * 2.0 / 3.0)) // + 1 removed because 2F+1 nodes is majority
-	for i, node := range c.Nodes() {
-		node.StartWithBackendFactory(createBackend(i >= limit))
+	for _, node := range c.Nodes() {
+		node.StartWithBackendFactory(createBackend(node.name <= "prt_"+strconv.Itoa(limit)))
 	}
 
-	names := generateNodeNames(0, limit, "prt_")
-	c.WaitForHeight(15, 2*time.Minute, false, names)
+	nodeNames := generateNodeNames(limit, nodesCnt, "prt_")
+	c.WaitForHeight(8, 1*time.Minute, true, nodeNames)
 }
 
 type fsmValidationError struct {
@@ -69,7 +74,7 @@ type fsmValidationError struct {
 }
 
 func (f *fsmValidationError) Validate(_ []byte) error {
-	return errors.New("invalid propsal")
+	return fmt.Errorf("invalid propsal")
 }
 
 type fsmInsertError struct {
@@ -77,27 +82,17 @@ type fsmInsertError struct {
 }
 
 func (f *fsmInsertError) Insert(_ *pbft.SealedProposal) error {
-	return errors.New("insert error")
-}
-
-type fsmWrongHash struct {
-	fsm
-}
-
-func (f *fsmWrongHash) Hash(p []byte) []byte {
-	return []byte("")
+	return fmt.Errorf("insert error")
 }
 
 func createBackend(invalid bool) func(nn *node) pbft.Backend {
 	return func(nn *node) pbft.Backend {
 		if invalid {
-			switch rand.Intn(3) {
+			switch rand.Intn(2) {
 			case 0:
 				return &fsmValidationError{fsm: NewFsm(nn)}
 			case 1:
 				return &fsmInsertError{fsm: NewFsm(nn)}
-			case 2:
-				return &fsmWrongHash{fsm: NewFsm(nn)}
 			}
 		}
 		tmp := NewFsm(nn)

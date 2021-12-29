@@ -6,10 +6,9 @@ import (
 )
 
 func generateNodeNames(from int, count int, prefix string) []string {
-	names := make([]string, count)
-	for j := 0; j < count; j++ {
-		names[j] = prefix + strconv.Itoa(from)
-		from++
+	var names []string
+	for j := from; j < count; j++ {
+		names = append(names, prefix+strconv.Itoa(j))
 	}
 	return names
 }
