@@ -36,8 +36,8 @@ func Test_InitializeConfigOptionsSet(t *testing.T) {
 		sequence: 1, // use by default sequence=1
 	}
 
-	timeout := time.Duration(time.Millisecond)
-	proposalTimeout := time.Duration(2 * time.Millisecond)
+	timeout := 1 * time.Millisecond
+	proposalTimeout := 2 * time.Millisecond
 	mockTracer := &mockTracer{}
 	mockTimeoutProvider := &mockTimeoutProvider{}
 
@@ -60,7 +60,7 @@ func Test_InitializeConfigOptionsSet(t *testing.T) {
 func TestTransition_AcceptState(t *testing.T) {
 	t.Parallel()
 
-	for scenario, fn := range map[string]func(t *testing.T){
+	for sc, testFn := range map[string]func(t *testing.T){
 		"move to sync state":             acceptState_SyncStateTransition,
 		"proposer create proposal":       acceptState_ProposerPropose,
 		"proposer locked":                acceptState_ProposerLocked,
@@ -72,9 +72,11 @@ func TestTransition_AcceptState(t *testing.T) {
 		"validate proposal failure":      acceptState_ValidateProposalFail,
 		"run from non validator node":    acceptState_NonValidatorNode,
 	} {
+		scenario := sc
+		testCase := testFn
 		t.Run(scenario, func(t *testing.T) {
 			t.Parallel()
-			fn(t)
+			testCase(t)
 		})
 	}
 }
@@ -82,7 +84,7 @@ func TestTransition_AcceptState(t *testing.T) {
 func TestTransition_RoundChangeState(t *testing.T) {
 	t.Parallel()
 
-	for scenario, fn := range map[string]func(t *testing.T){
+	for sc, testFn := range map[string]func(t *testing.T){
 		"round catchup":                        roundChangeState_CatchupRound,
 		"timeout":                              roundChangeState_Timeout,
 		"weak certificate":                     roundChangeState_WeakCertificate,
@@ -91,9 +93,11 @@ func TestTransition_RoundChangeState(t *testing.T) {
 		"catchup highest round due to timeout": roundChangeState_MaxRound,
 		"round change stuck":                   roundChangeState_Stuck,
 	} {
+		scenario := sc
+		testCase := testFn
 		t.Run(scenario, func(t *testing.T) {
 			t.Parallel()
-			fn(t)
+			testCase(t)
 		})
 	}
 }
@@ -101,13 +105,15 @@ func TestTransition_RoundChangeState(t *testing.T) {
 func TestTransition_ValidateState(t *testing.T) {
 	t.Parallel()
 
-	for scenario, fn := range map[string]func(t *testing.T){
+	for sc, testFn := range map[string]func(t *testing.T){
 		"validate to commit state":       validateState_MoveToCommitState,
 		"validate to round change state": validateState_MoveToRoundChangeState,
 	} {
+		scenario := sc
+		testCase := testFn
 		t.Run(scenario, func(t *testing.T) {
 			t.Parallel()
-			fn(t)
+			testCase(t)
 		})
 	}
 }
@@ -235,7 +241,7 @@ func TestTransition_CommitState_DoneState(t *testing.T) {
 
 	m := newMockPbft(t, []string{"A", "B", "C"}, "A")
 	m.state.view = ViewMsg(1, 0)
-	m.state.proposer = NodeID("A")
+	m.state.proposer = "A"
 	m.setState(CommitState)
 
 	m.runCycle(context.Background())
@@ -795,7 +801,7 @@ func TestTransportGossip_Failed(t *testing.T) {
 	defer func() {
 		m.logger.SetOutput(getDefaultLoggerOutput())
 	}()
-	m.gossip(MessageReq_Preprepare)
+	_ = m.gossip(MessageReq_Preprepare)
 	m.logger.Println(buf.String())
 	assert.Contains(t, buf.String(), "[ERROR] failed to gossip")
 }
@@ -876,7 +882,7 @@ func newMockPbft(t *testing.T, accounts []string, account string, backendArg ...
 	} else {
 		backend = newMockBackend(accounts, m, nil, nil, nil)
 	}
-	m.Pbft.SetBackend(backend)
+	_ = m.Pbft.SetBackend(backend)
 
 	m.state.proposal = &Proposal{
 		Data: mockProposal,
@@ -1028,13 +1034,13 @@ func (m *mockBackend) ValidatorSet() ValidatorSet {
 type mockTracer struct {
 }
 
-func (t *mockTracer) Start(ctx context.Context, spanName string, opts ...trace.SpanStartOption) (context.Context, trace.Span) {
+func (t *mockTracer) Start(_ context.Context, _ string, _ ...trace.SpanStartOption) (context.Context, trace.Span) {
 	return context.Background(), nil
 }
 
 type mockTimeoutProvider struct {
 }
 
-func (p *mockTimeoutProvider) CalculateTimeout(round uint64) time.Duration {
+func (p *mockTimeoutProvider) CalculateTimeout(_ uint64) time.Duration {
 	return time.Millisecond
 }
