@@ -358,9 +358,11 @@ func TestPbftState_ToString(t *testing.T) {
 	assert.Panics(t, func() { _ = PbftState(20).String() })
 }
 
+type signDelegate func([]byte) ([]byte, error)
 type testerAccount struct {
-	alias string
-	priv  *ecdsa.PrivateKey
+	alias  string
+	priv   *ecdsa.PrivateKey
+	signFn signDelegate
 }
 
 func (t *testerAccount) NodeID() NodeID {
@@ -368,7 +370,9 @@ func (t *testerAccount) NodeID() NodeID {
 }
 
 func (t *testerAccount) Sign(b []byte) ([]byte, error) {
-	// TODO: Check is this correct?
+	if t.signFn != nil {
+		return t.signFn(b)
+	}
 	return ecdsa.SignASN1(crand.Reader, t.priv, b)
 }
 

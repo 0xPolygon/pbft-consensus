@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"reflect"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -65,8 +64,9 @@ func WithTimeoutProvider(timeoutProvider TimeoutProvider) ConfigOption {
 }
 
 const (
-	defaultTimeout = 2 * time.Second
-	maxTimeout     = 300 * time.Second
+	defaultTimeout     = 2 * time.Second
+	maxTimeout         = 300 * time.Second
+	maxTimeoutExponent = 8
 )
 
 func DefaultConfig() *Config {
@@ -88,8 +88,19 @@ func (c *Config) ApplyOps(opts ...ConfigOption) {
 type DefaultTimeoutProvider struct {
 }
 
-func (t *DefaultTimeoutProvider) CalculateTimeout(round uint64) time.Duration {
-	return exponentialTimeout(round)
+// CalculateTimeout calculates the timeout duration depending on the current round.
+// Round acts as an exponent when determining timeout (2^round).
+func (t *DefaultTimeoutProvider) CalculateTimeout(timeoutExponent uint64) time.Duration {
+	timeout := defaultTimeout
+	// limit exponent to be in range of maxTimeout (<=8) otherwise use maxTimeout
+	// this prevents calculating timeout that is greater than maxTimeout and
+	// possible overflow for calculating timeout for rounds >33 since duration is in nanoseconds stored in int64
+	if timeoutExponent <= maxTimeoutExponent {
+		timeout += time.Duration(1<<timeoutExponent) * time.Second
+	} else {
+		timeout = maxTimeout
+	}
+	return timeout
 }
 
 type SealedProposal struct {
@@ -428,7 +439,7 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 			p.state.addCommitted(msg)
 
 		default:
-			panic(fmt.Sprintf("BUG: %s", reflect.TypeOf(msg.Type)))
+			panic(fmt.Errorf("BUG: Unexpected message type: %s in %s", msg.Type, p.getState()))
 		}
 
 		if p.state.numPrepared() > p.state.NumValid() {
@@ -708,20 +719,6 @@ func (p *Pbft) setState(s PbftState) {
 // forceTimeout sets the forceTimeoutCh flag to true
 func (p *Pbft) forceTimeout() {
 	p.forceTimeoutCh = true
-}
-
-// exponentialTimeout calculates the timeout duration depending on the current round
-func exponentialTimeout(round uint64) time.Duration {
-	timeout := defaultTimeout
-	// limit exponent to be in range of maxTimeout (<=8) otherwise use maxTimeout
-	// this prevents calculating timeout that is greater than maxTimeout and
-	// possible overflow for calculating timeout for rounds >33 since duration is in nanoseconds stored in int64
-	if round <= 8 {
-		timeout += time.Duration(1<<round) * time.Second
-	} else {
-		timeout = maxTimeout
-	}
-	return timeout
 }
 
 // getNextMessage reads a new message from the message queue
