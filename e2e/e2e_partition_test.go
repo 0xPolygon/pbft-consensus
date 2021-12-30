@@ -25,6 +25,15 @@ func TestE2E_Partition_OneMajority(t *testing.T) {
 	// the partition with two nodes is stuck
 	c.IsStuck(10*time.Second, partitions[1])
 
-	// TODO: Reset and check that they can sync again
+	// reset all partitions
+	hook.Reset()
+
+	allNodes := make([]string, len(c.nodes))
+	for i, node := range c.Nodes() {
+		allNodes[i] = node.name
+	}
+	// all nodes should be able to sync
+	c.WaitForHeight(15, 1*time.Minute, false, allNodes)
+
 	c.Stop()
 }
