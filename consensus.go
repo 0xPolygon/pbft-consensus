@@ -520,8 +520,6 @@ func (p *Pbft) runCommitState(ctx context.Context) {
 		p.logger.Print("[ERROR] failed to insert proposal", " err:", err)
 		p.handleStateErr(errFailedToInsertProposal)
 	} else {
-		p.setSequence(p.state.view.Sequence + 1)
-
 		// move to done state to finish the current iteration of the state machine
 		p.setState(DoneState)
 	}

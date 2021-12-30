@@ -313,7 +313,7 @@ func commitState_DoneState(t *testing.T) {
 	m.runCycle(m.ctx)
 
 	m.expect(expectResult{
-		sequence: 2,
+		sequence: 1,
 		state:    DoneState,
 	})
 }
@@ -396,7 +396,7 @@ func TestPbft_Run(t *testing.T) {
 
 	m.expect(expectResult{
 		state:       DoneState,
-		sequence:    2,
+		sequence:    1,
 		prepareMsgs: 1,
 		commitMsgs:  1,
 		outgoing:    3,
