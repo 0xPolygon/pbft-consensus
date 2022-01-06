@@ -11,7 +11,7 @@ import (
 func TestE2E_Unreliable_Network(t *testing.T) {
 	nodesCount := 20 + rand.Intn(11) // vary nodes [20,30]
 	maxFaulty := nodesCount/3 - 1
-	maxHeight := uint64(200)
+	maxHeight := uint64(40)
 	currentHeight := uint64(0)
 	jitterMax := 500 * time.Millisecond
 	hook := newPartitionTransport(jitterMax)
@@ -20,7 +20,7 @@ func TestE2E_Unreliable_Network(t *testing.T) {
 	c.Start()
 
 	for {
-		currentHeight = currentHeight + 10
+		currentHeight += 5
 		var minorityPartition []string
 		var majorityPartition []string
 		// create 2 partition with random number of nodes
@@ -35,12 +35,13 @@ func TestE2E_Unreliable_Network(t *testing.T) {
 		fmt.Printf("Partitions ratio %d/%d\n", len(majorityPartition), len(minorityPartition))
 
 		hook.Partition(minorityPartition, majorityPartition)
+		fmt.Printf("Checking for height %v, started with nodes %d\n", currentHeight, nodesCount)
 		c.WaitForHeight(currentHeight, 10*time.Minute, false, majorityPartition)
 		// randomly drop if possible nodes from the partition pick one number
 		dropN := rand.Intn(maxFaulty - pSize + 1)
 		fmt.Printf("Dropping: %v nodes.\n", dropN)
 
-		currentHeight += 10
+		currentHeight += 5
 		// stop N nodes from majority partition
 		for i := 0; i < dropN; i++ {
 			c.nodes["prt_"+strconv.Itoa(pSize+i)].Stop()
@@ -60,6 +61,7 @@ func TestE2E_Unreliable_Network(t *testing.T) {
 			}
 		}
 		// check all running nodes in majority partition for the block height
+		fmt.Printf("Checking for height %v, started with nodes %d\n", currentHeight, nodesCount)
 		c.WaitForHeight(currentHeight, 10*time.Minute, false, runningMajorityNodes)
 		// restart network for this iteration
 		hook.Reset()
@@ -73,6 +75,8 @@ func TestE2E_Unreliable_Network(t *testing.T) {
 	}
 	hook.Reset()
 	// all nodes in the network should be synced after starting all nodes and partition restart
-	c.WaitForHeight(maxHeight+20, 20*time.Minute, false)
+	finalHeight := maxHeight + 10
+	fmt.Printf("Checking final height %v, nodes: %d\n", finalHeight, nodesCount)
+	c.WaitForHeight(finalHeight, 20*time.Minute, false)
 	c.Stop()
 }

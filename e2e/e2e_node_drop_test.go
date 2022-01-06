@@ -1,7 +1,7 @@
 package e2e
 
 import (
-	"math"
+	"fmt"
 	"math/rand"
 	"strconv"
 	"testing"
@@ -22,6 +22,7 @@ func TestE2E_NodeDrop(t *testing.T) {
 func TestE2E_NetworkChurn(t *testing.T) {
 	rand.Seed(time.Now().Unix())
 	nodeCount := 20
+	maxFaulty := nodeCount/3 - 1
 	const prefix = "ptr_"
 	c := newPBFTCluster(t, "network_churn", "ptr", nodeCount)
 	c.Start()
@@ -31,7 +32,7 @@ func TestE2E_NetworkChurn(t *testing.T) {
 		nodeNo := rand.Intn(nodeCount)
 		nodeID := prefix + strconv.Itoa(nodeNo)
 		node := c.nodes[nodeID]
-		if node.IsRunning() && runningNodeCount > int(math.Ceil(float64(nodeCount)/3.0))-1 {
+		if node.IsRunning() && runningNodeCount > nodeCount-maxFaulty {
 			// node is running
 			c.StopNode(nodeID)
 			runningNodeCount--
@@ -44,20 +45,14 @@ func TestE2E_NetworkChurn(t *testing.T) {
 
 	// get all running nodes after random drops
 	var runningNodes []string
-	var stoppedNodes []string
 	for _, v := range c.nodes {
 		if v.IsRunning() {
 			runningNodes = append(runningNodes, v.name)
-		} else {
-			stoppedNodes = append(stoppedNodes, v.name)
 		}
 	}
-
-	// all stopped nodes are stuck
-	c.IsStuck(30*time.Second, stoppedNodes)
-
+	fmt.Println("Checking height after churn")
 	// all running nodes must have the same height
-	c.WaitForHeight(15, 1*time.Minute, false, runningNodes)
+	c.WaitForHeight(35, 5*time.Minute, false, runningNodes)
 
 	// start rest of the nodes
 	for _, v := range c.nodes {
@@ -66,9 +61,9 @@ func TestE2E_NetworkChurn(t *testing.T) {
 			runningNodes = append(runningNodes, v.name)
 		}
 	}
-
 	// all nodes must sync and have same height
-	c.WaitForHeight(20, 1*time.Minute, false, runningNodes)
+	fmt.Println("Checking height after all nodes start")
+	c.WaitForHeight(45, 5*time.Minute, false, runningNodes)
 
 	c.Stop()
 }
