@@ -12,6 +12,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+type RoundTimeout func(uint64) time.Duration
+
 type Config struct {
 	// ProposalTimeout is the time to wait for the proposal
 	// from the validator. It defaults to Timeout
@@ -27,8 +29,8 @@ type Config struct {
 	// Tracer is the OpenTelemetry tracer to log traces
 	Tracer trace.Tracer
 
-	// TimeoutProvider encapsulates logic for timeout calculation
-	TimeoutProvider TimeoutProvider
+	// RoundTimeout is a function that calculates timeout based on a round number
+	RoundTimeout RoundTimeout
 }
 
 type ConfigOption func(*Config)
@@ -57,9 +59,9 @@ func WithTracer(t trace.Tracer) ConfigOption {
 	}
 }
 
-func WithTimeoutProvider(timeoutProvider TimeoutProvider) ConfigOption {
+func WithRoundTimeout(rt RoundTimeout) ConfigOption {
 	return func(c *Config) {
-		c.TimeoutProvider = timeoutProvider
+		c.RoundTimeout = rt
 	}
 }
 
@@ -75,7 +77,7 @@ func DefaultConfig() *Config {
 		ProposalTimeout: defaultTimeout,
 		Logger:          log.New(os.Stderr, "", log.LstdFlags),
 		Tracer:          trace.NewNoopTracerProvider().Tracer(""),
-		TimeoutProvider: &DefaultTimeoutProvider{},
+		RoundTimeout:    exponentialTimeout,
 	}
 }
 
@@ -83,24 +85,6 @@ func (c *Config) ApplyOps(opts ...ConfigOption) {
 	for _, opt := range opts {
 		opt(c)
 	}
-}
-
-type DefaultTimeoutProvider struct {
-}
-
-// CalculateTimeout calculates the timeout duration depending on the current round.
-// Round acts as an exponent when determining timeout (2^round).
-func (t *DefaultTimeoutProvider) CalculateTimeout(timeoutExponent uint64) time.Duration {
-	timeout := defaultTimeout
-	// limit exponent to be in range of maxTimeout (<=8) otherwise use maxTimeout
-	// this prevents calculating timeout that is greater than maxTimeout and
-	// possible overflow for calculating timeout for rounds >33 since duration is in nanoseconds stored in int64
-	if timeoutExponent <= maxTimeoutExponent {
-		timeout += time.Duration(1<<timeoutExponent) * time.Second
-	} else {
-		timeout = maxTimeout
-	}
-	return timeout
 }
 
 type SealedProposal struct {
@@ -131,11 +115,6 @@ type Backend interface {
 
 	// IsStuck returns whether the pbft is stucked
 	IsStuck(num uint64) (uint64, bool)
-}
-
-type TimeoutProvider interface {
-	// CalculateTimeout calculates a wait timeout for various operations
-	CalculateTimeout(round uint64) time.Duration
 }
 
 // Pbft represents the PBFT consensus mechanism object
@@ -170,10 +149,10 @@ type Pbft struct {
 	// tracer is a reference to the OpenTelemetry tracer
 	tracer trace.Tracer
 
-	forceTimeoutCh bool
+	// calculates timeout for a specific round
+	roundTimeout RoundTimeout
 
-	// timeoutProvider encapsulates logic for timeout calculation
-	timeoutProvider TimeoutProvider
+	forceTimeoutCh bool
 }
 
 type SignKey interface {
@@ -187,15 +166,15 @@ func New(validator SignKey, transport Transport, opts ...ConfigOption) *Pbft {
 	config.ApplyOps(opts...)
 
 	p := &Pbft{
-		validator:       validator,
-		state:           newState(),
-		transport:       transport,
-		msgQueue:        newMsgQueue(),
-		updateCh:        make(chan struct{}),
-		config:          config,
-		logger:          config.Logger,
-		tracer:          config.Tracer,
-		timeoutProvider: config.TimeoutProvider,
+		validator:    validator,
+		state:        newState(),
+		transport:    transport,
+		msgQueue:     newMsgQueue(),
+		updateCh:     make(chan struct{}),
+		config:       config,
+		logger:       config.Logger,
+		tracer:       config.Tracer,
+		roundTimeout: config.RoundTimeout,
 	}
 
 	p.logger.Printf("[INFO] validator key: addr=%s\n", p.validator.NodeID())
@@ -344,7 +323,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 	// we are NOT a proposer for this height/round. Then, we have to wait
 	// for a pre-prepare message from the proposer
 
-	timeout := p.timeoutProvider.CalculateTimeout(p.state.view.Round)
+	timeout := p.roundTimeout(p.state.view.Round)
 
 	// We only need to wait here for one type of message, the Prepare message from the proposer.
 	// However, since we can receive bad Prepare messages we have to wait (or timeout) until
@@ -416,7 +395,7 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 		}
 	}
 
-	timeout := p.timeoutProvider.CalculateTimeout(p.state.view.Round)
+	timeout := p.roundTimeout(p.state.view.Round)
 	for p.getState() == ValidateState {
 		_, span := p.tracer.Start(ctx, "ValidateState")
 
@@ -591,7 +570,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 	}
 
 	// create a timer for the round change
-	timeout := p.timeoutProvider.CalculateTimeout(p.state.view.Round)
+	timeout := p.roundTimeout(p.state.view.Round)
 	for p.getState() == RoundChangeState {
 		_, span := p.tracer.Start(ctx, "RoundChangeState")
 
@@ -605,7 +584,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 			p.logger.Printf("[DEBUG] round change timeout")
 			checkTimeout()
 			// update the timeout duration
-			timeout = p.timeoutProvider.CalculateTimeout(p.state.view.Round)
+			timeout = p.roundTimeout(p.state.view.Round)
 			span.End()
 			continue
 		}
@@ -621,7 +600,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 			// weak certificate, try to catch up if our round number is smaller
 			if p.state.view.Round < msg.View.Round {
 				// update timer
-				timeout = p.timeoutProvider.CalculateTimeout(p.state.view.Round)
+				timeout = p.roundTimeout(p.state.view.Round)
 				sendRoundChange(msg.View.Round)
 			}
 		}
@@ -717,6 +696,21 @@ func (p *Pbft) setState(s PbftState) {
 // forceTimeout sets the forceTimeoutCh flag to true
 func (p *Pbft) forceTimeout() {
 	p.forceTimeoutCh = true
+}
+
+// exponentialTimeout calculates the timeout duration depending on the current round.
+// Round acts as an exponent when determining timeout (2^round).
+func exponentialTimeout(round uint64) time.Duration {
+	timeout := defaultTimeout
+	// limit exponent to be in range of maxTimeout (<=8) otherwise use maxTimeout
+	// this prevents calculating timeout that is greater than maxTimeout and
+	// possible overflow for calculating timeout for rounds >33 since duration is in nanoseconds stored in int64
+	if round <= maxTimeoutExponent {
+		timeout += time.Duration(1<<round) * time.Second
+	} else {
+		timeout = maxTimeout
+	}
+	return timeout
 }
 
 // getNextMessage reads a new message from the message queue

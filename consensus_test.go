@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -23,6 +24,16 @@ var (
 	mockProposal  = []byte{0x1, 0x2, 0x3}
 	mockProposal1 = []byte{0x1, 0x2, 0x3, 0x4}
 )
+
+// MockedTracer is a mocked object that implements Tracer interface
+type MockedTracer struct {
+	mock.Mock
+}
+
+func (m *MockedTracer) Start(ctx context.Context, spanName string, opts ...trace.SpanStartOption) (context.Context, trace.Span) {
+	args := m.Called(ctx, spanName, opts)
+	return args.Get(0).(context.Context), args.Get(1).(trace.Span)
+}
 
 func Test_InitializeConfigOptionsSet(t *testing.T) {
 	t.Parallel()
@@ -39,29 +50,30 @@ func Test_InitializeConfigOptionsSet(t *testing.T) {
 
 	timeout := 1 * time.Millisecond
 	proposalTimeout := 2 * time.Millisecond
-	mockTracer := &mockTracer{}
-	mockTimeoutProvider := &mockTimeoutProvider{}
+	mockedTracer := new(MockedTracer)
+	mockedTimeout := func(u uint64) time.Duration { return 0 }
 
 	assert.NotPanics(t, func() {
 		m.Pbft = New(pool.get("A"), m,
 			WithTimeout(timeout),
 			WithProposalTimeout(proposalTimeout),
-			WithTracer(mockTracer),
-			WithTimeoutProvider(mockTimeoutProvider))
+			WithTracer(mockedTracer),
+			WithRoundTimeout(mockedTimeout))
 	}, "New function failed to execute")
-	assert.Same(t, mockTracer, m.Pbft.config.Tracer)
-	assert.Same(t, mockTimeoutProvider, m.Pbft.config.TimeoutProvider)
+	assert.Same(t, mockedTracer, m.Pbft.config.Tracer)
 
 	assert.Equal(t, timeout, m.Pbft.config.Timeout)
 	assert.Equal(t, proposalTimeout, m.Pbft.config.ProposalTimeout)
-	assert.Equal(t, mockTracer, m.Pbft.config.Tracer)
-	assert.Equal(t, mockTimeoutProvider, m.Pbft.config.TimeoutProvider)
+	assert.Equal(t, mockedTracer, m.Pbft.config.Tracer)
+
+	mockedTracer.AssertNotCalled(t, "Start")
+	mockedTracer.AssertExpectations(t)
 }
 
 func TestTransition_AcceptState(t *testing.T) {
 	t.Parallel()
 
-	for sc, testFn := range map[string]func(t *testing.T){
+	for sc, f := range map[string]func(t *testing.T){
 		"move to sync state":             acceptState_SyncStateTransition,
 		"proposer create proposal":       acceptState_ProposerPropose,
 		"proposer locked":                acceptState_ProposerLocked,
@@ -75,11 +87,11 @@ func TestTransition_AcceptState(t *testing.T) {
 		"validate proposal failure":      acceptState_ValidateProposalFail,
 		"run from non validator node":    acceptState_NonValidatorNode,
 	} {
-		scenario := sc
-		testCase := testFn
-		t.Run(scenario, func(t *testing.T) {
+		sc := sc
+		f := f
+		t.Run(sc, func(t *testing.T) {
 			t.Parallel()
-			testCase(t)
+			f(t)
 		})
 	}
 }
@@ -87,7 +99,7 @@ func TestTransition_AcceptState(t *testing.T) {
 func TestTransition_RoundChangeState(t *testing.T) {
 	t.Parallel()
 
-	for sc, testFn := range map[string]func(t *testing.T){
+	for sc, f := range map[string]func(t *testing.T){
 		"round catchup":                        roundChangeState_CatchupRound,
 		"timeout":                              roundChangeState_Timeout,
 		"weak certificate":                     roundChangeState_WeakCertificate,
@@ -96,11 +108,11 @@ func TestTransition_RoundChangeState(t *testing.T) {
 		"catchup highest round due to timeout": roundChangeState_MaxRound,
 		"round change stuck":                   roundChangeState_Stuck,
 	} {
-		scenario := sc
-		testCase := testFn
-		t.Run(scenario, func(t *testing.T) {
+		sc := sc
+		f := f
+		t.Run(sc, func(t *testing.T) {
 			t.Parallel()
-			testCase(t)
+			f(t)
 		})
 	}
 }
@@ -108,22 +120,23 @@ func TestTransition_RoundChangeState(t *testing.T) {
 func TestTransition_ValidateState(t *testing.T) {
 	t.Parallel()
 
-	for sc, testFn := range map[string]func(t *testing.T){
+	for sc, f := range map[string]func(t *testing.T){
 		"validate to commit state":       validateState_MoveToCommitState,
 		"validate to round change state": validateState_MoveToRoundChangeState,
 		"validate wrong message type":    validateState_WrongMessageType,
 		"discarded message":              validateState_DiscardMessage,
 	} {
-		scenario := sc
-		testCase := testFn
-		t.Run(scenario, func(t *testing.T) {
+		sc := sc
+		f := f
+		t.Run(sc, func(t *testing.T) {
 			t.Parallel()
-			testCase(t)
+			f(t)
 		})
 	}
 }
 
 func validateState_MoveToCommitState(t *testing.T) {
+	t.Helper()
 	// we receive enough prepare messages to lock and commit the proposal
 	m := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
 	m.setState(ValidateState)
@@ -180,6 +193,7 @@ func validateState_MoveToCommitState(t *testing.T) {
 }
 
 func validateState_MoveToRoundChangeState(t *testing.T) {
+	t.Helper()
 	// No messages are sent, so we are changing state to round change state and jumping out of the state machine loop
 	m := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
 	m.setState(ValidateState)
@@ -190,6 +204,7 @@ func validateState_MoveToRoundChangeState(t *testing.T) {
 }
 
 func validateState_WrongMessageType(t *testing.T) {
+	t.Helper()
 	// Send wrong message type within ValidateState and asssure it panics
 	m := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
 	m.setState(ValidateState)
@@ -206,6 +221,7 @@ func validateState_WrongMessageType(t *testing.T) {
 }
 
 func validateState_DiscardMessage(t *testing.T) {
+	t.Helper()
 	m := newMockPbft(t, []string{"A", "B"}, "A")
 	m.setState(ValidateState)
 	m.setProposal(&Proposal{
@@ -266,7 +282,7 @@ func TestExponentialTimeout(t *testing.T) {
 
 	testCases := []struct {
 		description string
-		exponent    uint64
+		round       uint64
 		expected    time.Duration
 	}{
 		{"for round 0", 0, defaultTimeout + (1 * time.Second)},
@@ -278,33 +294,34 @@ func TestExponentialTimeout(t *testing.T) {
 		{"for round 34", 34, maxTimeout},
 	}
 
-	for _, testCase := range testCases {
-		tc := testCase // rebind tc into this lexical scope
+	for _, tc := range testCases {
+		tc := tc // rebind tc into this lexical scope
 		t.Run(tc.description, func(t *testing.T) {
 			t.Parallel()
-			defaultTimeoutProvider := &DefaultTimeoutProvider{}
-			timeout := defaultTimeoutProvider.CalculateTimeout(tc.exponent)
+			timeout := exponentialTimeout(tc.round)
 			require.Equal(t, tc.expected, timeout, fmt.Sprintf("timeout should be %s", tc.expected))
 		})
 	}
 }
 
 func TestTransition_CommitState(t *testing.T) {
-	for sc, testFn := range map[string]func(t *testing.T){
+	for sc, f := range map[string]func(t *testing.T){
 		"move to done state":         commitState_DoneState,
 		"move to round change state": commitState_RoundChange,
 	} {
-		scenario := sc
-		testCase := testFn
-		t.Run(scenario, func(t *testing.T) {
+		sc := sc
+		f := f
+		t.Run(sc, func(t *testing.T) {
 			t.Parallel()
-			testCase(t)
+			f(t)
 		})
 	}
 
 }
 
 func commitState_DoneState(t *testing.T) {
+	t.Helper()
+
 	m := newMockPbft(t, []string{"A", "B", "C"}, "A")
 	m.state.view = ViewMsg(1, 0)
 	m.state.proposer = "A"
@@ -319,6 +336,8 @@ func commitState_DoneState(t *testing.T) {
 }
 
 func commitState_RoundChange(t *testing.T) {
+	t.Helper()
+
 	m := newMockPbft(t, []string{"A", "B", "C"}, "A")
 	m.state.view = ViewMsg(1, 0)
 	m.setState(CommitState)
@@ -404,6 +423,7 @@ func TestPbft_Run(t *testing.T) {
 }
 
 func acceptState_SyncStateTransition(t *testing.T) {
+	t.Helper()
 	// we are in AcceptState and we are not in the validators list
 	// means that we have been removed as validator, move to sync state
 	m := newMockPbft(t, []string{"A", "B", "C", "D"}, "")
@@ -418,6 +438,7 @@ func acceptState_SyncStateTransition(t *testing.T) {
 }
 
 func acceptState_ProposerPropose(t *testing.T) {
+	t.Helper()
 	// we are in AcceptState and we are the proposer, it needs to:
 	// 1. create a proposal
 	// 2. wait for the delay
@@ -443,6 +464,7 @@ func acceptState_ProposerPropose(t *testing.T) {
 }
 
 func acceptState_ProposerLocked(t *testing.T) {
+	t.Helper()
 	// we are in AcceptState, we are the proposer but the value is locked.
 	// it needs to send the locked proposal again
 	m := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
@@ -465,6 +487,7 @@ func acceptState_ProposerLocked(t *testing.T) {
 }
 
 func acceptState_ValidatorVerifyCorrect(t *testing.T) {
+	t.Helper()
 	m := newMockPbft(t, []string{"A", "B", "C"}, "B")
 	m.state.view = ViewMsg(1, 0)
 	m.setState(AcceptState)
@@ -487,6 +510,7 @@ func acceptState_ValidatorVerifyCorrect(t *testing.T) {
 }
 
 func acceptState_ValidatorProposerInvalid(t *testing.T) {
+	t.Helper()
 	m := newMockPbft(t, []string{"A", "B", "C"}, "B")
 	m.state.view = ViewMsg(1, 0)
 	m.setState(AcceptState)
@@ -510,6 +534,7 @@ func acceptState_ValidatorProposerInvalid(t *testing.T) {
 }
 
 func acceptState_ProposerCancellation(t *testing.T) {
+	t.Helper()
 	// We are in the AcceptState, we are the proposer.
 	// Cancellation occurs, so we are checking whether we are still in AcceptState.
 	m := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
@@ -528,11 +553,15 @@ func acceptState_ProposerCancellation(t *testing.T) {
 }
 
 func acceptState_NonProposerCancellation(t *testing.T) {
+	t.Helper()
 	// We are in the AcceptState, we are non proposer node.
 	// Cancellation occurs, so we are checking whether we are still in AcceptState.
 	m := newMockPbft(t, []string{"A", "B", "C", "D"}, "D")
 	m.Pbft.state.proposer = "A"
-	m.timeoutProvider = &mockTimeoutProvider{timeout: time.Second}
+
+	// mock round timeout
+	m.roundTimeout = func(u uint64) time.Duration { return time.Millisecond }
+
 	m.setState(AcceptState)
 	m.setProposal(&Proposal{
 		Data: mockProposal,
@@ -548,6 +577,7 @@ func acceptState_NonProposerCancellation(t *testing.T) {
 }
 
 func acceptState_ValidatorLockWrong(t *testing.T) {
+	t.Helper()
 	// we are a validator and have a locked state in 'proposal1'.
 	// We receive an invalid proposal 'proposal2' with different data.
 
@@ -580,6 +610,7 @@ func acceptState_ValidatorLockWrong(t *testing.T) {
 }
 
 func acceptState_ValidatorLockCorrect(t *testing.T) {
+	t.Helper()
 	m := newMockPbft(t, []string{"A", "B", "C"}, "B")
 	m.state.view = ViewMsg(1, 0)
 	m.setState(AcceptState)
@@ -608,6 +639,7 @@ func acceptState_ValidatorLockCorrect(t *testing.T) {
 }
 
 func acceptState_ProposerFailedBuildProposal(t *testing.T) {
+	t.Helper()
 	buildProposalFunc := func() (*Proposal, error) {
 		return nil, errors.New("failed to build a proposal")
 	}
@@ -659,6 +691,7 @@ func acceptState_ProposerFailedBuildProposal(t *testing.T) {
 }
 
 func acceptState_ValidateProposalFail(t *testing.T) {
+	t.Helper()
 	validateProposalFunc := func(proposal []byte) error {
 		return errors.New("failed to validate a proposal")
 	}
@@ -715,6 +748,7 @@ func acceptState_ValidateProposalFail(t *testing.T) {
 }
 
 func acceptState_NonValidatorNode(t *testing.T) {
+	t.Helper()
 	// Node sending a messages isn't among validator set, so state machine should set state to SyncState
 	m := newMockPbft(t, []string{"A", "B", "C"}, "")
 	m.state.view = ViewMsg(1, 0)
@@ -728,6 +762,7 @@ func acceptState_NonValidatorNode(t *testing.T) {
 }
 
 func roundChangeState_CatchupRound(t *testing.T) {
+	t.Helper()
 	m := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
 	m.setState(RoundChangeState)
 
@@ -764,6 +799,7 @@ func roundChangeState_CatchupRound(t *testing.T) {
 }
 
 func roundChangeState_Timeout(t *testing.T) {
+	t.Helper()
 	m := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
 
 	m.forceTimeout()
@@ -785,6 +821,7 @@ func roundChangeState_Timeout(t *testing.T) {
 }
 
 func roundChangeState_WeakCertificate(t *testing.T) {
+	t.Helper()
 	m := newMockPbft(t, []string{"A", "B", "C", "D", "E", "F", "G"}, "A")
 
 	m.setState(RoundChangeState)
@@ -819,6 +856,7 @@ func roundChangeState_WeakCertificate(t *testing.T) {
 }
 
 func roundChangeState_ErrStartNewRound(t *testing.T) {
+	t.Helper()
 	// if we start a round change because there was an error we start
 	// a new round right away
 	m := newMockPbft(t, []string{"A", "B"}, "A")
@@ -838,6 +876,7 @@ func roundChangeState_ErrStartNewRound(t *testing.T) {
 }
 
 func roundChangeState_StartNewRound(t *testing.T) {
+	t.Helper()
 	// if we start round change due to a state timeout and we are on the
 	// correct sequence, we start a new round
 	m := newMockPbft(t, []string{"A", "B"}, "A")
@@ -855,6 +894,7 @@ func roundChangeState_StartNewRound(t *testing.T) {
 }
 
 func roundChangeState_MaxRound(t *testing.T) {
+	t.Helper()
 	// if we start round change due to a state timeout we try to catch up
 	// with the highest round seen.
 	m := newMockPbft(t, []string{"A", "B", "C"}, "A")
@@ -881,6 +921,7 @@ func roundChangeState_MaxRound(t *testing.T) {
 }
 
 func roundChangeState_Stuck(t *testing.T) {
+	t.Helper()
 	isStuckFn := func(num uint64) (uint64, bool) {
 		return 0, true
 	}
@@ -1009,8 +1050,11 @@ func newMockPbft(t *testing.T, accounts []string, account string, backendArg ...
 	loggerOutput := getDefaultLoggerOutput()
 
 	// initialize pbft
-	m.Pbft = New(acct, m, WithLogger(log.New(loggerOutput, "", log.LstdFlags)),
-		WithTimeoutProvider(&mockTimeoutProvider{}))
+	m.Pbft = New(acct, m,
+		WithLogger(log.New(loggerOutput, "", log.LstdFlags)))
+
+	// mock timeout
+	m.roundTimeout = func(u uint64) time.Duration { return time.Millisecond }
 
 	// initialize backend mock
 	var backend *mockBackend
@@ -1167,22 +1211,4 @@ func (m *mockBackend) Insert(pp *SealedProposal) error {
 
 func (m *mockBackend) ValidatorSet() ValidatorSet {
 	return m.validators
-}
-
-type mockTracer struct {
-}
-
-func (t *mockTracer) Start(_ context.Context, _ string, _ ...trace.SpanStartOption) (context.Context, trace.Span) {
-	return context.Background(), nil
-}
-
-type mockTimeoutProvider struct {
-	timeout time.Duration
-}
-
-func (p *mockTimeoutProvider) CalculateTimeout(_ uint64) time.Duration {
-	if p.timeout > 0 {
-		return p.timeout
-	}
-	return time.Millisecond
 }
