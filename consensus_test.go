@@ -1212,3 +1212,27 @@ func (m *mockBackend) Insert(pp *SealedProposal) error {
 func (m *mockBackend) ValidatorSet() ValidatorSet {
 	return m.validators
 }
+
+func TestExponentialTimeout(t *testing.T) {
+	testCases := []struct {
+		description string
+		exponent    uint64
+		expected    time.Duration
+	}{
+		{"for round 0 timeout 3s", 0, defaultTimeout + (1 * time.Second)},
+		{"for round 1 timeout 4s", 1, defaultTimeout + (2 * time.Second)},
+		{"for round 2 timeout 6s", 2, defaultTimeout + (4 * time.Second)},
+		{"for round 8 timeout 258s", 8, defaultTimeout + (256 * time.Second)},
+		{"for round 9 timeout 300s", 9, 300 * time.Second},
+		{"for round 10 timeout 5m", 10, 5 * time.Minute},
+		{"for round 34 timeout 5m", 34, 5 * time.Minute},
+	}
+
+	for _, test := range testCases {
+		t.Run(test.description, func(t *testing.T) {
+			ibft := Pbft{state: &currentState{view: &View{Round: test.exponent}}}
+			timeout := ibft.exponentialTimeout()
+			assert.Equal(t, test.expected, timeout)
+		})
+	}
+}

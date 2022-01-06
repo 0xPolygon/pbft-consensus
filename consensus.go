@@ -394,8 +394,9 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 			span.AddEvent("Commit")
 		}
 	}
-
+  
 	timeout := p.roundTimeout(p.state.view.Round)
+
 	for p.getState() == ValidateState {
 		_, span := p.tracer.Start(ctx, "ValidateState")
 
@@ -571,6 +572,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 
 	// create a timer for the round change
 	timeout := p.roundTimeout(p.state.view.Round)
+
 	for p.getState() == RoundChangeState {
 		_, span := p.tracer.Start(ctx, "RoundChangeState")
 
