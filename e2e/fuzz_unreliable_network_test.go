@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func TestE2E_Unreliable_Network(t *testing.T) {
+func TestFuzz_Unreliable_Network(t *testing.T) {
 	nodesCount := 20 + rand.Intn(11) // vary nodes [20,30]
 	maxFaulty := nodesCount/3 - 1
 	maxHeight := uint64(40)

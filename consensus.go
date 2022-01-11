@@ -394,21 +394,23 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 			span.AddEvent("Commit")
 		}
 	}
-  
+
 	timeout := p.roundTimeout(p.state.view.Round)
 
 	for p.getState() == ValidateState {
 		_, span := p.tracer.Start(ctx, "ValidateState")
 
 		msg, ok := p.getNextMessage(span, timeout)
-		if !ok || msg == nil {
-			if msg == nil {
-				// timeout
-				p.setState(RoundChangeState)
-			}
+		if !ok {
 			// closing
 			span.End()
 			return
+		}
+		if msg == nil {
+			// timeout
+			p.setState(RoundChangeState)
+			span.End()
+			continue
 		}
 
 		switch msg.Type {
@@ -497,7 +499,7 @@ func (p *Pbft) runCommitState(ctx context.Context) {
 	if err := p.backend.Insert(pp); err != nil {
 		// start a new round with the state unlocked since we need to
 		// be able to propose/validate a different proposal
-		p.logger.Print("[ERROR] failed to insert proposal", " err:", err)
+		p.logger.Print("[ERROR] failed to insert proposal", "err", err)
 		p.handleStateErr(errFailedToInsertProposal)
 	} else {
 		// move to done state to finish the current iteration of the state machine
@@ -556,13 +558,13 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 	// if the round was triggered due to an error, we send our own
 	// next round change
 	if err := p.state.getErr(); err != nil {
-		p.logger.Print("[DEBUG] round change handle err", " err:", err)
+		p.logger.Print("[DEBUG] round change handle err", "err", err)
 		sendNextRoundChange()
 	} else {
 		// otherwise, it is due to a timeout in any stage
 		// First, we try to sync up with any max round already available
 		if maxRound, ok := p.state.maxRound(); ok {
-			p.logger.Print("[DEBUG] round change set max round", " round:", maxRound)
+			p.logger.Print("[DEBUG] round change set max round", "round", maxRound)
 			sendRoundChange(maxRound)
 		} else {
 			// otherwise, do your best to sync up
@@ -614,23 +616,23 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 
 // --- communication wrappers ---
 
-func (p *Pbft) sendRoundChange() error {
-	return p.gossip(MessageReq_RoundChange)
+func (p *Pbft) sendRoundChange() {
+	p.gossip(MessageReq_RoundChange)
 }
 
-func (p *Pbft) sendPreprepareMsg() error {
-	return p.gossip(MessageReq_Preprepare)
+func (p *Pbft) sendPreprepareMsg() {
+	p.gossip(MessageReq_Preprepare)
 }
 
-func (p *Pbft) sendPrepareMsg() error {
-	return p.gossip(MessageReq_Prepare)
+func (p *Pbft) sendPrepareMsg() {
+	p.gossip(MessageReq_Prepare)
 }
 
-func (p *Pbft) sendCommitMsg() error {
-	return p.gossip(MessageReq_Commit)
+func (p *Pbft) sendCommitMsg() {
+	p.gossip(MessageReq_Commit)
 }
 
-func (p *Pbft) gossip(msgType MsgType) error {
+func (p *Pbft) gossip(msgType MsgType) {
 	msg := &MessageReq{
 		Type: msgType,
 		From: p.validator.NodeID(),
@@ -651,8 +653,8 @@ func (p *Pbft) gossip(msgType MsgType) error {
 
 		seal, err := p.validator.Sign(hash)
 		if err != nil {
-			p.logger.Print("[ERROR] failed to commit seal", " err:", err)
-			return err
+			p.logger.Print("[ERROR] failed to commit seal", "err", err)
+			return
 		}
 		msg.Seal = seal
 	}
@@ -664,11 +666,8 @@ func (p *Pbft) gossip(msgType MsgType) error {
 		p.pushMessage(msg2)
 	}
 	if err := p.transport.Gossip(msg); err != nil {
-		p.logger.Print("[ERROR] failed to gossip", " err:", err)
-		return err
+		p.logger.Print("[ERROR] failed to gossip", "err", err)
 	}
-
-	return nil
 }
 
 func (p *Pbft) GetState() PbftState {

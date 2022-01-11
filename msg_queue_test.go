@@ -62,19 +62,6 @@ func TestMsgQueue_RoundChangeState(t *testing.T) {
 	}
 }
 
-func Test_msgToState(t *testing.T) {
-	expectedResult := map[MsgType]PbftState{
-		MessageReq_RoundChange: RoundChangeState,
-		MessageReq_Preprepare:  AcceptState,
-		MessageReq_Prepare:     ValidateState,
-		MessageReq_Commit:      ValidateState,
-	}
-	for msgType, pbftState := range expectedResult {
-		assert.Equal(t, pbftState, msgToState(msgType))
-	}
-	assert.Panics(t, func() { _ = msgToState(MsgType(20)) })
-}
-
 func TestCmpView(t *testing.T) {
 	var cases = []struct {
 		x, y           *View
