@@ -164,7 +164,7 @@ func (c *cluster) IsStuck(timeout time.Duration, nodes ...[]string) {
 	}
 }
 
-func (c *cluster) WaitForHeight(num uint64, timeout time.Duration, nodes ...[]string) {
+func (c *cluster) WaitForHeight(num uint64, timeout time.Duration, nodes ...[]string) error {
 	// we need to check every node in the ensemble?
 	// yes, this should test if everyone can agree on the final set.
 	// note, if we include drops, we need to do sync otherwise this will never work
@@ -185,12 +185,22 @@ func (c *cluster) WaitForHeight(num uint64, timeout time.Duration, nodes ...[]st
 		select {
 		case <-time.After(200 * time.Millisecond):
 			if enough() {
-				return
+				return nil
 			}
 		case <-timer.C:
-			c.t.Fatal("timeout")
+			return fmt.Errorf("timeout")
 		}
 	}
+}
+
+func (c *cluster) Nodes() []*node {
+	list := make([]*node, len(c.nodes))
+	i := 0
+	for _, n := range c.nodes {
+		list[i] = n
+		i++
+	}
+	return list
 }
 
 func (c *cluster) Start() {
@@ -311,6 +321,14 @@ func (n *node) Insert(pp *pbft.SealedProposal) error {
 }
 
 func (n *node) Start() {
+	factory := func(nn *node) pbft.Backend {
+		result := NewFsm(nn)
+		return &result
+	}
+	n.StartWithBackendFactory(factory)
+}
+
+func (n *node) StartWithBackendFactory(fsmFactory func(n *node) pbft.Backend) {
 	if n.cancelFn != nil {
 		panic("already started")
 	}
@@ -326,14 +344,7 @@ func (n *node) Start() {
 		n.proposals = history
 
 		for {
-			fsm := &fsm{
-				n:            n,
-				nodes:        n.nodes,
-				lastProposer: n.lastProposer(),
-
-				// important: in this iteration of the fsm we have increased our height
-				height: n.currentHeight() + 1,
-			}
+			fsm := fsmFactory(n)
 			if err := n.pbft.SetBackend(fsm); err != nil {
 				panic(err)
 			}
@@ -386,6 +397,17 @@ type fsm struct {
 	height       uint64
 }
 
+func NewFsm(nn *node) fsm {
+	return fsm{
+		n:            nn,
+		nodes:        nn.nodes,
+		lastProposer: nn.lastProposer(),
+
+		// important: in this iteration of the fsm we have increased our height
+		height: nn.currentHeight() + 1,
+	}
+}
+
 func (f *fsm) Height() uint64 {
 	return f.height
 }
@@ -403,7 +425,6 @@ func (f *fsm) BuildProposal() (*pbft.Proposal, error) {
 }
 
 func (f *fsm) Validate(proposal []byte) error {
-	// always validate for now
 	return nil
 }
 
