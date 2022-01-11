@@ -72,6 +72,7 @@ func TestState_FaultyNodesCount(t *testing.T) {
 		{8, 2},
 		{9, 2},
 		{10, 3},
+		{99, 32},
 		{100, 33},
 	}
 	for _, c := range cases {

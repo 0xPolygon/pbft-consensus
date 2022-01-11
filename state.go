@@ -2,7 +2,6 @@ package pbft
 
 import (
 	"fmt"
-	"math"
 	"sync/atomic"
 	"time"
 )
@@ -203,12 +202,25 @@ func (c *currentState) setState(s PbftState) {
 	atomic.StoreUint64(stateAddr, uint64(s))
 }
 
+// MaxFaultyNodes returns the maximum number of allowed faulty nodes (F), based on the current validator set
 func (c *currentState) MaxFaultyNodes() int {
-	return int(math.Ceil(float64(c.validators.Len())/3)) - 1
+	// N -> number of nodes in PBFT
+	// F -> number of faulty nodes
+	// N = 3 * F + 1 => F = (N - 1) / 3
+	//
+	// PBFT tolerates 1 failure with 4 nodes
+	// 4 = 3 * 1 + 1
+	// To tolerate 2 failures, PBFT requires 7 nodes
+	// 7 = 3 * 2 + 1
+	// It should always take the floor of the result
+	return (c.validators.Len() - 1) / 3
 }
 
 // NumValid returns the number of required messages
 func (c *currentState) NumValid() int {
+	// 2 * F + 1
+	// + 1 is up to the caller to add
+	// the current node tallying the messages will include its own message
 	return 2 * c.MaxFaultyNodes()
 }
 
