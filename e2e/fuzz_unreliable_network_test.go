@@ -36,7 +36,11 @@ func TestFuzz_Unreliable_Network(t *testing.T) {
 
 		hook.Partition(minorityPartition, majorityPartition)
 		fmt.Printf("Checking for height %v, started with nodes %d\n", currentHeight, nodesCount)
-		c.WaitForHeight(currentHeight, 10*time.Minute, false, majorityPartition)
+		err := c.WaitForHeight(currentHeight, 10*time.Minute, majorityPartition)
+		if err != nil {
+			t.Fatal(err)
+		}
+
 		// randomly drop if possible nodes from the partition pick one number
 		dropN := rand.Intn(maxFaulty - pSize + 1)
 		fmt.Printf("Dropping: %v nodes.\n", dropN)
@@ -62,7 +66,11 @@ func TestFuzz_Unreliable_Network(t *testing.T) {
 		}
 		// check all running nodes in majority partition for the block height
 		fmt.Printf("Checking for height %v, started with nodes %d\n", currentHeight, nodesCount)
-		c.WaitForHeight(currentHeight, 10*time.Minute, false, runningMajorityNodes)
+		err = c.WaitForHeight(currentHeight, 10*time.Minute, runningMajorityNodes)
+		if err != nil {
+			t.Fatal(err)
+		}
+
 		// restart network for this iteration
 		hook.Reset()
 		for _, stopped := range stoppedNodes {
@@ -77,6 +85,9 @@ func TestFuzz_Unreliable_Network(t *testing.T) {
 	// all nodes in the network should be synced after starting all nodes and partition restart
 	finalHeight := maxHeight + 10
 	fmt.Printf("Checking final height %v, nodes: %d\n", finalHeight, nodesCount)
-	c.WaitForHeight(finalHeight, 20*time.Minute, false)
+	err := c.WaitForHeight(finalHeight, 20*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
 	c.Stop()
 }

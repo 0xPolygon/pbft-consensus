@@ -41,7 +41,10 @@ func TestFuzz_NetworkChurn(t *testing.T) {
 	}
 	fmt.Println("Checking height after churn")
 	// all running nodes must have the same height
-	c.WaitForHeight(35, 5*time.Minute, false, runningNodes)
+	err := c.WaitForHeight(35, 5*time.Minute, runningNodes)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// start rest of the nodes
 	for _, v := range c.nodes {
@@ -52,7 +55,9 @@ func TestFuzz_NetworkChurn(t *testing.T) {
 	}
 	// all nodes must sync and have same height
 	fmt.Println("Checking height after all nodes start")
-	c.WaitForHeight(45, 5*time.Minute, false, runningNodes)
-
+	err = c.WaitForHeight(45, 5*time.Minute, runningNodes)
+	if err != nil {
+		t.Fatal(err)
+	}
 	c.Stop()
 }

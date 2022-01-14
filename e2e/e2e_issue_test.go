@@ -18,7 +18,7 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func TestE2E_Partition_MinorityCanValidate(t *testing.T) {
+func TestE2E_Partition_MinorityCantValidate(t *testing.T) {
 	const nodesCnt = 7 // N=3F + 1, F = 2
 	hook := newPartitionTransport(300 * time.Millisecond)
 
@@ -29,15 +29,13 @@ func TestE2E_Partition_MinorityCanValidate(t *testing.T) {
 	}
 
 	names := generateNodeNames(0, limit, "prt_")
-	c.WaitForHeight(4, 1*time.Minute, false, names)
+	err := c.WaitForHeight(4, 1*time.Minute, names)
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestE2E_Partition_MajorityCantValidate(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatal("Height reached for minority of nodes")
-		}
-	}()
 	const nodesCnt = 7 // N=3F + 1, F = 2
 	hook := newPartitionTransport(300 * time.Millisecond)
 
@@ -47,15 +45,13 @@ func TestE2E_Partition_MajorityCantValidate(t *testing.T) {
 		node.StartWithBackendFactory(createBackend(node.name < "prt_"+strconv.Itoa(limit)))
 	}
 	names := generateNodeNames(limit, nodesCnt, "prt_")
-	c.WaitForHeight(3, 1*time.Minute, true, names)
+	err := c.WaitForHeight(3, 1*time.Minute, names)
+	if err == nil {
+		t.Fatal("Height reached for minority of nodes")
+	}
 }
 
 func TestE2E_Partition_BigMajorityCantValidate(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatal("Height reached for minority of nodes")
-		}
-	}()
 	const nodesCnt = 100
 	hook := newPartitionTransport(300 * time.Millisecond)
 
@@ -66,7 +62,10 @@ func TestE2E_Partition_BigMajorityCantValidate(t *testing.T) {
 	}
 
 	nodeNames := generateNodeNames(limit, nodesCnt, "prt_")
-	c.WaitForHeight(8, 1*time.Minute, true, nodeNames)
+	err := c.WaitForHeight(8, 1*time.Minute, nodeNames)
+	if err == nil {
+		t.Fatal("Height reached for minority of nodes")
+	}
 }
 
 type fsmValidationError struct {

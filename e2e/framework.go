@@ -164,7 +164,7 @@ func (c *cluster) IsStuck(timeout time.Duration, nodes ...[]string) {
 	}
 }
 
-func (c *cluster) WaitForHeight(num uint64, timeout time.Duration, throwPanic bool, nodes ...[]string) {
+func (c *cluster) WaitForHeight(num uint64, timeout time.Duration, nodes ...[]string) error {
 	// we need to check every node in the ensemble?
 	// yes, this should test if everyone can agree on the final set.
 	// note, if we include drops, we need to do sync otherwise this will never work
@@ -185,14 +185,10 @@ func (c *cluster) WaitForHeight(num uint64, timeout time.Duration, throwPanic bo
 		select {
 		case <-time.After(200 * time.Millisecond):
 			if enough() {
-				return
+				return nil
 			}
 		case <-timer.C:
-			if throwPanic {
-				panic("timeout")
-			} else {
-				c.t.Fatal("timeout")
-			}
+			return fmt.Errorf("timeout")
 		}
 	}
 }
