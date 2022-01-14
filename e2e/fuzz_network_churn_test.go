@@ -9,12 +9,12 @@ import (
 )
 
 func TestFuzz_NetworkChurn(t *testing.T) {
-	rand.Seed(time.Now().Unix())
 	nodeCount := 20
 	maxFaulty := nodeCount/3 - 1
 	const prefix = "ptr_"
 	c := newPBFTCluster(t, "network_churn", "ptr", nodeCount)
 	c.Start()
+	defer c.Stop()
 	runningNodeCount := nodeCount
 	// randomly stop nodes every 3 seconds
 	executeInTimerAndWait(3*time.Second, 30*time.Second, func(_ time.Duration) {
@@ -59,5 +59,4 @@ func TestFuzz_NetworkChurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.Stop()
 }

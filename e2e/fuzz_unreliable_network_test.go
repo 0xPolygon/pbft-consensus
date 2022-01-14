@@ -18,6 +18,7 @@ func TestFuzz_Unreliable_Network(t *testing.T) {
 	c := newPBFTCluster(t, "network_unreliable", "prt", nodesCount, hook)
 	fmt.Printf("Starting cluster with %d nodes, max faulty %d.\n", nodesCount, maxFaulty)
 	c.Start()
+	defer c.Stop()
 
 	for {
 		currentHeight += 5
@@ -89,5 +90,4 @@ func TestFuzz_Unreliable_Network(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.Stop()
 }

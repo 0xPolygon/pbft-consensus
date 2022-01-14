@@ -12,6 +12,7 @@ func TestE2E_Partition_OneMajority(t *testing.T) {
 
 	c := newPBFTCluster(t, "majority_partition", "prt", nodesCnt, hook)
 	c.Start()
+	defer c.Stop()
 
 	err := c.WaitForHeight(5, 1*time.Minute)
 	if err != nil {
@@ -43,5 +44,4 @@ func TestE2E_Partition_OneMajority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.Stop()
 }

@@ -27,7 +27,7 @@ func TestE2E_Partition_MinorityCantValidate(t *testing.T) {
 	for _, node := range c.Nodes() {
 		node.StartWithBackendFactory(createBackend(node.name >= "prt_"+strconv.Itoa(limit)))
 	}
-
+	defer c.Stop()
 	names := generateNodeNames(0, limit, "prt_")
 	err := c.WaitForHeight(4, 1*time.Minute, names)
 	if err != nil {
@@ -44,6 +44,7 @@ func TestE2E_Partition_MajorityCantValidate(t *testing.T) {
 	for _, node := range c.Nodes() {
 		node.StartWithBackendFactory(createBackend(node.name < "prt_"+strconv.Itoa(limit)))
 	}
+	defer c.Stop()
 	names := generateNodeNames(limit, nodesCnt, "prt_")
 	err := c.WaitForHeight(3, 1*time.Minute, names)
 	if err == nil {
@@ -60,7 +61,7 @@ func TestE2E_Partition_BigMajorityCantValidate(t *testing.T) {
 	for _, node := range c.Nodes() {
 		node.StartWithBackendFactory(createBackend(node.name <= "prt_"+strconv.Itoa(limit)))
 	}
-
+	defer c.Stop()
 	nodeNames := generateNodeNames(limit, nodesCnt, "prt_")
 	err := c.WaitForHeight(8, 1*time.Minute, nodeNames)
 	if err == nil {
