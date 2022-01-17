@@ -35,15 +35,15 @@ func (m *MockedTracer) Start(ctx context.Context, spanName string, opts ...trace
 	return args.Get(0).(context.Context), args.Get(1).(trace.Span)
 }
 
-func TestTransition_AcceptState_SyncStateTransition(t *testing.T) {
-	// we are in AcceptState, and we are not in the validators list
+func TestTransition_AcceptState_ToSyncState(t *testing.T) {
+	// we are in AcceptState and we are not in the validators list
 	// means that we have been removed as validator, move to sync state
-	m := newMockPbft(t, []string{"A", "B", "C", "D"}, "")
-	m.setState(AcceptState)
+	i := newMockPbft(t, []string{"A", "B", "C", "D"}, "")
+	i.setState(AcceptState)
 
-	m.runCycle(m.ctx)
+	i.runCycle(context.Background())
 
-	m.expect(expectResult{
+	i.expect(expectResult{
 		sequence: 1,
 		state:    SyncState,
 	})
@@ -56,17 +56,18 @@ func TestTransition_AcceptState_Proposer_Propose(t *testing.T) {
 	// 3. send a preprepare message
 	// 4. send a prepare message
 	// 5. move to ValidateState
-	m := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
-	m.setState(AcceptState)
 
-	m.setProposal(&Proposal{
+	i := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
+	i.setState(AcceptState)
+
+	i.setProposal(&Proposal{
 		Data: mockProposal,
 		Time: time.Now().Add(1 * time.Second),
 	})
 
-	m.runCycle(m.ctx)
+	i.runCycle(context.Background())
 
-	m.expect(expectResult{
+	i.expect(expectResult{
 		sequence: 1,
 		outgoing: 2, // preprepare and prepare
 		state:    ValidateState,
@@ -76,23 +77,69 @@ func TestTransition_AcceptState_Proposer_Propose(t *testing.T) {
 func TestTransition_AcceptState_Proposer_Locked(t *testing.T) {
 	// we are in AcceptState, we are the proposer but the value is locked.
 	// it needs to send the locked proposal again
-	m := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
-	m.setState(AcceptState)
+	i := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
+	i.setState(AcceptState)
 
-	m.state.locked = true
-	m.state.proposal = &Proposal{
+	i.state.locked = true
+	i.state.proposal = &Proposal{
 		Data: mockProposal,
 	}
 
-	m.runCycle(m.ctx)
+	i.runCycle(context.Background())
 
-	m.expect(expectResult{
+	i.expect(expectResult{
 		sequence: 1,
 		state:    ValidateState,
 		locked:   true,
 		outgoing: 2, // preprepare and prepare
 	})
-	assert.Equal(t, m.state.proposal.Data, mockProposal)
+	assert.Equal(t, i.state.proposal.Data, mockProposal)
+}
+
+func TestTransition_AcceptState_Validator_VerifyCorrect(t *testing.T) {
+	i := newMockPbft(t, []string{"A", "B", "C"}, "B")
+	i.state.view = ViewMsg(1, 0)
+	i.setState(AcceptState)
+
+	// A sends the message
+	i.emitMsg(&MessageReq{
+		From:     "A",
+		Type:     MessageReq_Preprepare,
+		Proposal: mockProposal,
+		View:     ViewMsg(1, 0),
+	})
+
+	i.runCycle(context.Background())
+
+	i.expect(expectResult{
+		sequence: 1,
+		state:    ValidateState,
+		outgoing: 1, // prepare
+	})
+}
+
+func TestTransition_AcceptState_Validator_VerifyFails(t *testing.T) {
+	t.Skip("involves validation of hash that is not done yet")
+
+	i := newMockPbft(t, []string{"A", "B", "C"}, "B")
+	i.state.view = ViewMsg(1, 0)
+	i.setState(AcceptState)
+
+	// A sends the message
+	i.emitMsg(&MessageReq{
+		From:     "A",
+		Type:     MessageReq_Preprepare,
+		Proposal: mockProposal,
+		View:     ViewMsg(1, 0),
+	})
+
+	i.runCycle(context.Background())
+
+	i.expect(expectResult{
+		sequence: 1,
+		state:    RoundChangeState,
+		err:      errVerificationFailed,
+	})
 }
 
 func TestTransition_AcceptState_Proposer_FailedBuildProposal(t *testing.T) {
@@ -183,50 +230,28 @@ func TestTransition_AcceptState_NonProposer_Cancellation(t *testing.T) {
 		m.cancelFn()
 	}()
 
-	m.runCycle(m.ctx)
+	m.runCycle(context.Background())
 	assert.True(t, m.IsState(AcceptState))
 }
 
-func TestTransition_AcceptState_Validator_VerifyCorrect(t *testing.T) {
-	m := newMockPbft(t, []string{"A", "B", "C"}, "B")
-	m.state.view = ViewMsg(1, 0)
-	m.setState(AcceptState)
-
-	// A sends the message
-	m.emitMsg(&MessageReq{
-		From:     "A",
-		Type:     MessageReq_Preprepare,
-		Proposal: mockProposal,
-		View:     ViewMsg(1, 0),
-	})
-
-	m.runCycle(m.ctx)
-
-	m.expect(expectResult{
-		sequence: 1,
-		state:    ValidateState,
-		outgoing: 1, // prepare
-	})
-}
-
 func TestTransition_AcceptState_Validator_ProposerInvalid(t *testing.T) {
-	m := newMockPbft(t, []string{"A", "B", "C"}, "B")
-	m.state.view = ViewMsg(1, 0)
-	m.setState(AcceptState)
+	i := newMockPbft(t, []string{"A", "B", "C"}, "B")
+	i.state.view = ViewMsg(1, 0)
+	i.setState(AcceptState)
 
 	// A is the proposer but C sends the propose, we do not fail
 	// but wait for timeout to move to roundChange state
-	m.emitMsg(&MessageReq{
+	i.emitMsg(&MessageReq{
 		From:     "C",
 		Type:     MessageReq_Preprepare,
 		Proposal: mockProposal,
 		View:     ViewMsg(1, 0),
 	})
-	m.forceTimeout()
+	i.forceTimeout()
 
-	m.runCycle(m.ctx)
+	i.runCycle(context.Background())
 
-	m.expect(expectResult{
+	i.expect(expectResult{
 		sequence: 1,
 		state:    RoundChangeState,
 	})
@@ -236,27 +261,27 @@ func TestTransition_AcceptState_Validator_LockWrong(t *testing.T) {
 	// we are a validator and have a locked state in 'proposal1'.
 	// We receive an invalid proposal 'proposal2' with different data.
 
-	m := newMockPbft(t, []string{"A", "B", "C"}, "B")
-	m.state.view = ViewMsg(1, 0)
-	m.setState(AcceptState)
+	i := newMockPbft(t, []string{"A", "B", "C"}, "B")
+	i.state.view = ViewMsg(1, 0)
+	i.setState(AcceptState)
 
 	// locked proposal
-	m.state.proposal = &Proposal{
+	i.state.proposal = &Proposal{
 		Data: mockProposal,
 	}
-	m.state.lock()
+	i.state.lock()
 
 	// emit the wrong locked proposal
-	m.emitMsg(&MessageReq{
+	i.emitMsg(&MessageReq{
 		From:     "A",
 		Type:     MessageReq_Preprepare,
 		Proposal: mockProposal1,
 		View:     ViewMsg(1, 0),
 	})
 
-	m.runCycle(m.ctx)
+	i.runCycle(context.Background())
 
-	m.expect(expectResult{
+	i.expect(expectResult{
 		sequence: 1,
 		state:    RoundChangeState,
 		locked:   true,
@@ -265,26 +290,26 @@ func TestTransition_AcceptState_Validator_LockWrong(t *testing.T) {
 }
 
 func TestTransition_AcceptState_Validator_LockCorrect(t *testing.T) {
-	m := newMockPbft(t, []string{"A", "B", "C"}, "B")
-	m.state.view = ViewMsg(1, 0)
-	m.setState(AcceptState)
+	i := newMockPbft(t, []string{"A", "B", "C"}, "B")
+	i.state.view = ViewMsg(1, 0)
+	i.setState(AcceptState)
 
 	// locked proposal
 	proposal := mockProposal
 
-	m.state.proposal = &Proposal{Data: proposal}
-	m.state.locked = true
+	i.state.proposal = &Proposal{Data: proposal}
+	i.state.locked = true
 
-	m.emitMsg(&MessageReq{
+	i.emitMsg(&MessageReq{
 		From:     "A",
 		Type:     MessageReq_Preprepare,
 		Proposal: proposal,
 		View:     ViewMsg(1, 0),
 	})
 
-	m.runCycle(m.ctx)
+	i.runCycle(context.Background())
 
-	m.expect(expectResult{
+	i.expect(expectResult{
 		sequence: 1,
 		state:    ValidateState,
 		locked:   true,
@@ -353,7 +378,7 @@ func TestTransition_AcceptState_NonValidatorNode(t *testing.T) {
 	m := newMockPbft(t, []string{"A", "B", "C"}, "")
 	m.state.view = ViewMsg(1, 0)
 	m.setState(AcceptState)
-	m.runCycle(m.ctx)
+	m.runCycle(context.Background())
 
 	m.expect(expectResult{
 		state:    SyncState,
@@ -387,7 +412,7 @@ func TestTransition_RoundChangeState_CatchupRound(t *testing.T) {
 	// not processed all the messages yet.
 	// After it receives 3 Round change messages higher than his own
 	// round it will change round again and move to accept
-	m.runCycle(m.ctx)
+	m.runCycle(context.Background())
 
 	m.expect(expectResult{
 		sequence: 1,
@@ -408,7 +433,7 @@ func TestTransition_RoundChangeState_Timeout(t *testing.T) {
 	// one RoundChange message.
 	// After the timeout, it increases to round 2 and sends another
 	// / RoundChange message.
-	m.runCycle(m.ctx)
+	m.runCycle(context.Background())
 
 	m.expect(expectResult{
 		sequence: 1,
@@ -442,7 +467,7 @@ func TestTransition_RoundChangeState_WeakCertificate(t *testing.T) {
 	})
 	m.Close()
 
-	m.runCycle(m.ctx)
+	m.runCycle(context.Background())
 
 	m.expect(expectResult{
 		sequence: 1,
@@ -461,7 +486,7 @@ func TestTransition_RoundChangeState_ErrStartNewRound(t *testing.T) {
 	m.state.err = errVerificationFailed
 
 	m.setState(RoundChangeState)
-	m.runCycle(m.ctx)
+	m.runCycle(context.Background())
 
 	m.expect(expectResult{
 		sequence: 1,
@@ -478,7 +503,7 @@ func TestTransition_RoundChangeState_StartNewRound(t *testing.T) {
 	m.Close()
 
 	m.setState(RoundChangeState)
-	m.runCycle(m.ctx)
+	m.runCycle(context.Background())
 
 	m.expect(expectResult{
 		sequence: 1,
@@ -504,7 +529,7 @@ func TestTransition_RoundChangeState_MaxRound(t *testing.T) {
 	})
 
 	m.setState(RoundChangeState)
-	m.runCycle(m.ctx)
+	m.runCycle(context.Background())
 
 	m.expect(expectResult{
 		sequence: 1,
@@ -525,7 +550,7 @@ func TestTransition_RoundChangeState_Stuck(t *testing.T) {
 	m := newMockPbft(t, validatorIds, "A", mockBackend)
 	m.SetState(RoundChangeState)
 
-	m.runCycle(m.ctx)
+	m.runCycle(context.Background())
 	assert.True(t, m.IsState(SyncState))
 }
 
@@ -573,7 +598,7 @@ func TestTransition_ValidateState_MoveToCommitState(t *testing.T) {
 		View: ViewMsg(1, 0),
 	})
 
-	m.runCycle(m.ctx)
+	m.runCycle(context.Background())
 
 	m.expect(expectResult{
 		sequence:    1,
@@ -590,7 +615,7 @@ func TestTransition_ValidateState_MoveToRoundChangeState(t *testing.T) {
 	m := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
 	m.setState(ValidateState)
 
-	m.runCycle(m.ctx)
+	m.runCycle(context.Background())
 
 	assert.True(t, m.IsState(RoundChangeState))
 }
@@ -608,7 +633,7 @@ func TestTransition_ValidateState_WrongMessageType(t *testing.T) {
 		View:     ViewMsg(1, 0),
 	}
 	heap.Push(&m.msgQueue.validateStateQueue, msg)
-	assert.PanicsWithError(t, "BUG: Unexpected message type: Preprepare in ValidateState", func() { m.runCycle(m.ctx) })
+	assert.PanicsWithError(t, "BUG: Unexpected message type: Preprepare in ValidateState", func() { m.runCycle(context.Background()) })
 }
 
 func TestTransition_ValidateState_DiscardMessage(t *testing.T) {
@@ -633,7 +658,7 @@ func TestTransition_ValidateState_DiscardMessage(t *testing.T) {
 		View: ViewMsg(2, 3),
 	})
 
-	m.runCycle(m.ctx)
+	m.runCycle(context.Background())
 	m.expect(expectResult{
 		state:       RoundChangeState,
 		round:       2,
@@ -643,37 +668,13 @@ func TestTransition_ValidateState_DiscardMessage(t *testing.T) {
 		outgoing:    0})
 }
 
-func TestTransition_AcceptState_Validator_VerifyFails(t *testing.T) {
-	t.Skip("involves validation of hash that is not done yet")
-
-	m := newMockPbft(t, []string{"A", "B", "C"}, "B")
-	m.state.view = ViewMsg(1, 0)
-	m.setState(AcceptState)
-
-	// A sends the message
-	m.emitMsg(&MessageReq{
-		From:     "A",
-		Type:     MessageReq_Preprepare,
-		Proposal: mockProposal,
-		View:     ViewMsg(1, 0),
-	})
-
-	m.runCycle(m.ctx)
-
-	m.expect(expectResult{
-		sequence: 1,
-		state:    RoundChangeState,
-		err:      errVerificationFailed,
-	})
-}
-
 func TestTransition_CommitState_DoneState(t *testing.T) {
 	m := newMockPbft(t, []string{"A", "B", "C"}, "A")
 	m.state.view = ViewMsg(1, 0)
 	m.state.proposer = "A"
 	m.setState(CommitState)
 
-	m.runCycle(m.ctx)
+	m.runCycle(context.Background())
 
 	m.expect(expectResult{
 		sequence: 1,
@@ -686,7 +687,7 @@ func TestTransition_CommitState_RoundChange(t *testing.T) {
 	m.state.view = ViewMsg(1, 0)
 	m.setState(CommitState)
 
-	m.runCycle(m.ctx)
+	m.runCycle(context.Background())
 
 	m.expect(expectResult{
 		sequence: 1,
@@ -726,7 +727,7 @@ func TestDoneState_RunCycle_Panics(t *testing.T) {
 	m.state.view = ViewMsg(1, 0)
 	m.SetState(DoneState)
 
-	assert.Panics(t, func() { m.runCycle(m.ctx) })
+	assert.Panics(t, func() { m.runCycle(context.Background()) })
 }
 
 func TestPbft_Run(t *testing.T) {

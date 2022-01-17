@@ -30,16 +30,6 @@ func generateValidatorNodes(nodesCount int, prefixNodeId string) []NodeID {
 
 // Helper function which enables creation of MessageReq.
 func createMessage(sender string, messageType MsgType, round ...uint64) *MessageReq {
-	return createMessagePoolSender(sender, messageType, nil, round...)
-}
-
-// Helper function which enables creation of MessageReq.
-// Note: sender needs to be seeded to the pool before invoking, otherwise senderId will be set to provided sender parameter.
-func createMessagePoolSender(sender string, messageType MsgType, pool *testerAccountPool, round ...uint64) *MessageReq {
-	senderId := sender
-	if pool != nil {
-		senderId = pool.get(sender).alias
-	}
 	seal := make([]byte, 2)
 	mrand.Read(seal)
 
@@ -49,7 +39,7 @@ func createMessagePoolSender(sender string, messageType MsgType, pool *testerAcc
 	}
 
 	msg := &MessageReq{
-		From:     NodeID(senderId),
+		From:     NodeID(sender),
 		Type:     messageType,
 		View:     &View{Round: r},
 		Seal:     seal,
@@ -76,9 +66,8 @@ func TestState_FaultyNodesCount(t *testing.T) {
 		{100, 33},
 	}
 	for _, c := range cases {
-		validatorNodeIds := generateValidatorNodes(c.TotalNodesCount, "validator")
 		s := newState()
-		s.validators = convertToMockValidatorSet(validatorNodeIds)
+		s.validators = convertToMockValidatorSet(generateValidatorNodes(c.TotalNodesCount, "validator"))
 
 		assert.Equal(t, s.MaxFaultyNodes(), c.FaultyNodesCount)
 	}
@@ -101,9 +90,8 @@ func TestState_ValidNodesCount(t *testing.T) {
 		{100, 66},
 	}
 	for _, c := range cases {
-		validatorNodeIds := generateValidatorNodes(c.TotalNodesCount, "validator")
 		s := newState()
-		s.validators = convertToMockValidatorSet(validatorNodeIds)
+		s.validators = convertToMockValidatorSet(generateValidatorNodes(c.TotalNodesCount, "validator"))
 
 		assert.Equal(t, s.NumValid(), c.ValidNodesCount)
 	}
@@ -124,16 +112,16 @@ func TestState_AddMessages(t *testing.T) {
 	assert.Empty(t, s.roundMessages)
 
 	// -- test committed messages --
-	s.addMessage(createMessagePoolSender("A", MessageReq_Commit, pool))
-	s.addMessage(createMessagePoolSender("B", MessageReq_Commit, pool))
-	s.addMessage(createMessagePoolSender("B", MessageReq_Commit, pool))
+	s.addMessage(pool.createMessage("A", MessageReq_Commit))
+	s.addMessage(pool.createMessage("B", MessageReq_Commit))
+	s.addMessage(pool.createMessage("B", MessageReq_Commit))
 
 	assert.Equal(t, s.numCommitted(), 2)
 
 	// -- test prepare messages --
-	s.addMessage(createMessagePoolSender("C", MessageReq_Prepare, pool))
-	s.addMessage(createMessagePoolSender("C", MessageReq_Prepare, pool))
-	s.addMessage(createMessagePoolSender("D", MessageReq_Prepare, pool))
+	s.addMessage(pool.createMessage("C", MessageReq_Prepare))
+	s.addMessage(pool.createMessage("C", MessageReq_Prepare))
+	s.addMessage(pool.createMessage("D", MessageReq_Prepare))
 
 	assert.Equal(t, s.numPrepared(), 2)
 
@@ -141,7 +129,7 @@ func TestState_AddMessages(t *testing.T) {
 	rounds := 2
 	for round := 0; round < rounds; round++ {
 		for i := 0; i < s.validators.Len(); i++ {
-			s.addMessage(createMessagePoolSender(validatorIds[i], MessageReq_RoundChange, pool, uint64(round)))
+			s.addMessage(pool.createMessage(validatorIds[i], MessageReq_RoundChange, uint64(round)))
 		}
 	}
 
@@ -215,21 +203,21 @@ func TestState_MaxRound_NotFound(t *testing.T) {
 
 func TestState_AddRoundMessage(t *testing.T) {
 	s := newState()
-	validatorIds := []string{"validator_1", "validator_2"}
+	validatorIds := []string{"A", "B"}
 	s.validators = newMockValidatorSet(validatorIds)
 
-	roundMessageSize := s.AddRoundMessage(createMessage(validatorIds[0], MessageReq_Commit, 0))
+	roundMessageSize := s.AddRoundMessage(createMessage("A", MessageReq_Commit, 0))
 	assert.Equal(t, 0, roundMessageSize)
 	assert.Equal(t, 0, len(s.roundMessages))
 
-	s.AddRoundMessage(createMessage(validatorIds[0], MessageReq_RoundChange, 0))
-	s.AddRoundMessage(createMessage(validatorIds[0], MessageReq_RoundChange, 1))
-	s.AddRoundMessage(createMessage(validatorIds[0], MessageReq_RoundChange, 2))
+	s.AddRoundMessage(createMessage("A", MessageReq_RoundChange, 0))
+	s.AddRoundMessage(createMessage("A", MessageReq_RoundChange, 1))
+	s.AddRoundMessage(createMessage("A", MessageReq_RoundChange, 2))
 
-	roundMessageSize = s.AddRoundMessage(createMessage(validatorIds[1], MessageReq_RoundChange, 2))
+	roundMessageSize = s.AddRoundMessage(createMessage("B", MessageReq_RoundChange, 2))
 	assert.Equal(t, 2, roundMessageSize)
 
-	s.AddRoundMessage(createMessage(validatorIds[1], MessageReq_RoundChange, 3))
+	s.AddRoundMessage(createMessage("B", MessageReq_RoundChange, 3))
 	assert.Equal(t, 4, len(s.roundMessages))
 
 	assert.Empty(t, s.prepared)
@@ -238,14 +226,14 @@ func TestState_AddRoundMessage(t *testing.T) {
 
 func TestState_addPrepared(t *testing.T) {
 	s := newState()
-	validatorIds := []string{"validator_1", "validator_2"}
+	validatorIds := []string{"A", "B"}
 	s.validators = newMockValidatorSet(validatorIds)
 
-	s.addPrepared(createMessage(validatorIds[0], MessageReq_Commit))
+	s.addPrepared(createMessage("A", MessageReq_Commit))
 	assert.Equal(t, 0, len(s.prepared))
 
-	s.addPrepared(createMessage(validatorIds[0], MessageReq_Prepare))
-	s.addPrepared(createMessage(validatorIds[1], MessageReq_Prepare))
+	s.addPrepared(createMessage("A", MessageReq_Prepare))
+	s.addPrepared(createMessage("B", MessageReq_Prepare))
 
 	assert.Equal(t, len(validatorIds), len(s.prepared))
 	assert.Empty(t, s.committed)
@@ -254,14 +242,14 @@ func TestState_addPrepared(t *testing.T) {
 
 func TestState_addCommitted(t *testing.T) {
 	s := newState()
-	validatorIds := []string{"validator_1", "validator_2"}
+	validatorIds := []string{"A", "B"}
 	s.validators = newMockValidatorSet(validatorIds)
 
-	s.addCommitted(createMessage(validatorIds[0], MessageReq_Prepare))
+	s.addCommitted(createMessage("A", MessageReq_Prepare))
 	assert.Empty(t, 0, s.committed)
 
-	s.addCommitted(createMessage(validatorIds[0], MessageReq_Commit))
-	s.addCommitted(createMessage(validatorIds[1], MessageReq_Commit))
+	s.addCommitted(createMessage("A", MessageReq_Commit))
+	s.addCommitted(createMessage("B", MessageReq_Commit))
 
 	assert.Equal(t, len(validatorIds), len(s.committed))
 	assert.Empty(t, s.prepared)
@@ -269,7 +257,7 @@ func TestState_addCommitted(t *testing.T) {
 }
 
 func TestState_Copy(t *testing.T) {
-	originalMsg := createMessage("validator_1", MessageReq_Preprepare, 0)
+	originalMsg := createMessage("A", MessageReq_Preprepare, 0)
 	copyMsg := originalMsg.Copy()
 	assert.NotSame(t, originalMsg, copyMsg)
 	assert.Equal(t, originalMsg, copyMsg)
@@ -299,12 +287,14 @@ func TestState_GetSequence(t *testing.T) {
 }
 
 func TestState_getCommittedSeals(t *testing.T) {
-	s := newState()
-	validatorIds := []string{"A", "B"}
-	s.validators = newMockValidatorSet(validatorIds)
+	pool := newTesterAccountPool()
+	pool.add("A", "B", "C", "D")
 
-	s.addCommitted(createMessage(validatorIds[0], MessageReq_Commit))
-	s.addCommitted(createMessage(validatorIds[1], MessageReq_Commit))
+	s := newState()
+	s.validators = pool.validatorSet()
+
+	s.addCommitted(createMessage("A", MessageReq_Commit))
+	s.addCommitted(createMessage("B", MessageReq_Commit))
 	committedSeals := s.getCommittedSeals()
 
 	assert.Len(t, committedSeals, 2)
@@ -421,6 +411,16 @@ func (ap *testerAccountPool) validatorSet() ValidatorSet {
 		validatorIds = append(validatorIds, NodeID(acc.alias))
 	}
 	return convertToMockValidatorSet(validatorIds)
+}
+
+// Helper function which enables creation of MessageReq.
+// Note: sender needs to be seeded to the pool before invoking, otherwise senderId will be set to provided sender parameter.
+func (ap *testerAccountPool) createMessage(sender string, messageType MsgType, round ...uint64) *MessageReq {
+	poolSender := ap.get(sender)
+	if poolSender != nil {
+		sender = poolSender.alias
+	}
+	return createMessage(sender, messageType, round...)
 }
 
 func generateKey() *ecdsa.PrivateKey {
