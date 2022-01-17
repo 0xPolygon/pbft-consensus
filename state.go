@@ -50,8 +50,8 @@ type MessageReq struct {
 	Proposal []byte
 }
 
-func (m *MessageReq) SetProposal(b []byte) {
-	m.Proposal = append([]byte{}, b...)
+func (m *MessageReq) SetProposal(proposal []byte) {
+	m.Proposal = append([]byte{}, proposal...)
 }
 
 func (m *MessageReq) Copy() *MessageReq {
@@ -61,7 +61,11 @@ func (m *MessageReq) Copy() *MessageReq {
 		mm.View = m.View.Copy()
 	}
 	if m.Proposal != nil {
-		mm.Proposal = append([]byte{}, m.Proposal...)
+		mm.SetProposal(m.Proposal)
+	}
+	// FIXME: Check if Seal should be copied as well or instantiated an empty slice instead?
+	if m.Seal != nil {
+		mm.Seal = append([]byte{}, m.Seal...)
 	}
 	return mm
 }
@@ -228,12 +232,12 @@ func (c *currentState) getErr() error {
 func (c *currentState) maxRound() (maxRound uint64, found bool) {
 	num := c.MaxFaultyNodes() + 1
 
-	for k, round := range c.roundMessages {
-		if len(round) < num {
+	for currentRound, messages := range c.roundMessages {
+		if len(messages) < num {
 			continue
 		}
-		if maxRound < k {
-			maxRound = k
+		if maxRound < currentRound {
+			maxRound = currentRound
 			found = true
 		}
 	}
@@ -308,11 +312,12 @@ func (c *currentState) addMessage(msg *MessageReq) {
 		c.prepared[addr] = msg
 	} else if msg.Type == MessageReq_RoundChange {
 		view := msg.View
-		if _, ok := c.roundMessages[view.Round]; !ok {
-			c.roundMessages[view.Round] = map[NodeID]*MessageReq{}
+		roundMessages, exists := c.roundMessages[view.Round]
+		if !exists {
+			roundMessages = map[NodeID]*MessageReq{}
+			c.roundMessages[view.Round] = roundMessages
 		}
-
-		c.roundMessages[view.Round][addr] = msg
+		roundMessages[addr] = msg
 	}
 }
 

@@ -248,7 +248,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 
 	if !p.state.validators.Includes(p.validator.NodeID()) {
 		// we are not a validator anymore, move back to sync state
-		p.logger.Printf("[INFO] we are not a validator anymore")
+		p.logger.Print("[INFO] we are not a validator anymore")
 		p.setState(SyncState)
 		return
 	}
@@ -329,7 +329,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 
 		// retrieve the proposal
 		if err := p.backend.Validate(msg.Proposal); err != nil {
-			p.logger.Printf("[ERROR] failed to validate proposal: %v", err)
+			p.logger.Printf("[ERROR] failed to validate proposal. Error message: %v", err)
 			p.setState(RoundChangeState)
 			return
 		}
@@ -482,7 +482,7 @@ func (p *Pbft) runCommitState(ctx context.Context) {
 	if err := p.backend.Insert(pp); err != nil {
 		// start a new round with the state unlocked since we need to
 		// be able to propose/validate a different proposal
-		p.logger.Print("[ERROR] failed to insert proposal", "err", err)
+		p.logger.Printf("[ERROR] failed to insert proposal. Error message: %v", err)
 		p.handleStateErr(errFailedToInsertProposal)
 	} else {
 		p.setSequence(p.state.view.Sequence + 1)
@@ -543,13 +543,13 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 	// if the round was triggered due to an error, we send our own
 	// next round change
 	if err := p.state.getErr(); err != nil {
-		p.logger.Print("[DEBUG] round change handle err", "err", err)
+		p.logger.Printf("[DEBUG] round change handle error. Error message: %v", err)
 		sendNextRoundChange()
 	} else {
 		// otherwise, it is due to a timeout in any stage
 		// First, we try to sync up with any max round already available
 		if maxRound, ok := p.state.maxRound(); ok {
-			p.logger.Print("[DEBUG] round change set max round", "round", maxRound)
+			p.logger.Printf("[DEBUG] round change, max round=%d", maxRound)
 			sendRoundChange(maxRound)
 		} else {
 			// otherwise, do your best to sync up
@@ -569,7 +569,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 			return
 		}
 		if msg == nil {
-			p.logger.Printf("[DEBUG] round change timeout")
+			p.logger.Print("[DEBUG] round change timeout")
 			checkTimeout()
 			// update the timeout duration
 			timeout = p.exponentialTimeout()
@@ -637,7 +637,7 @@ func (p *Pbft) gossip(typ MsgType) {
 
 		seal, err := p.validator.Sign(hash)
 		if err != nil {
-			p.logger.Print("[ERROR] failed to commit seal", "err", err)
+			p.logger.Printf("[ERROR] failed to commit seal. Error message: %v", err)
 			return
 		}
 		msg.Seal = seal
@@ -650,7 +650,7 @@ func (p *Pbft) gossip(typ MsgType) {
 		p.pushMessage(msg2)
 	}
 	if err := p.transport.Gossip(msg); err != nil {
-		p.logger.Print("[ERROR] failed to gossip", "err", err)
+		p.logger.Printf("[ERROR] failed to gossip. Error message: %v", err)
 	}
 }
 
