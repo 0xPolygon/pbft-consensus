@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"reflect"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
+
+type RoundTimeout func(uint64) time.Duration
 
 type Config struct {
 	// ProposalTimeout is the time to wait for the proposal
@@ -27,6 +28,9 @@ type Config struct {
 
 	// Tracer is the OpenTelemetry tracer to log traces
 	Tracer trace.Tracer
+
+	// RoundTimeout is a function that calculates timeout based on a round number
+	RoundTimeout RoundTimeout
 }
 
 type ConfigOption func(*Config)
@@ -55,9 +59,16 @@ func WithTracer(t trace.Tracer) ConfigOption {
 	}
 }
 
+func WithRoundTimeout(rt RoundTimeout) ConfigOption {
+	return func(c *Config) {
+		c.RoundTimeout = rt
+	}
+}
+
 const (
-	defaultTimeout = 2 * time.Second
-	maxTimeout     = 300 * time.Second
+	defaultTimeout     = 2 * time.Second
+	maxTimeout         = 300 * time.Second
+	maxTimeoutExponent = 8
 )
 
 func DefaultConfig() *Config {
@@ -66,6 +77,7 @@ func DefaultConfig() *Config {
 		ProposalTimeout: defaultTimeout,
 		Logger:          log.New(os.Stderr, "", log.LstdFlags),
 		Tracer:          trace.NewNoopTracerProvider().Tracer(""),
+		RoundTimeout:    exponentialTimeout,
 	}
 }
 
@@ -137,6 +149,9 @@ type Pbft struct {
 	// tracer is a reference to the OpenTelemetry tracer
 	tracer trace.Tracer
 
+	// calculates timeout for a specific round
+	roundTimeout RoundTimeout
+
 	forceTimeoutCh bool
 }
 
@@ -151,14 +166,15 @@ func New(validator SignKey, transport Transport, opts ...ConfigOption) *Pbft {
 	config.ApplyOps(opts...)
 
 	p := &Pbft{
-		validator: validator,
-		state:     newState(),
-		transport: transport,
-		msgQueue:  newMsgQueue(),
-		updateCh:  make(chan struct{}),
-		config:    config,
-		logger:    config.Logger,
-		tracer:    config.Tracer,
+		validator:    validator,
+		state:        newState(),
+		transport:    transport,
+		msgQueue:     newMsgQueue(),
+		updateCh:     make(chan struct{}),
+		config:       config,
+		logger:       config.Logger,
+		tracer:       config.Tracer,
+		roundTimeout: config.RoundTimeout,
 	}
 
 	p.logger.Printf("[INFO] validator key: addr=%s\n", p.validator.NodeID())
@@ -307,7 +323,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 	// we are NOT a proposer for this height/round. Then, we have to wait
 	// for a pre-prepare message from the proposer
 
-	timeout := p.exponentialTimeout()
+	timeout := p.roundTimeout(p.state.view.Round)
 
 	// We only need to wait here for one type of message, the Prepare message from the proposer.
 	// However, since we can receive bad Prepare messages we have to wait (or timeout) until
@@ -379,7 +395,7 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 		}
 	}
 
-	timeout := p.exponentialTimeout()
+	timeout := p.roundTimeout(p.state.view.Round)
 	for p.getState() == ValidateState {
 		_, span := p.tracer.Start(ctx, "ValidateState")
 
@@ -393,7 +409,7 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 			// timeout
 			p.setState(RoundChangeState)
 			span.End()
-			continue
+			return
 		}
 
 		switch msg.Type {
@@ -404,7 +420,7 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 			p.state.addCommitted(msg)
 
 		default:
-			panic(fmt.Sprintf("BUG: %s", reflect.TypeOf(msg.Type)))
+			panic(fmt.Errorf("BUG: Unexpected message type: %s in %s", msg.Type, p.getState()))
 		}
 
 		if p.state.numPrepared() > p.state.NumValid() {
@@ -485,8 +501,6 @@ func (p *Pbft) runCommitState(ctx context.Context) {
 		p.logger.Print("[ERROR] failed to insert proposal", "err", err)
 		p.handleStateErr(errFailedToInsertProposal)
 	} else {
-		p.setSequence(p.state.view.Sequence + 1)
-
 		// move to done state to finish the current iteration of the state machine
 		p.setState(DoneState)
 	}
@@ -523,7 +537,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 	checkTimeout := func() {
 		// At this point we might be stuck in the network if:
 		// - We have advanced the round but everyone else passed.
-		//   We are removing those messages since they are old now.
+		// - We are removing those messages since they are old now.
 		if bestHeight, stucked := p.backend.IsStuck(p.state.view.Sequence); stucked {
 			span.AddEvent("OutOfSync", trace.WithAttributes(
 				// our local height
@@ -558,7 +572,8 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 	}
 
 	// create a timer for the round change
-	timeout := p.exponentialTimeout()
+	timeout := p.roundTimeout(p.state.view.Round)
+
 	for p.getState() == RoundChangeState {
 		_, span := p.tracer.Start(ctx, "RoundChangeState")
 
@@ -572,7 +587,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 			p.logger.Printf("[DEBUG] round change timeout")
 			checkTimeout()
 			// update the timeout duration
-			timeout = p.exponentialTimeout()
+			timeout = p.roundTimeout(p.state.view.Round)
 			span.End()
 			continue
 		}
@@ -588,7 +603,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 			// weak certificate, try to catch up if our round number is smaller
 			if p.state.view.Round < msg.View.Round {
 				// update timer
-				timeout = p.exponentialTimeout()
+				timeout = p.roundTimeout(p.state.view.Round)
 				sendRoundChange(msg.View.Round)
 			}
 		}
@@ -616,9 +631,9 @@ func (p *Pbft) sendCommitMsg() {
 	p.gossip(MessageReq_Commit)
 }
 
-func (p *Pbft) gossip(typ MsgType) {
+func (p *Pbft) gossip(msgType MsgType) {
 	msg := &MessageReq{
-		Type: typ,
+		Type: msgType,
 		From: p.validator.NodeID(),
 	}
 
@@ -683,14 +698,14 @@ func (p *Pbft) forceTimeout() {
 	p.forceTimeoutCh = true
 }
 
-// exponentialTimeout calculates the timeout duration depending on the current round
-func (p *Pbft) exponentialTimeout() time.Duration {
+// exponentialTimeout calculates the timeout duration depending on the current round.
+// Round acts as an exponent when determining timeout (2^round).
+func exponentialTimeout(round uint64) time.Duration {
 	timeout := defaultTimeout
-	round := p.state.view.Round
 	// limit exponent to be in range of maxTimeout (<=8) otherwise use maxTimeout
 	// this prevents calculating timeout that is greater than maxTimeout and
 	// possible overflow for calculating timeout for rounds >33 since duration is in nanoseconds stored in int64
-	if round <= 8 {
+	if round <= maxTimeoutExponent {
 		timeout += time.Duration(1<<round) * time.Second
 	} else {
 		timeout = maxTimeout
