@@ -226,6 +226,10 @@ func (c *cluster) Stop() {
 	}
 }
 
+func (c *cluster) FailNode(name string) {
+	c.nodes[name].setValidationFails(true)
+}
+
 type node struct {
 	lock sync.Mutex
 
@@ -241,6 +245,8 @@ type node struct {
 
 	// list of proposals
 	proposals []*pbft.SealedProposal
+	// indicate if the node is faulty
+	validationFails bool
 }
 
 func newPBFTNode(name string, nodes []string, trace trace.Tracer, tt *transport) (*node, error) {
@@ -320,15 +326,11 @@ func (n *node) Insert(pp *pbft.SealedProposal) error {
 	return nil
 }
 
-func (n *node) Start() {
-	factory := func(nn *node) pbft.Backend {
-		result := NewFsm(nn)
-		return &result
-	}
-	n.StartWithBackendFactory(factory)
+func (n *node) setValidationFails(v bool) {
+	n.validationFails = v
 }
 
-func (n *node) StartWithBackendFactory(fsmFactory func(n *node) pbft.Backend) {
+func (n *node) Start() {
 	if n.cancelFn != nil {
 		panic("already started")
 	}
@@ -344,7 +346,15 @@ func (n *node) StartWithBackendFactory(fsmFactory func(n *node) pbft.Backend) {
 		n.proposals = history
 
 		for {
-			fsm := fsmFactory(n)
+			fsm := &fsm{
+				n:            n,
+				nodes:        n.nodes,
+				lastProposer: n.lastProposer(),
+
+				// important: in this iteration of the fsm we have increased our height
+				height:          n.currentHeight() + 1,
+				validationFails: n.validationFails,
+			}
 			if err := n.pbft.SetBackend(fsm); err != nil {
 				panic(err)
 			}
@@ -396,10 +406,11 @@ func (k key) Sign(b []byte) ([]byte, error) {
 // -- fsm --
 
 type fsm struct {
-	n            *node
-	nodes        []string
-	lastProposer pbft.NodeID
-	height       uint64
+	n               *node
+	nodes           []string
+	lastProposer    pbft.NodeID
+	height          uint64
+	validationFails bool
 }
 
 func NewFsm(nn *node) fsm {
@@ -429,7 +440,14 @@ func (f *fsm) BuildProposal() (*pbft.Proposal, error) {
 	return proposal, nil
 }
 
+func (f *fsm) setValidationFails(v bool) {
+	f.validationFails = v
+}
+
 func (f *fsm) Validate(proposal []byte) error {
+	if f.validationFails {
+		return fmt.Errorf("validation error")
+	}
 	return nil
 }
 

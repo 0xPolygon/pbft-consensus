@@ -1,14 +1,11 @@
 package e2e
 
 import (
-	"fmt"
 	"math"
-	"math/rand"
 	"strconv"
 	"testing"
 	"time"
 
-	"github.com/0xPolygon/pbft-consensus"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -54,8 +51,9 @@ func TestE2E_Partition_MajorityCanValidate(t *testing.T) {
 	c := newPBFTCluster(t, "majority_partition", "prt", nodesCnt, hook)
 	limit := int(math.Floor(nodesCnt*2.0/3.0)) + 1 // 2F+1 nodes can Validate
 	for _, node := range c.Nodes() {
-		node.StartWithBackendFactory(createBackend(node.name >= "prt_"+strconv.Itoa(limit)))
+		node.setValidationFails(node.name >= "prt_"+strconv.Itoa(limit))
 	}
+	c.Start()
 	defer c.Stop()
 	names := generateNodeNames(0, limit, "prt_")
 	err := c.WaitForHeight(4, 1*time.Minute, names)
@@ -77,8 +75,9 @@ func TestE2E_Partition_MajorityCantValidate(t *testing.T) {
 	c := newPBFTCluster(t, "majority_partition", "prt", nodesCnt, hook)
 	limit := int(math.Floor(nodesCnt * 2.0 / 3.0)) // + 1 removed because 2F+1 nodes is majority
 	for _, node := range c.Nodes() {
-		node.StartWithBackendFactory(createBackend(node.name < "prt_"+strconv.Itoa(limit)))
+		node.setValidationFails(node.name < "prt_"+strconv.Itoa(limit))
 	}
+	c.Start()
 	defer c.Stop()
 	names := generateNodeNames(limit, nodesCnt, "prt_")
 	err := c.WaitForHeight(3, 1*time.Minute, names)
@@ -92,41 +91,11 @@ func TestE2E_Partition_BigMajorityCantValidate(t *testing.T) {
 	c := newPBFTCluster(t, "majority_partition", "prt", nodesCnt, hook)
 	limit := int(math.Floor(nodesCnt * 2.0 / 3.0)) // + 1 removed because 2F+1 nodes is majority
 	for _, node := range c.Nodes() {
-		node.StartWithBackendFactory(createBackend(node.name <= "prt_"+strconv.Itoa(limit)))
+		node.setValidationFails(node.name <= "prt_"+strconv.Itoa(limit))
 	}
+	c.Start()
 	defer c.Stop()
 	nodeNames := generateNodeNames(limit, nodesCnt, "prt_")
 	err := c.WaitForHeight(8, 1*time.Minute, nodeNames)
 	assert.Errorf(t, err, "Height reached for minority of nodes")
-}
-
-type fsmValidationError struct {
-	fsm
-}
-
-func (f *fsmValidationError) Validate(_ []byte) error {
-	return fmt.Errorf("invalid propsal")
-}
-
-type fsmInsertError struct {
-	fsm
-}
-
-func (f *fsmInsertError) Insert(_ *pbft.SealedProposal) error {
-	return fmt.Errorf("insert error")
-}
-
-func createBackend(invalid bool) func(nn *node) pbft.Backend {
-	return func(nn *node) pbft.Backend {
-		if invalid {
-			switch rand.Intn(2) {
-			case 0:
-				return &fsmValidationError{fsm: NewFsm(nn)}
-			case 1:
-				return &fsmInsertError{fsm: NewFsm(nn)}
-			}
-		}
-		tmp := NewFsm(nn)
-		return &tmp
-	}
 }
