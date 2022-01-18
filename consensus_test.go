@@ -460,7 +460,7 @@ func (m *mockPbft) emitMsg(msg *MessageReq) {
 	// from := m.pool.get(string(msg.From)).Address()
 	// msg.From = from
 
-	m.Pbft.pushMessage(msg)
+	m.Pbft.PushMessage(msg)
 }
 
 func (m *mockPbft) addMessage(msg *MessageReq) {

@@ -647,7 +647,7 @@ func (p *Pbft) gossip(typ MsgType) {
 		// send a copy to ourselves so that we can process this message as well
 		msg2 := msg.Copy()
 		msg2.From = p.validator.NodeID()
-		p.pushMessage(msg2)
+		p.PushMessage(msg2)
 	}
 	if err := p.transport.Gossip(msg); err != nil {
 		p.logger.Printf("[ERROR] failed to gossip. Error message: %v", err)
@@ -732,12 +732,8 @@ func (p *Pbft) getNextMessage(span trace.Span, timeout time.Duration) (*MessageR
 	}
 }
 
+// PushMessage pushes a new message to the message queue
 func (p *Pbft) PushMessage(msg *MessageReq) {
-	p.pushMessage(msg)
-}
-
-// pushMessage pushes a new message to the message queue
-func (p *Pbft) pushMessage(msg *MessageReq) {
 	p.msgQueue.pushMessage(msg)
 
 	select {
