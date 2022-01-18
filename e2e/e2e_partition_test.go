@@ -18,7 +18,7 @@ func TestE2E_Partition_OneMajority(t *testing.T) {
 	defer c.Stop()
 
 	err := c.WaitForHeight(5, 1*time.Minute)
-	assert.NoError(t, err, "Error should not be returned")
+	assert.NoError(t, err)
 
 	// create two partitions.
 	majorityPartition := []string{"prt_0", "prt_1", "prt_2"}
@@ -27,7 +27,7 @@ func TestE2E_Partition_OneMajority(t *testing.T) {
 
 	// only the majority partition will be able to sync
 	err = c.WaitForHeight(10, 1*time.Minute, majorityPartition)
-	assert.NoError(t, err, "Error should not be returned")
+	assert.NoError(t, err)
 
 	// the partition with two nodes is stuck
 	c.IsStuck(10*time.Second, minorityPartition)
@@ -41,7 +41,7 @@ func TestE2E_Partition_OneMajority(t *testing.T) {
 	}
 	// all nodes should be able to sync
 	err = c.WaitForHeight(15, 1*time.Minute, allNodes)
-	assert.NoError(t, err, "Error should not be returned")
+	assert.NoError(t, err)
 }
 
 func TestE2E_Partition_MajorityCanValidate(t *testing.T) {
@@ -57,7 +57,7 @@ func TestE2E_Partition_MajorityCanValidate(t *testing.T) {
 	defer c.Stop()
 	names := generateNodeNames(0, limit, "prt_")
 	err := c.WaitForHeight(4, 1*time.Minute, names)
-	assert.NoError(t, err, "Error should not be returned.")
+	assert.NoError(t, err)
 	// restart minority and wait to sync
 	for _, node := range c.Nodes() {
 		if node.name >= "prt_"+strconv.Itoa(limit) {
@@ -65,7 +65,7 @@ func TestE2E_Partition_MajorityCanValidate(t *testing.T) {
 		}
 	}
 	err = c.WaitForHeight(4, 1*time.Minute)
-	assert.NoError(t, err, "Error should not be returned.")
+	assert.NoError(t, err)
 }
 
 func TestE2E_Partition_MajorityCantValidate(t *testing.T) {

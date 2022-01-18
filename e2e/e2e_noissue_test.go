@@ -13,5 +13,5 @@ func TestE2E_NoIssue(t *testing.T) {
 	defer c.Stop()
 
 	err := c.WaitForHeight(10, 1*time.Minute)
-	assert.NoError(t, err, "Error should not be returned.")
+	assert.NoError(t, err)
 }
