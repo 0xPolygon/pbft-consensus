@@ -378,6 +378,11 @@ func (n *node) Stop() {
 	n.cancelFn = nil
 }
 
+func (n *node) Restart() {
+	n.Stop()
+	n.Start()
+}
+
 type key string
 
 func (k key) NodeID() pbft.NodeID {

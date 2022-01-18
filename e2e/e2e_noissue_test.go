@@ -3,6 +3,8 @@ package e2e
 import (
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestE2E_NoIssue(t *testing.T) {
@@ -11,7 +13,5 @@ func TestE2E_NoIssue(t *testing.T) {
 	defer c.Stop()
 
 	err := c.WaitForHeight(10, 1*time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
+	assert.NoError(t, err, "Error should not be returned.")
 }
