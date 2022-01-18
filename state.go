@@ -63,7 +63,6 @@ func (m *MessageReq) Copy() *MessageReq {
 	if m.Proposal != nil {
 		mm.SetProposal(m.Proposal)
 	}
-	// FIXME: Check if Seal should be copied as well or instantiated an empty slice instead?
 	if m.Seal != nil {
 		mm.Seal = append([]byte{}, m.Seal...)
 	}
