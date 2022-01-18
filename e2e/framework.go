@@ -227,7 +227,7 @@ func (c *cluster) Stop() {
 }
 
 func (c *cluster) FailNode(name string) {
-	c.nodes[name].setValidationFails(true)
+	c.nodes[name].setFaultyNode(true)
 }
 
 type node struct {
@@ -246,7 +246,7 @@ type node struct {
 	// list of proposals
 	proposals []*pbft.SealedProposal
 	// indicate if the node is faulty
-	validationFails bool
+	faulty bool
 }
 
 func newPBFTNode(name string, nodes []string, trace trace.Tracer, tt *transport) (*node, error) {
@@ -326,8 +326,8 @@ func (n *node) Insert(pp *pbft.SealedProposal) error {
 	return nil
 }
 
-func (n *node) setValidationFails(v bool) {
-	n.validationFails = v
+func (n *node) setFaultyNode(v bool) {
+	n.faulty = v
 }
 
 func (n *node) Start() {
@@ -353,7 +353,7 @@ func (n *node) Start() {
 
 				// important: in this iteration of the fsm we have increased our height
 				height:          n.currentHeight() + 1,
-				validationFails: n.validationFails,
+				validationFails: n.faulty,
 			}
 			if err := n.pbft.SetBackend(fsm); err != nil {
 				panic(err)
@@ -411,17 +411,6 @@ type fsm struct {
 	lastProposer    pbft.NodeID
 	height          uint64
 	validationFails bool
-}
-
-func NewFsm(nn *node) fsm {
-	return fsm{
-		n:            nn,
-		nodes:        nn.nodes,
-		lastProposer: nn.lastProposer(),
-
-		// important: in this iteration of the fsm we have increased our height
-		height: nn.currentHeight() + 1,
-	}
 }
 
 func (f *fsm) Height() uint64 {

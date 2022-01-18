@@ -51,7 +51,7 @@ func TestE2E_Partition_MajorityCanValidate(t *testing.T) {
 	c := newPBFTCluster(t, "majority_partition", "prt", nodesCnt, hook)
 	limit := int(math.Floor(nodesCnt*2.0/3.0)) + 1 // 2F+1 nodes can Validate
 	for _, node := range c.Nodes() {
-		node.setValidationFails(node.name >= "prt_"+strconv.Itoa(limit))
+		node.setFaultyNode(node.name >= "prt_"+strconv.Itoa(limit))
 	}
 	c.Start()
 	defer c.Stop()
@@ -75,7 +75,7 @@ func TestE2E_Partition_MajorityCantValidate(t *testing.T) {
 	c := newPBFTCluster(t, "majority_partition", "prt", nodesCnt, hook)
 	limit := int(math.Floor(nodesCnt * 2.0 / 3.0)) // + 1 removed because 2F+1 nodes is majority
 	for _, node := range c.Nodes() {
-		node.setValidationFails(node.name < "prt_"+strconv.Itoa(limit))
+		node.setFaultyNode(node.name < "prt_"+strconv.Itoa(limit))
 	}
 	c.Start()
 	defer c.Stop()
@@ -91,7 +91,7 @@ func TestE2E_Partition_BigMajorityCantValidate(t *testing.T) {
 	c := newPBFTCluster(t, "majority_partition", "prt", nodesCnt, hook)
 	limit := int(math.Floor(nodesCnt * 2.0 / 3.0)) // + 1 removed because 2F+1 nodes is majority
 	for _, node := range c.Nodes() {
-		node.setValidationFails(node.name <= "prt_"+strconv.Itoa(limit))
+		node.setFaultyNode(node.name <= "prt_"+strconv.Itoa(limit))
 	}
 	c.Start()
 	defer c.Stop()
