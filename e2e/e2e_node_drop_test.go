@@ -17,4 +17,11 @@ func TestE2E_NodeDrop(t *testing.T) {
 	c.StopNode("ptr_0")
 	err = c.WaitForHeight(15, 1*time.Minute, generateNodeNames(1, 4, "ptr_"))
 	assert.NoError(t, err)
+
+	// sync dropped node by starting it again
+	c.StartNode("ptr_0")
+	err = c.WaitForHeight(15, 1*time.Minute)
+	assert.NoError(t, err)
+
+	c.Stop()
 }
