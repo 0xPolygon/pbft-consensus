@@ -15,25 +15,13 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel/trace"
 )
 
 var (
 	mockProposal  = []byte{0x1, 0x2, 0x3}
 	mockProposal1 = []byte{0x1, 0x2, 0x3, 0x4}
 )
-
-// MockedTracer is a mocked object that implements Tracer interface
-type MockedTracer struct {
-	mock.Mock
-}
-
-func (m *MockedTracer) Start(ctx context.Context, spanName string, opts ...trace.SpanStartOption) (context.Context, trace.Span) {
-	args := m.Called(ctx, spanName, opts)
-	return args.Get(0).(context.Context), args.Get(1).(trace.Span)
-}
 
 func TestTransition_AcceptState_ToSyncState(t *testing.T) {
 	// we are in AcceptState and we are not in the validators list
