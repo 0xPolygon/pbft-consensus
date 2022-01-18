@@ -346,9 +346,11 @@ func TestPbftState_ToString(t *testing.T) {
 	}
 }
 
+type signDelegate func([]byte) ([]byte, error)
 type testerAccount struct {
-	alias string
-	priv  *ecdsa.PrivateKey
+	alias  string
+	priv   *ecdsa.PrivateKey
+	signFn signDelegate
 }
 
 func (t *testerAccount) NodeID() NodeID {
@@ -356,6 +358,9 @@ func (t *testerAccount) NodeID() NodeID {
 }
 
 func (t *testerAccount) Sign(b []byte) ([]byte, error) {
+	if t.signFn != nil {
+		return t.signFn(b)
+	}
 	return nil, nil
 }
 

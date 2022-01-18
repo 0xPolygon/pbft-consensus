@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"reflect"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -380,6 +379,7 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 	}
 
 	timeout := p.exponentialTimeout()
+
 	for p.getState() == ValidateState {
 		_, span := p.tracer.Start(ctx, "ValidateState")
 
@@ -393,7 +393,7 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 			// timeout
 			p.setState(RoundChangeState)
 			span.End()
-			continue
+			return
 		}
 
 		switch msg.Type {
@@ -404,7 +404,7 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 			p.state.addCommitted(msg)
 
 		default:
-			panic(fmt.Sprintf("BUG: %s", reflect.TypeOf(msg.Type)))
+			panic(fmt.Errorf("BUG: Unexpected message type: %s in %s", msg.Type, p.getState()))
 		}
 
 		if p.state.numPrepared() > p.state.NumValid() {
@@ -485,8 +485,6 @@ func (p *Pbft) runCommitState(ctx context.Context) {
 		p.logger.Printf("[ERROR] failed to insert proposal. Error message: %v", err)
 		p.handleStateErr(errFailedToInsertProposal)
 	} else {
-		p.setSequence(p.state.view.Sequence + 1)
-
 		// move to done state to finish the current iteration of the state machine
 		p.setState(DoneState)
 	}
@@ -523,7 +521,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 	checkTimeout := func() {
 		// At this point we might be stuck in the network if:
 		// - We have advanced the round but everyone else passed.
-		//   We are removing those messages since they are old now.
+		// - We are removing those messages since they are old now.
 		if bestHeight, stucked := p.backend.IsStuck(p.state.view.Sequence); stucked {
 			span.AddEvent("OutOfSync", trace.WithAttributes(
 				// our local height
@@ -559,6 +557,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 
 	// create a timer for the round change
 	timeout := p.exponentialTimeout()
+
 	for p.getState() == RoundChangeState {
 		_, span := p.tracer.Start(ctx, "RoundChangeState")
 
@@ -616,9 +615,9 @@ func (p *Pbft) sendCommitMsg() {
 	p.gossip(MessageReq_Commit)
 }
 
-func (p *Pbft) gossip(typ MsgType) {
+func (p *Pbft) gossip(msgType MsgType) {
 	msg := &MessageReq{
-		Type: typ,
+		Type: msgType,
 		From: p.validator.NodeID(),
 	}
 
@@ -683,7 +682,8 @@ func (p *Pbft) forceTimeout() {
 	p.forceTimeoutCh = true
 }
 
-// exponentialTimeout calculates the timeout duration depending on the current round
+// exponentialTimeout calculates the timeout duration depending on the current round.
+// Round acts as an exponent when determining timeout (2^round).
 func (p *Pbft) exponentialTimeout() time.Duration {
 	timeout := defaultTimeout
 	round := p.state.view.Round
