@@ -50,12 +50,34 @@ func TestMsgQueue_RoundChangeState(t *testing.T) {
 		assert.NotNil(t, msg2)
 		assert.Equal(t, msg2.From, NodeID("D"))
 	}
+
+	// insert future messages to the queue => such messages should not be retrieved back
+	{
+		m = newMsgQueue()
+		m.pushMessage(mockQueueMsg("A", MessageReq_RoundChange, ViewMsg(3, 1)))
+		assert.Nil(t, m.readMessage(RoundChangeState, ViewMsg(1, 1)))
+
+		m.pushMessage(mockQueueMsg("A", MessageReq_Commit, ViewMsg(3, 1)))
+		assert.Nil(t, m.readMessage(CommitState, ViewMsg(1, 1)))
+	}
+}
+
+func Test_msgToState(t *testing.T) {
+	expectedResult := map[MsgType]PbftState{
+		MessageReq_RoundChange: RoundChangeState,
+		MessageReq_Preprepare:  AcceptState,
+		MessageReq_Prepare:     ValidateState,
+		MessageReq_Commit:      ValidateState,
+	}
+	for msgType, pbftState := range expectedResult {
+		assert.Equal(t, pbftState, msgToState(msgType))
+	}
 }
 
 func TestCmpView(t *testing.T) {
 	var cases = []struct {
-		v, y *View
-		res  int
+		x, y           *View
+		expectedResult int
 	}{
 		{
 			&View{
@@ -68,9 +90,53 @@ func TestCmpView(t *testing.T) {
 			},
 			-1,
 		},
+		{
+			&View{
+				Sequence: 2,
+				Round:    1,
+			},
+			&View{
+				Sequence: 1,
+				Round:    1,
+			},
+			1,
+		},
+		{
+			&View{
+				Sequence: 1,
+				Round:    1,
+			},
+			&View{
+				Sequence: 1,
+				Round:    2,
+			},
+			-1,
+		},
+		{
+			&View{
+				Sequence: 1,
+				Round:    2,
+			},
+			&View{
+				Sequence: 1,
+				Round:    1,
+			},
+			1,
+		},
+		{
+			&View{
+				Sequence: 1,
+				Round:    1,
+			},
+			&View{
+				Sequence: 1,
+				Round:    1,
+			},
+			0,
+		},
 	}
 
 	for _, c := range cases {
-		assert.Equal(t, cmpView(c.v, c.y), c.res)
+		assert.Equal(t, cmpView(c.x, c.y), c.expectedResult)
 	}
 }
