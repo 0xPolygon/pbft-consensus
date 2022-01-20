@@ -1,7 +1,9 @@
 package e2e
 
 import (
+	"os"
 	"strconv"
+	"testing"
 	"time"
 )
 
@@ -43,4 +45,10 @@ func executeInTimer(tickTime time.Duration, duration time.Duration, fn func(time
 		close(tickerDone)
 	}()
 	return end
+}
+
+func isFuzzEnabled(t *testing.T) {
+	if os.Getenv("FUZZ") != "true" {
+		t.Skip("Fuzz tests are disabled.")
+	}
 }

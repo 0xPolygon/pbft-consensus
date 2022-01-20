@@ -2,7 +2,6 @@ package e2e
 
 import (
 	"math/rand"
-	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -11,9 +10,7 @@ import (
 )
 
 func TestFuzz_NetworkChurn(t *testing.T) {
-	if os.Getenv("FUZZ") != "true" {
-		t.Skip("Fuzz tests are disabled.")
-	}
+	isFuzzEnabled(t)
 
 	rand.Seed(time.Now().Unix())
 	nodeCount := 20
