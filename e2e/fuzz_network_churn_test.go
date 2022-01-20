@@ -1,8 +1,8 @@
 package e2e
 
 import (
-	"fmt"
 	"math/rand"
+	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -11,6 +11,10 @@ import (
 )
 
 func TestFuzz_NetworkChurn(t *testing.T) {
+	if os.Getenv("FUZZ") != "true" {
+		t.Skip("Fuzz tests are disabled.")
+	}
+
 	rand.Seed(time.Now().Unix())
 	nodeCount := 20
 	maxFaulty := nodeCount/3 - 1
@@ -42,7 +46,7 @@ func TestFuzz_NetworkChurn(t *testing.T) {
 			runningNodes = append(runningNodes, v.name)
 		}
 	}
-	fmt.Println("Checking height after churn")
+	t.Log("Checking height after churn.")
 	// all running nodes must have the same height
 	err := c.WaitForHeight(35, 5*time.Minute, runningNodes)
 	assert.NoError(t, err)
@@ -55,7 +59,7 @@ func TestFuzz_NetworkChurn(t *testing.T) {
 		}
 	}
 	// all nodes must sync and have same height
-	fmt.Println("Checking height after all nodes start")
+	t.Log("Checking height after all nodes start.")
 	err = c.WaitForHeight(45, 5*time.Minute, runningNodes)
 	assert.NoError(t, err)
 }

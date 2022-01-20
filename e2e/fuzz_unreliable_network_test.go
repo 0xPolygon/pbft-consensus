@@ -1,8 +1,8 @@
 package e2e
 
 import (
-	"fmt"
 	"math/rand"
+	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -11,6 +11,10 @@ import (
 )
 
 func TestFuzz_Unreliable_Network(t *testing.T) {
+	if os.Getenv("FUZZ") != "true" {
+		t.Skip("Fuzz tests are disabled.")
+	}
+
 	rand.Seed(time.Now().Unix())
 	nodesCount := 20 + rand.Intn(11) // vary nodes [20,30]
 	maxFaulty := nodesCount/3 - 1
@@ -19,7 +23,7 @@ func TestFuzz_Unreliable_Network(t *testing.T) {
 	jitterMax := 500 * time.Millisecond
 	hook := newPartitionTransport(jitterMax)
 	c := newPBFTCluster(t, "network_unreliable", "prt", nodesCount, hook)
-	fmt.Printf("Starting cluster with %d nodes, max faulty %d.\n", nodesCount, maxFaulty)
+	t.Logf("Starting cluster with %d nodes, max faulty %d.\n", nodesCount, maxFaulty)
 	c.Start()
 	defer c.Stop()
 
@@ -36,10 +40,10 @@ func TestFuzz_Unreliable_Network(t *testing.T) {
 		for i := pSize; i < nodesCount; i++ {
 			majorityPartition = append(majorityPartition, "prt_"+strconv.Itoa(i))
 		}
-		fmt.Printf("Partitions ratio %d/%d\n", len(majorityPartition), len(minorityPartition))
+		t.Logf("Partitions ratio %d/%d\n", len(majorityPartition), len(minorityPartition))
 
 		hook.Partition(minorityPartition, majorityPartition)
-		fmt.Printf("Checking for height %v, started with nodes %d\n", currentHeight, nodesCount)
+		t.Logf("Checking for height %v, started with nodes %d\n", currentHeight, nodesCount)
 		err := c.WaitForHeight(currentHeight, 10*time.Minute, majorityPartition)
 		if err != nil {
 			t.Fatal(err)
@@ -47,7 +51,7 @@ func TestFuzz_Unreliable_Network(t *testing.T) {
 
 		// randomly drop if possible nodes from the partition pick one number
 		dropN := rand.Intn(maxFaulty - pSize + 1)
-		fmt.Printf("Dropping: %v nodes.\n", dropN)
+		t.Logf("Dropping: %v nodes.\n", dropN)
 
 		currentHeight += 5
 		// stop N nodes from majority partition
@@ -69,7 +73,7 @@ func TestFuzz_Unreliable_Network(t *testing.T) {
 			}
 		}
 		// check all running nodes in majority partition for the block height
-		fmt.Printf("Checking for height %v, started with nodes %d\n", currentHeight, nodesCount)
+		t.Logf("Checking for height %v, started with nodes %d\n", currentHeight, nodesCount)
 		err = c.WaitForHeight(currentHeight, 10*time.Minute, runningMajorityNodes)
 		assert.NoError(t, err)
 
@@ -86,7 +90,7 @@ func TestFuzz_Unreliable_Network(t *testing.T) {
 	hook.Reset()
 	// all nodes in the network should be synced after starting all nodes and partition restart
 	finalHeight := maxHeight + 10
-	fmt.Printf("Checking final height %v, nodes: %d\n", finalHeight, nodesCount)
+	t.Logf("Checking final height %v, nodes: %d\n", finalHeight, nodesCount)
 	err := c.WaitForHeight(finalHeight, 20*time.Minute)
 	assert.NoError(t, err)
 }
