@@ -131,12 +131,12 @@ func TestTransition_AcceptState_Validator_VerifyFails(t *testing.T) {
 
 // Test that if build proposal fails, state machine will change state from AcceptState to RoundChangeState.
 func TestTransition_AcceptState_Proposer_FailedBuildProposal(t *testing.T) {
-	buildProposalFunc := func() (*Proposal, error) {
+	buildProposalFailure := func() (*Proposal, error) {
 		return nil, errors.New("failed to build a proposal")
 	}
 
 	validatorIds := []string{"A", "B", "C"}
-	backend := newMockBackend(validatorIds, nil).HookBuildProposalHandler(buildProposalFunc)
+	backend := newMockBackend(validatorIds, nil).HookBuildProposalHandler(buildProposalFailure)
 
 	m := newMockPbft(t, validatorIds, "A", backend)
 	m.state.view = ViewMsg(1, 0)
@@ -158,15 +158,6 @@ func TestTransition_AcceptState_Proposer_FailedBuildProposal(t *testing.T) {
 		Type: MessageReq_Prepare,
 		View: ViewMsg(1, 0),
 	})
-
-	go func() {
-		for {
-			if m.GetState() == RoundChangeState {
-				m.cancelFn()
-				return
-			}
-		}
-	}()
 
 	m.runCycle(m.ctx)
 	assert.True(t, m.IsState(RoundChangeState))
@@ -200,8 +191,7 @@ func testAcceptState_Cancellation(t *testing.T, isProposerNode bool) {
 		m.cancelFn()
 	}()
 
-	m.runCycle(m.ctx)
-	assert.True(t, m.IsState(AcceptState), "Expected to be in %s, but was in %s", AcceptState, m.getState())
+	assert.NotPanics(t, func() { m.runCycle(m.ctx) })
 }
 
 func TestTransition_AcceptState_Validator_ProposerInvalid(t *testing.T) {
@@ -322,16 +312,7 @@ func TestTransition_AcceptState_Validate_ProposalFail(t *testing.T) {
 		View: ViewMsg(1, 0),
 	})
 
-	go func() {
-		for {
-			if m.GetState() == RoundChangeState {
-				m.cancelFn()
-				return
-			}
-		}
-	}()
-
-	m.Run(m.ctx)
+	m.runCycle(m.ctx)
 
 	assert.True(t, m.IsState(RoundChangeState))
 }
