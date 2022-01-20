@@ -164,7 +164,7 @@ func (c *cluster) IsStuck(timeout time.Duration, nodes ...[]string) {
 	}
 }
 
-func (c *cluster) WaitForHeight(num uint64, timeout time.Duration, nodes ...[]string) {
+func (c *cluster) WaitForHeight(num uint64, timeout time.Duration, nodes ...[]string) error {
 	// we need to check every node in the ensemble?
 	// yes, this should test if everyone can agree on the final set.
 	// note, if we include drops, we need to do sync otherwise this will never work
@@ -185,12 +185,22 @@ func (c *cluster) WaitForHeight(num uint64, timeout time.Duration, nodes ...[]st
 		select {
 		case <-time.After(200 * time.Millisecond):
 			if enough() {
-				return
+				return nil
 			}
 		case <-timer.C:
-			c.t.Fatal("timeout")
+			return fmt.Errorf("timeout")
 		}
 	}
+}
+
+func (c *cluster) Nodes() []*node {
+	list := make([]*node, len(c.nodes))
+	i := 0
+	for _, n := range c.nodes {
+		list[i] = n
+		i++
+	}
+	return list
 }
 
 func (c *cluster) Start() {
@@ -216,6 +226,10 @@ func (c *cluster) Stop() {
 	}
 }
 
+func (c *cluster) FailNode(name string) {
+	c.nodes[name].setFaultyNode(true)
+}
+
 type node struct {
 	lock sync.Mutex
 
@@ -231,6 +245,8 @@ type node struct {
 
 	// list of proposals
 	proposals []*pbft.SealedProposal
+	// indicate if the node is faulty
+	faulty bool
 }
 
 func newPBFTNode(name string, nodes []string, trace trace.Tracer, tt *transport) (*node, error) {
@@ -310,6 +326,10 @@ func (n *node) Insert(pp *pbft.SealedProposal) error {
 	return nil
 }
 
+func (n *node) setFaultyNode(v bool) {
+	n.faulty = v
+}
+
 func (n *node) Start() {
 	if n.cancelFn != nil {
 		panic("already started")
@@ -332,7 +352,8 @@ func (n *node) Start() {
 				lastProposer: n.lastProposer(),
 
 				// important: in this iteration of the fsm we have increased our height
-				height: n.currentHeight() + 1,
+				height:          n.currentHeight() + 1,
+				validationFails: n.faulty,
 			}
 			if err := n.pbft.SetBackend(fsm); err != nil {
 				panic(err)
@@ -367,6 +388,11 @@ func (n *node) Stop() {
 	n.cancelFn = nil
 }
 
+func (n *node) Restart() {
+	n.Stop()
+	n.Start()
+}
+
 type key string
 
 func (k key) NodeID() pbft.NodeID {
@@ -380,10 +406,11 @@ func (k key) Sign(b []byte) ([]byte, error) {
 // -- fsm --
 
 type fsm struct {
-	n            *node
-	nodes        []string
-	lastProposer pbft.NodeID
-	height       uint64
+	n               *node
+	nodes           []string
+	lastProposer    pbft.NodeID
+	height          uint64
+	validationFails bool
 }
 
 func (f *fsm) Height() uint64 {
@@ -402,8 +429,14 @@ func (f *fsm) BuildProposal() (*pbft.Proposal, error) {
 	return proposal, nil
 }
 
+func (f *fsm) setValidationFails(v bool) {
+	f.validationFails = v
+}
+
 func (f *fsm) Validate(proposal []byte) error {
-	// always validate for now
+	if f.validationFails {
+		return fmt.Errorf("validation error")
+	}
 	return nil
 }
 
