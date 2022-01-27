@@ -760,6 +760,171 @@ func TestGossip_SignProposalFailed(t *testing.T) {
 	assert.Empty(t, m.msgQueue.validateStateQueue)
 }
 
+func Test_LivenessIssueSimulation(t *testing.T) {
+	validatorIds := []string{"A", "B", "C", "D", "E"}
+	ABNodeSet := validatorIds[:2]  // A, B
+	CDENodeSet := validatorIds[2:] // C, D, E
+	a := newMockPbft(t, validatorIds, "A")
+	b := newMockPbft(t, validatorIds, "B")
+	c := newMockPbft(t, validatorIds, "C")
+	d := newMockPbft(t, validatorIds, "D")
+	e := newMockPbft(t, validatorIds, "E")
+	proposal := &Proposal{Data: mockProposal, Time: time.Now()}
+	validators := map[string]*mockPbft{"A": a, "B": b, "C": c, "D": d, "E": e}
+	for _, v := range validators {
+		v.setState(ValidateState)
+		v.setProposal(proposal)
+	}
+
+	// 1. Nodes A and B recieve enough Prepare messages so that they can lock a proposal.
+	for _, sender := range CDENodeSet {
+		a.emitMsg(&MessageReq{
+			From: NodeID(sender),
+			Type: MessageReq_Prepare,
+			View: ViewMsg(1, 0),
+		})
+		b.emitMsg(&MessageReq{
+			From: NodeID(sender),
+			Type: MessageReq_Prepare,
+			View: ViewMsg(1, 0),
+		})
+	}
+
+	for _, vId := range validatorIds {
+		validators[vId].runCycle(context.Background())
+	}
+
+	// 2. All the nodes are in the RoundChangeState, because there aren't enough Commit messages (2*F+1=3 in our example of total 5 nodes)
+	// to proceed to the CommitState.
+	// However we have a split: nodes A and B are almost ready to commit the proposal (they just need to receive enough Commit messages)
+	// whereas C, D and E are not (they don't have received any Prepare message).
+	lockedNodeRoundChangeRes := expectResult{
+		state:       RoundChangeState,
+		locked:      true,
+		sequence:    1,
+		prepareMsgs: 3,
+		commitMsgs:  1,
+		outgoing:    1,
+	}
+	unlockedNodeRoundChangeRes := expectResult{
+		state:    RoundChangeState,
+		locked:   false,
+		sequence: 1,
+	}
+	for _, vId := range ABNodeSet {
+		validators[vId].expect(lockedNodeRoundChangeRes)
+	}
+	for _, vId := range CDENodeSet {
+		validators[vId].expect(unlockedNodeRoundChangeRes)
+	}
+
+	// 3. Send enough RoundChange messages in order to proceed to the next round (AcceptState).
+	for _, v := range validators {
+		for _, sender := range validatorIds {
+			roundChangeMsg := &MessageReq{
+				From: NodeID(sender),
+				Type: MessageReq_RoundChange,
+				View: ViewMsg(1, 0),
+			}
+			v.emitMsg(roundChangeMsg)
+			roundChangeMsg.View = ViewMsg(1, 1)
+			v.state.AddRoundMessage(roundChangeMsg)
+		}
+	}
+
+	for _, vId := range validatorIds {
+		v := validators[vId]
+		v.runCycle(context.Background())
+
+		assert.True(t, v.IsState(AcceptState))
+		assert.True(t, v.state.view.Round == 1)
+
+		v.state.cleanRound(1)
+		v.setState(ValidateState)
+		// Round 1, new proposer
+		v.state.proposer = NodeID("C")
+	}
+
+	// 4. Nodes C, D and E gossip Prepare messages between them.
+	// A and B send RoundChange messages to the nodes C, D and E since they have already locked the proposal.
+	for _, vId := range CDENodeSet {
+		v := validators[vId]
+		// Inject Prepare messages from nodes C, D and E.
+		for _, sender := range CDENodeSet {
+			v.emitMsg(&MessageReq{
+				From: NodeID(sender),
+				Type: MessageReq_Prepare,
+				View: ViewMsg(1, 1),
+			})
+		}
+		// Inject RoundChange messages from nodes A and B to the C, D and E nodes.
+		for _, sender := range ABNodeSet {
+			roundChangeMsg := &MessageReq{
+				From: NodeID(sender),
+				Type: MessageReq_RoundChange,
+				View: ViewMsg(1, 2),
+			}
+			v.emitMsg(roundChangeMsg)
+			v.state.AddRoundMessage(roundChangeMsg)
+		}
+	}
+
+	lockedNodeRoundChangeRes.round = 1
+	lockedNodeRoundChangeRes.outgoing = 2
+	for _, vId := range CDENodeSet {
+		v := validators[vId]
+		// Move from ValidateState to RoundChangeState
+		v.runCycle(context.Background())
+		v.expect(lockedNodeRoundChangeRes)
+
+		// RoundChangeState to AcceptState (round=2)
+		v.runCycle(context.Background())
+	}
+
+	// 5. Mark some node (e.g. D) as faulty, which means it won't be able to either retrieve or send Commit message.
+	// Other nodes from the same subset send Commit message.
+	faultyNodeId := "D"
+	for _, vId := range CDENodeSet {
+		if vId == faultyNodeId {
+			continue
+		}
+		v := validators[vId]
+		for _, sender := range CDENodeSet {
+			if sender == faultyNodeId {
+				continue
+			}
+			// C and E nodes are sending Commit messages to each other, but it is not enough to proceed to Commit state
+			// (since 2*F+1=3 Commit messages are needed for quorum).
+			v.emitMsg(&MessageReq{
+				From: NodeID(sender),
+				Type: MessageReq_Commit,
+				View: ViewMsg(1, 1),
+			})
+		}
+	}
+
+	// 6. Assert that nodes from first subset remained in RoundChange state in round=1
+	for _, vId := range ABNodeSet {
+		v := validators[vId]
+		v.runCycle(context.Background())
+
+		assert.True(t, v.IsState(RoundChangeState))
+		assert.True(t, v.state.locked)
+		assert.True(t, v.state.view.Round == 1)
+	}
+
+	// 7. Assert that there is no progress towards CommitState in second subset either, since there aren't enough Commit messages (D node commit message lacks for quorum).
+	for _, vId := range CDENodeSet {
+		v := validators[vId]
+		v.setState(ValidateState)
+		v.runCycle(context.Background())
+
+		assert.True(t, v.IsState(RoundChangeState))
+		assert.True(t, v.state.locked)
+		assert.True(t, v.state.view.Round == 2)
+	}
+}
+
 type gossipDelegate func(*MessageReq) error
 
 type mockPbft struct {
