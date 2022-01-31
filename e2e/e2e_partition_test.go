@@ -6,8 +6,109 @@ import (
 	"testing"
 	"time"
 
+	"github.com/0xPolygon/pbft-consensus"
 	"github.com/stretchr/testify/assert"
 )
+
+// Test proves existence of liveness issues which is described in
+// Correctness Analysis of Istanbul Byzantine Fault Tolerance(https://arxiv.org/pdf/1901.07160.pdf).
+// Specific problem this test is emulating is described in Chapter 7.1, Case 1.
+// Summary of the problem is that there are not enough nodes to lock on single proposal,
+// due to some issues where nodes being unable to deliver messages to all of the peers.
+// Therefore nodes are split into two subsets locked on different proposals.
+// Simulating one node from larger subset as faulty one, results in being unable to reach a consensus on a single proposal and that's what liveness issue is about.
+// This test creates a single cluster of 5 nodes, but instead of letting all the peers communicate with each other,
+// it routes messages only to specific nodes and induces that nodes lock on different proposal.
+// In the round=1, it marks one node as faulty (meaning that it doesn't takes part in gossiping).
+func TestE2E_Partition_Liveness(t *testing.T) {
+	const nodesCnt = 5
+	round0 := roundMetadata{
+		round: 0,
+		// lock A_3 and A_4 on one proposal
+		routingMap: map[pbft.NodeID][]pbft.NodeID{
+			"A_0": {"A_3", "A_4"},
+			"A_3": {"A_0", "A_3", "A_4"},
+			"A_4": {"A_3", "A_4"},
+		},
+	}
+
+	round1 := roundMetadata{
+		round: 1,
+		// lock A_2 and A_0 on one proposal and A_1 will be faulty
+		routingMap: map[pbft.NodeID][]pbft.NodeID{
+			"A_0": {"A_0", "A_2", "A_3", "A_4"},
+			"A_1": {"A_0", "A_2", "A_3", "A_4"},
+			"A_2": {"A_0", "A_1", "A_2", "A_3", "A_4"},
+
+			"A_3": {"A_0", "A_1", "A_2", "A_3", "A_4"},
+			"A_4": {"A_0", "A_1", "A_2", "A_3", "A_4"},
+		},
+	}
+	flowMap := map[uint64]roundMetadata{0: round0, 1: round1}
+
+	livenessGossipArbitrage := func(sender, receiver pbft.NodeID, msg *pbft.MessageReq) bool {
+		faultyNodeId := pbft.NodeID("A_1")
+		if msg.View.Sequence > 2 || msg.View.Round > 1 {
+			// node A_1 (faulty) is unresponsive after round 1
+			if sender == faultyNodeId || receiver == faultyNodeId {
+				return false
+			}
+			// all other nodes are connected for all the messages
+			return true
+		}
+
+		// Case where we are in round 1 and 2 different nodes will lock the proposal
+		// (A_1 ignores round change and commit messages)
+		if msg.View.Round == 1 {
+			if sender == faultyNodeId &&
+				(msg.Type == pbft.MessageReq_RoundChange || msg.Type == pbft.MessageReq_Commit) {
+				return false
+			}
+		}
+
+		msgFlow, ok := flowMap[msg.View.Round]
+		if !ok {
+			return false
+		}
+
+		if msgFlow.round == msg.View.Round {
+			receivers, ok := msgFlow.routingMap[sender]
+			if !ok {
+				return false
+			}
+
+			// do not send commit messages for rounds <=1
+			if msg.Type == pbft.MessageReq_Commit {
+				return false
+			}
+
+			foundReceiver := false
+			for _, v := range receivers {
+				if v == receiver {
+					foundReceiver = true
+					break
+				}
+			}
+			return foundReceiver
+		}
+		return true
+	}
+
+	hook := newGenericGossipTransport(livenessGossipArbitrage)
+
+	c := newPBFTCluster(t, "liveness_issue", "A", nodesCnt, hook)
+	c.Start()
+	defer c.Stop()
+
+	err := c.WaitForHeight(3, 5*time.Minute)
+
+	// log to check what is the end state
+	for _, n := range c.nodes {
+		t.Logf("Node %v, isProposalLocked: %v, proposal data: %v\n", n.name, n.pbft.IsStateLocked(), n.pbft.Proposal().Data)
+	}
+
+	assert.NoError(t, err)
+}
 
 func TestE2E_Partition_OneMajority(t *testing.T) {
 	const nodesCnt = 5

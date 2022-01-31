@@ -184,6 +184,14 @@ func New(validator SignKey, transport Transport, opts ...ConfigOption) *Pbft {
 	return p
 }
 
+func (p *Pbft) IsStateLocked() bool {
+	return p.state.IsLocked()
+}
+
+func (p *Pbft) Proposal() *Proposal {
+	return p.state.proposal
+}
+
 func (p *Pbft) SetBackend(backend Backend) error {
 	p.backend = backend
 

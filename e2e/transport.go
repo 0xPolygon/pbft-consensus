@@ -34,6 +34,7 @@ func (t *transport) Gossip(msg *pbft.MessageReq) error {
 				send = t.hook.Gossip(msg.From, to, msg)
 			}
 			if send {
+				// fmt.Printf("Sending message %v from Node %v to node %v\n", msg.Type, msg.From, to)
 				handler(msg)
 			}
 		}(to, handler)
@@ -44,6 +45,37 @@ func (t *transport) Gossip(msg *pbft.MessageReq) error {
 type transportHook interface {
 	Connects(from, to pbft.NodeID) bool
 	Gossip(from, to pbft.NodeID, msg *pbft.MessageReq) bool
+}
+
+// encapsulates routing mapping for certain round
+type roundMetadata struct {
+	round uint64
+	// represents message routing map (sender node id to recipient node ids)
+	// e.g. A4 sends messages to [A0, A1]
+	routingMap map[pbft.NodeID][]pbft.NodeID
+}
+
+// callback which enables determining which message should be gossiped
+type gossipArbitrageHandler func(sender, reciever pbft.NodeID, msg *pbft.MessageReq) (shouldSend bool)
+
+// transport implementation which enables specifying custom gossiping logic
+type genericGossipTransport struct {
+	gossipArbitrage gossipArbitrageHandler
+}
+
+func newGenericGossipTransport(gossipArbitrage gossipArbitrageHandler) *genericGossipTransport {
+	return &genericGossipTransport{
+		gossipArbitrage: gossipArbitrage,
+	}
+}
+
+func (rt *genericGossipTransport) Gossip(from, to pbft.NodeID, msg *pbft.MessageReq) bool {
+	// if gossip arbitrage callback returns false, message should not be gossiped and we stop here.
+	return rt.gossipArbitrage(from, to, msg)
+}
+
+func (rt *genericGossipTransport) Connects(from, to pbft.NodeID) bool {
+	return true
 }
 
 // latency transport
