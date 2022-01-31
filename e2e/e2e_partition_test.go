@@ -13,7 +13,7 @@ import (
 
 func TestE2E_Partition_Liveness(t *testing.T) {
 	const nodesCnt = 5
-	flow1 := msgFlow{
+	round0 := msgFlow{
 		round: 0,
 		// lock A_3 and A_4 on one proposal
 		partition: map[pbft.NodeID][]pbft.NodeID{
@@ -23,8 +23,9 @@ func TestE2E_Partition_Liveness(t *testing.T) {
 		},
 	}
 
-	flow2 := msgFlow{
-		round: 1,
+	round1 := msgFlow{
+		round:      1,
+		faultyNode: pbft.NodeID("A_1"),
 		// lock A_2 and A_0 on one proposal and A_1 will be faulty
 		partition: map[pbft.NodeID][]pbft.NodeID{
 			"A_0": {"A_0", "A_2", "A_3", "A_4"},
@@ -37,8 +38,8 @@ func TestE2E_Partition_Liveness(t *testing.T) {
 	}
 
 	flowMap := make(map[uint64]msgFlow)
-	flowMap[0] = flow1 // for round 0
-	flowMap[1] = flow2 // for round 1
+	flowMap[0] = round0
+	flowMap[1] = round1
 	hook := newRoundChange(flowMap)
 
 	c := newPBFTCluster(t, "liveness_issue", "A", nodesCnt, hook)

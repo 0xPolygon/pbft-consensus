@@ -48,7 +48,8 @@ type transportHook interface {
 }
 
 type msgFlow struct {
-	round uint64
+	round      uint64
+	faultyNode pbft.NodeID
 	// represents message flow map
 	// e.g. A4 -> A0, A1
 	partition map[pbft.NodeID][]pbft.NodeID
@@ -64,19 +65,24 @@ func newRoundChange(flow map[uint64]msgFlow) *roundTransport {
 }
 func (rt *roundTransport) Gossip(from, to pbft.NodeID, msg *pbft.MessageReq) bool {
 	if msg.View.Round > 1 {
-		// node A_1 is unresponsive after round 1
-		if from == "A_1" || to == "A_1" {
+		// node A_1 (faulty) is unresponsive after round 1
+		msgSend, _ := rt.msgSend[msg.View.Round]
+		if from == msgSend.faultyNode || to == msgSend.faultyNode {
 			return false
 		}
-		// all other nodes are connected for all messages
+		// all other nodes are connected for all the messages
 		return true
 	}
 
-	// in round 1 A_1 ignores round change and commit messages
-	if msg.View.Round == 1 && (msg.Type == pbft.MessageReq_RoundChange ||
-		msg.Type == pbft.MessageReq_Commit) &&
-		(from == "A_1") {
-		return false
+	// Case where we are in round 1 and 2 different nodes will lock the proposal
+	// (A_1 ignores round change and commit messages)
+	if msg.View.Round == 1 {
+		msgSend, _ := rt.msgSend[msg.View.Round]
+		if (msg.Type == pbft.MessageReq_RoundChange ||
+			msg.Type == pbft.MessageReq_Commit) &&
+			(from == msgSend.faultyNode) {
+			return false
+		}
 	}
 
 	msgSend, ok := rt.msgSend[msg.View.Round]
@@ -89,9 +95,8 @@ func (rt *roundTransport) Gossip(from, to pbft.NodeID, msg *pbft.MessageReq) boo
 		if !ok {
 			return false
 		}
-		// if ok check to
 		found := false
-		// ignore commit messages <= of round 1
+		// do not send commit messages for rounds <=1
 		if msg.Type == pbft.MessageReq_Commit {
 			return false
 		}
