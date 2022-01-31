@@ -113,6 +113,9 @@ type Backend interface {
 	// Hash hashes the proposal bytes
 	Hash(p []byte) []byte
 
+	// Init is used to signal the backend that a new round is going to start.
+	Init()
+
 	// IsStuck returns whether the pbft is stucked
 	IsStuck(num uint64) (uint64, bool)
 }
@@ -268,6 +271,8 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 		p.setState(SyncState)
 		return
 	}
+
+	p.backend.Init()
 
 	// reset round messages
 	p.state.resetRoundMsgs()
