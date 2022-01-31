@@ -181,6 +181,18 @@ func New(validator SignKey, transport Transport, opts ...ConfigOption) *Pbft {
 	return p
 }
 
+// IsStateLocked only for debug purpose
+// TODO: remove this
+func (p *Pbft) IsStateLocked() bool {
+	return p.state.IsLocked()
+}
+
+// Proposal only for debug purpose
+// TODO: remove this
+func (p *Pbft) Proposal() *Proposal {
+	return p.state.proposal
+}
+
 func (p *Pbft) SetBackend(backend Backend) error {
 	p.backend = backend
 
@@ -384,6 +396,7 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 	sendCommit := func(span trace.Span) {
 		// at this point either we have enough prepare messages
 		// or commit messages so we can lock the proposal
+		fmt.Printf("Locking state for node %v, proposal %v and round %v\n", p.validator.NodeID(), p.state.proposal.Data, p.state.view.Round)
 		p.state.lock()
 
 		if !hasCommitted {

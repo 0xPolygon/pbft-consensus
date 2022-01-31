@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"os"
 	"sync"
 	"testing"
@@ -422,8 +423,11 @@ func (f *fsm) IsStuck(num uint64) (uint64, bool) {
 }
 
 func (f *fsm) BuildProposal() (*pbft.Proposal, error) {
+	// make different proposal for each sequence/round
+	prop := make([]byte, 64)
+	_, _ = rand.Read(prop)
 	proposal := &pbft.Proposal{
-		Data: []byte{byte(f.Height())},
+		Data: prop,
 		Time: time.Now().Add(1 * time.Second),
 	}
 	return proposal, nil
@@ -480,7 +484,16 @@ func (v *valString) CalcProposer(round uint64) pbft.NodeID {
 	}
 
 	pick := seed % uint64(v.Len())
-	return (v.nodes)[pick]
+	p := (v.nodes)[pick]
+	// todo fix this
+	if round == 0 {
+		p = "A_3"
+	}
+	if round == 1 {
+		p = "A_4"
+	}
+
+	return p
 }
 
 func (v *valString) Index(addr pbft.NodeID) int {

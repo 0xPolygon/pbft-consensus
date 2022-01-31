@@ -34,6 +34,7 @@ func (t *transport) Gossip(msg *pbft.MessageReq) error {
 				send = t.hook.Gossip(msg.From, to, msg)
 			}
 			if send {
+				// fmt.Printf("Sending message %v from Node %v to node %v\n", msg.Type, msg.From, to)
 				handler(msg)
 			}
 		}(to, handler)
@@ -44,6 +45,70 @@ func (t *transport) Gossip(msg *pbft.MessageReq) error {
 type transportHook interface {
 	Connects(from, to pbft.NodeID) bool
 	Gossip(from, to pbft.NodeID, msg *pbft.MessageReq) bool
+}
+
+type msgFlow struct {
+	round uint64
+	// represents message flow map
+	// e.g. A4 -> A0, A1
+	partition map[pbft.NodeID][]pbft.NodeID
+}
+
+type roundTransport struct {
+	// key is sequence
+	msgSend map[uint64]msgFlow
+}
+
+func newRoundChange(flow map[uint64]msgFlow) *roundTransport {
+	return &roundTransport{msgSend: flow}
+}
+func (rt *roundTransport) Gossip(from, to pbft.NodeID, msg *pbft.MessageReq) bool {
+	if msg.View.Round > 1 {
+		// node A_4 is unresponsiveafter round 1
+		if from == "A_4" || to == "A_4" {
+			return false
+		}
+		// all other nodes are connected for all messages
+		return true
+	}
+
+	// in round 1 A_4 ignores round change and commit messages
+	if msg.View.Round == 1 && (msg.Type == pbft.MessageReq_RoundChange ||
+		msg.Type == pbft.MessageReq_Commit) &&
+		(from == "A_4") {
+		return false
+	}
+
+	msgSend, ok := rt.msgSend[msg.View.Round]
+	if !ok {
+		return false
+	}
+
+	if msgSend.round == msg.View.Round {
+		subset, ok := msgSend.partition[from]
+		if !ok {
+			return false
+		}
+		// if ok check to
+		found := false
+		// ignore commit messages <= of round 1
+		if msg.Type == pbft.MessageReq_Commit {
+			return false
+		}
+
+		for _, v := range subset {
+			if v == to {
+				found = true
+				break
+			}
+		}
+		return found
+	}
+	return true
+}
+
+func (rt *roundTransport) Connects(from, to pbft.NodeID) bool {
+	return true
 }
 
 // latency transport

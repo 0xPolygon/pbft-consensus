@@ -1,13 +1,59 @@
 package e2e
 
 import (
+	"fmt"
 	"math"
 	"strconv"
 	"testing"
 	"time"
 
+	"github.com/0xPolygon/pbft-consensus"
 	"github.com/stretchr/testify/assert"
 )
+
+func TestE2E_Partition_Liveness(t *testing.T) {
+	const nodesCnt = 5
+	flow1 := msgFlow{
+		round: 0,
+		// lock A_0 and A_1 on one proposal
+		partition: map[pbft.NodeID][]pbft.NodeID{
+			"A_0": {"A_0", "A_1", "A_3"},
+			"A_1": {"A_0", "A_1"},
+			"A_3": {"A_0", "A_1"},
+		},
+	}
+
+	flow2 := msgFlow{
+		round: 1,
+		// lock A_2 and A_3 on one proposal
+		partition: map[pbft.NodeID][]pbft.NodeID{
+			"A_0": {"A_0", "A_1", "A_2", "A_3", "A_4"},
+			"A_1": {"A_0", "A_1", "A_2", "A_3", "A_4"},
+
+			"A_2": {"A_0", "A_1", "A_2", "A_3", "A_4"},
+			"A_3": {"A_0", "A_1", "A_2", "A_3"},
+			"A_4": {"A_0", "A_1", "A_2", "A_3"}, // from a4
+		},
+	}
+
+	flowMap := make(map[uint64]msgFlow)
+	flowMap[0] = flow1 // for round 0
+	flowMap[1] = flow2 // for round 1
+	hook := newRoundChange(flowMap)
+
+	c := newPBFTCluster(t, "liveness_issue", "A", nodesCnt, hook)
+	c.Start()
+	defer c.Stop()
+
+	err := c.WaitForHeight(3, 5*time.Minute)
+
+	// log to check what is the end state
+	for _, n := range c.nodes {
+		fmt.Printf("Node %v, isProposalLocked: %v, proposal data: %v\n", n.name, n.pbft.IsStateLocked(), n.pbft.Proposal().Data)
+	}
+
+	assert.NoError(t, err)
+}
 
 func TestE2E_Partition_OneMajority(t *testing.T) {
 	const nodesCnt = 5
