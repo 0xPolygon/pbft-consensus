@@ -15,24 +15,24 @@ func TestE2E_Partition_Liveness(t *testing.T) {
 	const nodesCnt = 5
 	flow1 := msgFlow{
 		round: 0,
-		// lock A_0 and A_1 on one proposal
+		// lock A_3 and A_4 on one proposal
 		partition: map[pbft.NodeID][]pbft.NodeID{
-			"A_0": {"A_0", "A_1", "A_3"},
-			"A_1": {"A_0", "A_1"},
-			"A_3": {"A_0", "A_1"},
+			"A_0": {"A_3", "A_4"},
+			"A_3": {"A_0", "A_3", "A_4"},
+			"A_4": {"A_3", "A_4"},
 		},
 	}
 
 	flow2 := msgFlow{
 		round: 1,
-		// lock A_2 and A_3 on one proposal
+		// lock A_2 and A_0 on one proposal and A_1 will be faulty
 		partition: map[pbft.NodeID][]pbft.NodeID{
-			"A_0": {"A_0", "A_1", "A_2", "A_3", "A_4"},
-			"A_1": {"A_0", "A_1", "A_2", "A_3", "A_4"},
-
+			"A_0": {"A_0", "A_2", "A_3", "A_4"},
+			"A_1": {"A_0", "A_2", "A_3", "A_4"},
 			"A_2": {"A_0", "A_1", "A_2", "A_3", "A_4"},
-			"A_3": {"A_0", "A_1", "A_2", "A_3"},
-			"A_4": {"A_0", "A_1", "A_2", "A_3"}, // from a4
+
+			"A_3": {"A_0", "A_1", "A_2", "A_3", "A_4"},
+			"A_4": {"A_0", "A_1", "A_2", "A_3", "A_4"},
 		},
 	}
 

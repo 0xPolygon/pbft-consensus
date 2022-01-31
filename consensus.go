@@ -396,7 +396,6 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 	sendCommit := func(span trace.Span) {
 		// at this point either we have enough prepare messages
 		// or commit messages so we can lock the proposal
-		fmt.Printf("Locking state for node %v, proposal %v and round %v\n", p.validator.NodeID(), p.state.proposal.Data, p.state.view.Round)
 		p.state.lock()
 
 		if !hasCommitted {

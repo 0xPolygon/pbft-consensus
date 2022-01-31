@@ -484,16 +484,8 @@ func (v *valString) CalcProposer(round uint64) pbft.NodeID {
 	}
 
 	pick := seed % uint64(v.Len())
-	p := (v.nodes)[pick]
-	// todo fix this
-	if round == 0 {
-		p = "A_3"
-	}
-	if round == 1 {
-		p = "A_4"
-	}
 
-	return p
+	return (v.nodes)[pick]
 }
 
 func (v *valString) Index(addr pbft.NodeID) int {

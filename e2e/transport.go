@@ -64,18 +64,18 @@ func newRoundChange(flow map[uint64]msgFlow) *roundTransport {
 }
 func (rt *roundTransport) Gossip(from, to pbft.NodeID, msg *pbft.MessageReq) bool {
 	if msg.View.Round > 1 {
-		// node A_4 is unresponsiveafter round 1
-		if from == "A_4" || to == "A_4" {
+		// node A_1 is unresponsive after round 1
+		if from == "A_1" || to == "A_1" {
 			return false
 		}
 		// all other nodes are connected for all messages
 		return true
 	}
 
-	// in round 1 A_4 ignores round change and commit messages
+	// in round 1 A_1 ignores round change and commit messages
 	if msg.View.Round == 1 && (msg.Type == pbft.MessageReq_RoundChange ||
 		msg.Type == pbft.MessageReq_Commit) &&
-		(from == "A_4") {
+		(from == "A_1") {
 		return false
 	}
 
