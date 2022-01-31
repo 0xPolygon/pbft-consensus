@@ -994,5 +994,5 @@ func (m *mockBackend) ValidatorSet() ValidatorSet {
 	return m.validators
 }
 
-func (m *mockBackend) Reset() {
+func (m *mockBackend) Init() {
 }
