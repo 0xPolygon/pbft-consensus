@@ -462,6 +462,9 @@ func (f *fsm) Hash(p []byte) []byte {
 	return h.Sum(nil)
 }
 
+func (f *fsm) Reset() {
+}
+
 type valString struct {
 	nodes        []pbft.NodeID
 	lastProposer pbft.NodeID

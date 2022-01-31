@@ -113,6 +113,9 @@ type Backend interface {
 	// Hash hashes the proposal bytes
 	Hash(p []byte) []byte
 
+	// Reset is used to signal the backend that the round is changing
+	Reset()
+
 	// IsStuck returns whether the pbft is stucked
 	IsStuck(num uint64) (uint64, bool)
 }
@@ -519,6 +522,8 @@ func (p *Pbft) handleStateErr(err error) {
 }
 
 func (p *Pbft) runRoundChangeState(ctx context.Context) {
+	p.backend.Reset()
+
 	ctx, span := p.tracer.Start(ctx, "RoundChange")
 	defer span.End()
 

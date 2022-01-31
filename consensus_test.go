@@ -993,3 +993,6 @@ func (m *mockBackend) Insert(pp *SealedProposal) error {
 func (m *mockBackend) ValidatorSet() ValidatorSet {
 	return m.validators
 }
+
+func (m *mockBackend) Reset() {
+}
