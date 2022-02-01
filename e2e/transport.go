@@ -47,72 +47,34 @@ type transportHook interface {
 	Gossip(from, to pbft.NodeID, msg *pbft.MessageReq) bool
 }
 
-type msgFlow struct {
-	round      uint64
-	faultyNode pbft.NodeID
-	// represents message flow map
-	// e.g. A4 -> A0, A1
-	partition map[pbft.NodeID][]pbft.NodeID
+// encapsulates routing mapping for certain round
+type roundMetadata struct {
+	round uint64
+	// represents message routing map (sender node id to recipient node ids)
+	// e.g. A4 sends messages to [A0, A1]
+	routingMap map[pbft.NodeID][]pbft.NodeID
 }
 
-type roundTransport struct {
-	// key is sequence
-	msgSend map[uint64]msgFlow
+// callback which enables determining which message should be gossiped
+type gossipArbitrageHandler func(sender, reciever pbft.NodeID, msg *pbft.MessageReq) (shouldSend bool)
+
+// transport implementation which enables specifying custom gossiping logic
+type genericGossipTransport struct {
+	gossipArbitrage gossipArbitrageHandler
 }
 
-func newRoundChange(flow map[uint64]msgFlow) *roundTransport {
-	return &roundTransport{msgSend: flow}
-}
-func (rt *roundTransport) Gossip(from, to pbft.NodeID, msg *pbft.MessageReq) bool {
-	if msg.View.Round > 1 {
-		// node A_1 (faulty) is unresponsive after round 1
-		msgSend, _ := rt.msgSend[msg.View.Round]
-		if from == msgSend.faultyNode || to == msgSend.faultyNode {
-			return false
-		}
-		// all other nodes are connected for all the messages
-		return true
+func newGenericGossipTransport(gossipArbitrage gossipArbitrageHandler) *genericGossipTransport {
+	return &genericGossipTransport{
+		gossipArbitrage: gossipArbitrage,
 	}
-
-	// Case where we are in round 1 and 2 different nodes will lock the proposal
-	// (A_1 ignores round change and commit messages)
-	if msg.View.Round == 1 {
-		msgSend, _ := rt.msgSend[msg.View.Round]
-		if (msg.Type == pbft.MessageReq_RoundChange ||
-			msg.Type == pbft.MessageReq_Commit) &&
-			(from == msgSend.faultyNode) {
-			return false
-		}
-	}
-
-	msgSend, ok := rt.msgSend[msg.View.Round]
-	if !ok {
-		return false
-	}
-
-	if msgSend.round == msg.View.Round {
-		subset, ok := msgSend.partition[from]
-		if !ok {
-			return false
-		}
-		found := false
-		// do not send commit messages for rounds <=1
-		if msg.Type == pbft.MessageReq_Commit {
-			return false
-		}
-
-		for _, v := range subset {
-			if v == to {
-				found = true
-				break
-			}
-		}
-		return found
-	}
-	return true
 }
 
-func (rt *roundTransport) Connects(from, to pbft.NodeID) bool {
+func (rt *genericGossipTransport) Gossip(from, to pbft.NodeID, msg *pbft.MessageReq) bool {
+	// if gossip arbitrage callback returns false, message should not be gossiped and we stop here.
+	return rt.gossipArbitrage(from, to, msg)
+}
+
+func (rt *genericGossipTransport) Connects(from, to pbft.NodeID) bool {
 	return true
 }
 

@@ -424,7 +424,7 @@ func (f *fsm) IsStuck(num uint64) (uint64, bool) {
 
 func (f *fsm) BuildProposal() (*pbft.Proposal, error) {
 	// make different proposal for each sequence/round
-	prop := make([]byte, 64)
+	prop := make([]byte, 8)
 	_, _ = rand.Read(prop)
 	proposal := &pbft.Proposal{
 		Data: prop,

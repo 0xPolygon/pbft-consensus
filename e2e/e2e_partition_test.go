@@ -1,7 +1,6 @@
 package e2e
 
 import (
-	"fmt"
 	"math"
 	"strconv"
 	"testing"
@@ -13,21 +12,20 @@ import (
 
 func TestE2E_Partition_Liveness(t *testing.T) {
 	const nodesCnt = 5
-	round0 := msgFlow{
+	round0 := roundMetadata{
 		round: 0,
 		// lock A_3 and A_4 on one proposal
-		partition: map[pbft.NodeID][]pbft.NodeID{
+		routingMap: map[pbft.NodeID][]pbft.NodeID{
 			"A_0": {"A_3", "A_4"},
 			"A_3": {"A_0", "A_3", "A_4"},
 			"A_4": {"A_3", "A_4"},
 		},
 	}
 
-	round1 := msgFlow{
-		round:      1,
-		faultyNode: pbft.NodeID("A_1"),
+	round1 := roundMetadata{
+		round: 1,
 		// lock A_2 and A_0 on one proposal and A_1 will be faulty
-		partition: map[pbft.NodeID][]pbft.NodeID{
+		routingMap: map[pbft.NodeID][]pbft.NodeID{
 			"A_0": {"A_0", "A_2", "A_3", "A_4"},
 			"A_1": {"A_0", "A_2", "A_3", "A_4"},
 			"A_2": {"A_0", "A_1", "A_2", "A_3", "A_4"},
@@ -36,11 +34,57 @@ func TestE2E_Partition_Liveness(t *testing.T) {
 			"A_4": {"A_0", "A_1", "A_2", "A_3", "A_4"},
 		},
 	}
+	flowMap := map[uint64]roundMetadata{0: round0, 1: round1}
 
-	flowMap := make(map[uint64]msgFlow)
-	flowMap[0] = round0
-	flowMap[1] = round1
-	hook := newRoundChange(flowMap)
+	livenessGossipArbitrage := func(sender, receiver pbft.NodeID, msg *pbft.MessageReq) bool {
+		faultyNodeId := pbft.NodeID("A_1")
+		if msg.View.Sequence > 2 || msg.View.Round > 1 {
+			// node A_1 (faulty) is unresponsive after round 1
+			if sender == faultyNodeId || receiver == faultyNodeId {
+				return false
+			}
+			// all other nodes are connected for all the messages
+			return true
+		}
+
+		// Case where we are in round 1 and 2 different nodes will lock the proposal
+		// (A_1 ignores round change and commit messages)
+		if msg.View.Round == 1 {
+			if sender == faultyNodeId &&
+				(msg.Type == pbft.MessageReq_RoundChange || msg.Type == pbft.MessageReq_Commit) {
+				return false
+			}
+		}
+
+		msgFlow, ok := flowMap[msg.View.Round]
+		if !ok {
+			return false
+		}
+
+		if msgFlow.round == msg.View.Round {
+			receivers, ok := msgFlow.routingMap[sender]
+			if !ok {
+				return false
+			}
+
+			// do not send commit messages for rounds <=1
+			if msg.Type == pbft.MessageReq_Commit {
+				return false
+			}
+
+			foundReceiver := false
+			for _, v := range receivers {
+				if v == receiver {
+					foundReceiver = true
+					break
+				}
+			}
+			return foundReceiver
+		}
+		return true
+	}
+
+	hook := newGenericGossipTransport(livenessGossipArbitrage)
 
 	c := newPBFTCluster(t, "liveness_issue", "A", nodesCnt, hook)
 	c.Start()
@@ -50,7 +94,7 @@ func TestE2E_Partition_Liveness(t *testing.T) {
 
 	// log to check what is the end state
 	for _, n := range c.nodes {
-		fmt.Printf("Node %v, isProposalLocked: %v, proposal data: %v\n", n.name, n.pbft.IsStateLocked(), n.pbft.Proposal().Data)
+		t.Logf("Node %v, isProposalLocked: %v, proposal data: %v\n", n.name, n.pbft.IsStateLocked(), n.pbft.Proposal().Data)
 	}
 
 	assert.NoError(t, err)
