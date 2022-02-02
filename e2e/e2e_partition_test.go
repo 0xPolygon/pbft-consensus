@@ -10,6 +10,13 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// Test proves existence of liveness issues which is described in
+// Correctness Analysis of Istanbul Byzantine Fault Tolerance(https://arxiv.org/pdf/1901.07160.pdf).
+// Specific problem this test is emulating is described in Chapter 7.1, Case 1.
+// Summary of the problem is that there are not enough nodes to lock on single proposal,
+// due to some issues where nodes being unable to deliver messages to all of the peers.
+// Therefore nodes are split into two subsets locked on different proposals.
+// Simulating one node from larger subset as faulty one, results in being unable to reach a consensus on a single proposal and that's what liveness issue is about.
 func TestE2E_Partition_Liveness(t *testing.T) {
 	const nodesCnt = 5
 	round0 := roundMetadata{
