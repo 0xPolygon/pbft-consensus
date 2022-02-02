@@ -181,14 +181,10 @@ func New(validator SignKey, transport Transport, opts ...ConfigOption) *Pbft {
 	return p
 }
 
-// IsStateLocked only for debug purpose
-// TODO: remove this
 func (p *Pbft) IsStateLocked() bool {
 	return p.state.IsLocked()
 }
 
-// Proposal only for debug purpose
-// TODO: remove this
 func (p *Pbft) Proposal() *Proposal {
 	return p.state.proposal
 }

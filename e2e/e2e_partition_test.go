@@ -17,6 +17,9 @@ import (
 // due to some issues where nodes being unable to deliver messages to all of the peers.
 // Therefore nodes are split into two subsets locked on different proposals.
 // Simulating one node from larger subset as faulty one, results in being unable to reach a consensus on a single proposal and that's what liveness issue is about.
+// This test creates a single cluster of 5 nodes, but instead of letting all the peers communicate with each other,
+// it routes messages only to specific nodes and induces that nodes lock on different proposal.
+// In the round=1, it marks one node as faulty (meaning that it doesn't takes part in gossiping).
 func TestE2E_Partition_Liveness(t *testing.T) {
 	const nodesCnt = 5
 	round0 := roundMetadata{
