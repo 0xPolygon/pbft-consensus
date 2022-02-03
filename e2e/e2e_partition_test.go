@@ -1,7 +1,6 @@
 package e2e
 
 import (
-	"bytes"
 	"math"
 	"strconv"
 	"testing"
@@ -48,6 +47,7 @@ func TestE2E_Partition_Liveness(t *testing.T) {
 
 	faultyNodeId := pbft.NodeID("A_1")
 
+	transport := newGenericGossipTransport()
 	// If livenessGossipHandler returns false, message should not be transported.
 	livenessGossipHandler := func(senderId, receiverId pbft.NodeID, msg *pbft.MessageReq) bool {
 		if msg.View.Round > 1 || msg.View.Sequence > 2 {
@@ -66,66 +66,23 @@ func TestE2E_Partition_Liveness(t *testing.T) {
 			}
 		}
 
-		return shouldGossipBasedOnMsgFlowMap(flowMap, msg, senderId, receiverId)
+		return transport.shouldGossipBasedOnMsgFlowMap(msg, senderId, receiverId)
 	}
 
-	hook := newGenericGossipTransport(livenessGossipHandler)
+	transport.withFlowMap(flowMap).withGossipHandler(livenessGossipHandler)
 
-	c := newPBFTCluster(t, "liveness_issue", "A", nodesCnt, hook)
+	c := newPBFTCluster(t, "liveness_issue", "A", nodesCnt, transport)
 	c.Start()
 	defer c.Stop()
 
 	err := c.WaitForHeight(3, 5*time.Minute)
 
-	// Query nodes and make appropriate assertions
-	nodeSubsetA := []pbft.NodeID{"A_0", "A_1", "A_2"}
-	nodeSubsetB := []pbft.NodeID{"A_3", "A_4"}
-	nodeA0 := c.nodes[string(nodeSubsetA[0])]
-	nodeA3 := c.nodes[string(nodeSubsetB[0])]
-	queryNodesFromSubset(t, c.nodes, faultyNodeId, nodeA0, nodeSubsetA)
-	queryNodesFromSubset(t, c.nodes, faultyNodeId, nodeA3, nodeSubsetB)
+	// log to check what is the end state
+	for _, n := range c.nodes {
+		t.Logf("Node %v, isProposalLocked: %v, proposal data: %v\n", n.name, n.pbft.IsStateLocked(), n.pbft.GetProposal().Data)
+	}
 
 	assert.NoError(t, err)
-}
-
-// Helper function determining whether a message should be gossiped, based on round message flow.
-func shouldGossipBasedOnMsgFlowMap(flowMap map[uint64]roundMetadata, msg *pbft.MessageReq, senderId pbft.NodeID, receiverId pbft.NodeID) bool {
-	roundMedatada, ok := flowMap[msg.View.Round]
-	if !ok {
-		return false
-	}
-
-	if roundMedatada.round == msg.View.Round {
-		receivers, ok := roundMedatada.routingMap[sender(senderId)]
-		if !ok {
-			return false
-		}
-
-		foundReceiver := false
-		for _, v := range receivers {
-			if v == receiverId {
-				foundReceiver = true
-				break
-			}
-		}
-		return foundReceiver
-	}
-	return true
-}
-
-// Query nodes from subset and make sure assertions are correct
-// (proposal is built and all the nodes from given subset are locked on same proposal, except the faulty one).
-func queryNodesFromSubset(t *testing.T, allNodes map[string]*node, faultyNodeId pbft.NodeID, refNode *node, nodeSubset []pbft.NodeID) {
-	for _, nodeId := range nodeSubset[1:] {
-		node := allNodes[string(nodeId)]
-		if node.name == string(faultyNodeId) {
-			assert.True(t, !node.pbft.IsStateLocked(), "'%s' node shouldn't have locked proposal.", node.name)
-		} else {
-			assert.True(t, node.pbft.IsStateLocked(), "'%s' node should have locked proposal.", node.name)
-		}
-		assert.NotNil(t, node.pbft.GetProposal())
-		assert.True(t, bytes.Equal(node.pbft.GetProposal().Data, refNode.pbft.GetProposal().Data))
-	}
 }
 
 func TestE2E_Partition_OneMajority(t *testing.T) {
