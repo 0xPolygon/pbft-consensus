@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"fmt"
 	"math"
 	"strconv"
 	"testing"
@@ -135,6 +136,116 @@ func TestE2E_Partition_Liveness(t *testing.T) {
 =======
 		t.Logf("Node %v, isProposalLocked: %v, proposal data: %v\n", n.name, n.pbft.IsStateLocked(), n.pbft.Proposal().Data)
 >>>>>>> 8fce256... Implement integration test that has issue with locking different proposals in 2 different rounds.
+	}
+
+	assert.NoError(t, err)
+}
+
+func TestE2E_Partition_Liveness_case2(t *testing.T) {
+	const nodesCnt = 6
+	round0 := roundMetadata{
+		round: 0,
+		// A_0 prop
+		// lock A_1, A_4
+		routingMap: map[pbft.NodeID][]pbft.NodeID{
+			"A_0": {"A_1", "A_3", "A_4"},
+			"A_3": {"A_1", "A_3", "A_4"},
+			"A_4": {"A_1", "A_4"},
+		},
+	}
+
+	round1 := roundMetadata{
+		round: 2,
+		// lock A_5
+		routingMap: map[pbft.NodeID][]pbft.NodeID{
+			"A_0": {"A_5", "A_2", "A_4"},
+			"A_1": {"A_5", "A_0"},
+			"A_2": {"A_5", "A_3"},
+			"A_3": {"A_5"},
+			"A_4": {"A_5"},
+		},
+	}
+
+	round2 := roundMetadata{
+		round: 3,
+		// A_3 prop
+		// lock A_2 and A_0 on one proposal and A_1 will be faulty
+		routingMap: map[pbft.NodeID][]pbft.NodeID{
+			"A_3": {"A_0", "A_2", "A_3", "A_4"},
+			"A_0": {"A_0", "A_3", "A_4"},
+			"A_2": {"A_0", "A_1", "A_3", "A_4"},
+		},
+	}
+	flowMap := map[uint64]roundMetadata{0: round0, 2: round1, 3: round2}
+
+	livenessGossipArbitrage := func(sender, receiver pbft.NodeID, msg *pbft.MessageReq) (sent bool) {
+		faultyNodeId := pbft.NodeID("A_2")
+		if msg.View.Round == 1 && msg.Type == pbft.MessageReq_RoundChange {
+			return true
+		}
+
+		if msg.View.Sequence > 2 || msg.View.Round > 3 {
+			// node A_1 (faulty) is unresponsive after round 1
+			if sender == faultyNodeId || receiver == faultyNodeId {
+				return false
+			}
+			// all other nodes are connected for all the messages
+			return true
+		}
+
+		// Case where we are in round 1 and 2 different nodes will lock the proposal
+		// (A_1 ignores round change and commit messages)
+		if msg.View.Round == 3 {
+			if sender == faultyNodeId &&
+				(msg.Type == pbft.MessageReq_RoundChange || msg.Type == pbft.MessageReq_Commit) {
+				return false
+			}
+		}
+
+		msgFlow, ok := flowMap[msg.View.Round]
+		if !ok {
+			return false
+		}
+
+		if msgFlow.round == msg.View.Round {
+			receivers, ok := msgFlow.routingMap[sender]
+			if !ok {
+				return false
+			}
+
+			// do not send commit messages for rounds <=1
+			if msg.Type == pbft.MessageReq_Commit {
+				return false
+			}
+
+			foundReceiver := false
+			for _, v := range receivers {
+				if v == receiver {
+					foundReceiver = true
+					break
+				}
+			}
+
+			if foundReceiver == true && msg.View.Round == 1 {
+				fmt.Printf("Sent %v to %v, msg: %v\n", sender, receiver, msg.Type)
+			}
+
+			return foundReceiver
+		}
+		return true
+	}
+
+	hook := newGenericGossipTransport(livenessGossipArbitrage)
+
+	c := newPBFTCluster(t, "liveness_issue", "A", nodesCnt, hook)
+	c.Start()
+	defer c.Stop()
+
+	err := c.WaitForHeight(3, 1*time.Minute)
+
+	// log to check what is the end state
+	for _, n := range c.nodes {
+		t.Logf("Node %v, isProposalLocked: %v, proposal data: %v\n", n.name, n.pbft.IsStateLocked(), n.pbft.Proposal().Data)
 	}
 
 	assert.NoError(t, err)
