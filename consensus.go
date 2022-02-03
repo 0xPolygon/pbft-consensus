@@ -188,7 +188,7 @@ func (p *Pbft) IsStateLocked() bool {
 	return p.state.IsLocked()
 }
 
-func (p *Pbft) Proposal() *Proposal {
+func (p *Pbft) GetProposal() *Proposal {
 	return p.state.proposal
 }
 

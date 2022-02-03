@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"bytes"
 	"math"
 	"strconv"
 	"testing"
@@ -11,7 +12,7 @@ import (
 )
 
 // Test proves existence of liveness issues which is described in
-// Correctness Analysis of Istanbul Byzantine Fault Tolerance(https://arxiv.org/pdf/1901.07160.pdf).
+// Correctness Analysis of Istanbul Byzantine Fault Tolerance (https://arxiv.org/pdf/1901.07160.pdf).
 // Specific problem this test is emulating is described in Chapter 7.1, Case 1.
 // Summary of the problem is that there are not enough nodes to lock on single proposal,
 // due to some issues where nodes being unable to deliver messages to all of the peers.
@@ -24,18 +25,17 @@ func TestE2E_Partition_Liveness(t *testing.T) {
 	const nodesCnt = 5
 	round0 := roundMetadata{
 		round: 0,
-		// lock A_3 and A_4 on one proposal
-		routingMap: map[pbft.NodeID][]pbft.NodeID{
+		// induce locking A_3 and A_4 on one proposal
+		routingMap: map[sender]receivers{
 			"A_0": {"A_3", "A_4"},
 			"A_3": {"A_0", "A_3", "A_4"},
 			"A_4": {"A_3", "A_4"},
 		},
 	}
-
 	round1 := roundMetadata{
 		round: 1,
-		// lock A_2 and A_0 on one proposal and A_1 will be faulty
-		routingMap: map[pbft.NodeID][]pbft.NodeID{
+		// induce locking lock A_0 and A_2 on another proposal
+		routingMap: map[sender]receivers{
 			"A_0": {"A_0", "A_2", "A_3", "A_4"},
 			"A_1": {"A_0", "A_2", "A_3", "A_4"},
 			"A_2": {"A_0", "A_1", "A_2", "A_3", "A_4"},
@@ -46,55 +46,30 @@ func TestE2E_Partition_Liveness(t *testing.T) {
 	}
 	flowMap := map[uint64]roundMetadata{0: round0, 1: round1}
 
-	livenessGossipArbitrage := func(sender, receiver pbft.NodeID, msg *pbft.MessageReq) bool {
-		faultyNodeId := pbft.NodeID("A_1")
-		if msg.View.Sequence > 2 || msg.View.Round > 1 {
-			// node A_1 (faulty) is unresponsive after round 1
-			if sender == faultyNodeId || receiver == faultyNodeId {
+	faultyNodeId := pbft.NodeID("A_1")
+
+	// If livenessGossipHandler returns false, message should not be transported.
+	livenessGossipHandler := func(senderId, receiverId pbft.NodeID, msg *pbft.MessageReq) bool {
+		if msg.View.Round > 1 || msg.View.Sequence > 2 {
+			// Faulty node is unresponsive after round 1, and all the other nodes are gossiping all the messages.
+			return senderId != faultyNodeId && receiverId != faultyNodeId
+		} else {
+			if msg.View.Round <= 1 && msg.Type == pbft.MessageReq_Commit {
+				// Cut all the commit messages gossiping for round 0 and 1
 				return false
 			}
-			// all other nodes are connected for all the messages
-			return true
-		}
-
-		// Case where we are in round 1 and 2 different nodes will lock the proposal
-		// (A_1 ignores round change and commit messages)
-		if msg.View.Round == 1 {
-			if sender == faultyNodeId &&
+			if msg.View.Round == 1 && senderId == faultyNodeId &&
 				(msg.Type == pbft.MessageReq_RoundChange || msg.Type == pbft.MessageReq_Commit) {
+				// Case where we are in round 1 and 2 different nodes will lock the proposal
+				// (consequence of faulty node doesn't gossip round change and commit messages).
 				return false
 			}
 		}
 
-		msgFlow, ok := flowMap[msg.View.Round]
-		if !ok {
-			return false
-		}
-
-		if msgFlow.round == msg.View.Round {
-			receivers, ok := msgFlow.routingMap[sender]
-			if !ok {
-				return false
-			}
-
-			// do not send commit messages for rounds <=1
-			if msg.Type == pbft.MessageReq_Commit {
-				return false
-			}
-
-			foundReceiver := false
-			for _, v := range receivers {
-				if v == receiver {
-					foundReceiver = true
-					break
-				}
-			}
-			return foundReceiver
-		}
-		return true
+		return shouldGossipBasedOnMsgFlowMap(flowMap, msg, senderId, receiverId)
 	}
 
-	hook := newGenericGossipTransport(livenessGossipArbitrage)
+	hook := newGenericGossipTransport(livenessGossipHandler)
 
 	c := newPBFTCluster(t, "liveness_issue", "A", nodesCnt, hook)
 	c.Start()
@@ -102,12 +77,55 @@ func TestE2E_Partition_Liveness(t *testing.T) {
 
 	err := c.WaitForHeight(3, 5*time.Minute)
 
-	// log to check what is the end state
-	for _, n := range c.nodes {
-		t.Logf("Node %v, isProposalLocked: %v, proposal data: %v\n", n.name, n.pbft.IsStateLocked(), n.pbft.Proposal().Data)
-	}
+	// Query nodes and make appropriate assertions
+	nodeSubsetA := []pbft.NodeID{"A_0", "A_1", "A_2"}
+	nodeSubsetB := []pbft.NodeID{"A_3", "A_4"}
+	nodeA0 := c.nodes[string(nodeSubsetA[0])]
+	nodeA3 := c.nodes[string(nodeSubsetB[0])]
+	queryNodesFromSubset(t, c.nodes, faultyNodeId, nodeA0, nodeSubsetA)
+	queryNodesFromSubset(t, c.nodes, faultyNodeId, nodeA3, nodeSubsetB)
 
 	assert.NoError(t, err)
+}
+
+// Helper function determining whether a message should be gossiped, based on round message flow.
+func shouldGossipBasedOnMsgFlowMap(flowMap map[uint64]roundMetadata, msg *pbft.MessageReq, senderId pbft.NodeID, receiverId pbft.NodeID) bool {
+	roundMedatada, ok := flowMap[msg.View.Round]
+	if !ok {
+		return false
+	}
+
+	if roundMedatada.round == msg.View.Round {
+		receivers, ok := roundMedatada.routingMap[sender(senderId)]
+		if !ok {
+			return false
+		}
+
+		foundReceiver := false
+		for _, v := range receivers {
+			if v == receiverId {
+				foundReceiver = true
+				break
+			}
+		}
+		return foundReceiver
+	}
+	return true
+}
+
+// Query nodes from subset and make sure assertions are correct
+// (proposal is built and all the nodes from given subset are locked on same proposal, except the faulty one).
+func queryNodesFromSubset(t *testing.T, allNodes map[string]*node, faultyNodeId pbft.NodeID, refNode *node, nodeSubset []pbft.NodeID) {
+	for _, nodeId := range nodeSubset[1:] {
+		node := allNodes[string(nodeId)]
+		if node.name == string(faultyNodeId) {
+			assert.True(t, !node.pbft.IsStateLocked(), "'%s' node shouldn't have locked proposal.", node.name)
+		} else {
+			assert.True(t, node.pbft.IsStateLocked(), "'%s' node should have locked proposal.", node.name)
+		}
+		assert.NotNil(t, node.pbft.GetProposal())
+		assert.True(t, bytes.Equal(node.pbft.GetProposal().Data, refNode.pbft.GetProposal().Data))
+	}
 }
 
 func TestE2E_Partition_OneMajority(t *testing.T) {

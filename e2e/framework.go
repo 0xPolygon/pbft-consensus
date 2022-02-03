@@ -104,7 +104,7 @@ func (c *cluster) syncWithNetwork(ourselves string) (uint64, []*pbft.SealedPropo
 		if c.hook != nil {
 			// we need to see if this transport does allow those two nodes to be connected
 			// Otherwise, that node should not be elegible to sync
-			if !c.hook.Connects(pbft.NodeID(ourselves), pbft.NodeID(n.name)) {
+			if !c.hook.ShouldConnect(pbft.NodeID(ourselves), pbft.NodeID(n.name)) {
 				continue
 			}
 		}
@@ -406,6 +406,8 @@ func (k key) Sign(b []byte) ([]byte, error) {
 
 // -- fsm --
 
+const ProposalLength = 8
+
 type fsm struct {
 	n               *node
 	nodes           []string
@@ -424,17 +426,13 @@ func (f *fsm) IsStuck(num uint64) (uint64, bool) {
 
 func (f *fsm) BuildProposal() (*pbft.Proposal, error) {
 	// make different proposal for each sequence/round
-	prop := make([]byte, 8)
+	prop := make([]byte, ProposalLength)
 	_, _ = rand.Read(prop)
 	proposal := &pbft.Proposal{
 		Data: prop,
 		Time: time.Now().Add(1 * time.Second),
 	}
 	return proposal, nil
-}
-
-func (f *fsm) setValidationFails(v bool) {
-	f.validationFails = v
 }
 
 func (f *fsm) Validate(proposal []byte) error {
