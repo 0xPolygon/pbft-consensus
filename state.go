@@ -1,6 +1,7 @@
 package pbft
 
 import (
+	"bytes"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -43,8 +44,8 @@ type MessageReq struct {
 	// view is the view assigned to the message
 	View *View
 
-	// hash of the locked proposal
-	Digest string
+	// hash of the proposal (only for prepare messages)
+	Hash []byte
 
 	// proposal is the arbitrary data proposal (only for preprepare messages)
 	Proposal []byte
@@ -129,6 +130,24 @@ type Proposal struct {
 
 	// Time is the time to create the proposal
 	Time time.Time
+
+	// Hash is the digest of the data to seal
+	Hash []byte
+}
+
+// Equal compares whether two proposals have the same hash
+func (p *Proposal) Equal(pp *Proposal) bool {
+	return bytes.Equal(p.Hash, pp.Hash)
+}
+
+// Copy makes a copy of the Proposal
+func (p *Proposal) Copy() *Proposal {
+	pp := new(Proposal)
+	*pp = *p
+
+	pp.Data = append([]byte{}, p.Data...)
+	pp.Hash = append([]byte{}, p.Hash...)
+	return pp
 }
 
 // currentState defines the current state object in PBFT

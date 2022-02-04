@@ -279,7 +279,7 @@ func TestTransition_AcceptState_Validator_LockCorrect(t *testing.T) {
 
 // Test that when validating proposal fails, state machine switches to RoundChangeState.
 func TestTransition_AcceptState_Validate_ProposalFail(t *testing.T) {
-	validateProposalFunc := func(proposal []byte) error {
+	validateProposalFunc := func(p *Proposal) error {
 		return errors.New("failed to validate a proposal")
 	}
 
@@ -871,6 +871,11 @@ func (m *mockPbft) Close() {
 }
 
 func (m *mockPbft) setProposal(p *Proposal) {
+	if p.Hash == nil {
+		h := sha1.New()
+		h.Write(p.Data)
+		p.Hash = h.Sum(nil)
+	}
 	m.proposal = p
 }
 
@@ -922,8 +927,9 @@ func (m *mockPbft) expect(res expectResult) {
 }
 
 type buildProposalDelegate func() (*Proposal, error)
-type validateDelegate func([]byte) error
+type validateDelegate func(*Proposal) error
 type isStuckDelegate func(uint64) (uint64, bool)
+
 type mockBackend struct {
 	mock            *mockPbft
 	validators      *valString
@@ -968,7 +974,7 @@ func (m *mockBackend) Height() uint64 {
 	return m.mock.sequence
 }
 
-func (m *mockBackend) Validate(proposal []byte) error {
+func (m *mockBackend) Validate(proposal *Proposal) error {
 	if m.validateFn != nil {
 		return m.validateFn(proposal)
 	}

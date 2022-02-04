@@ -1,7 +1,6 @@
 package pbft
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"log"
@@ -88,7 +87,7 @@ func (c *Config) ApplyOps(opts ...ConfigOption) {
 }
 
 type SealedProposal struct {
-	Proposal       []byte
+	Proposal       *Proposal
 	CommittedSeals [][]byte
 	Proposer       NodeID
 	Number         uint64
@@ -99,7 +98,7 @@ type Backend interface {
 	BuildProposal() (*Proposal, error)
 
 	// Validate validates a raw proposal (used if non-proposer)
-	Validate(proposal []byte) error
+	Validate(*Proposal) error
 
 	// Insert inserts the sealed proposal
 	Insert(p *SealedProposal) error
@@ -109,9 +108,6 @@ type Backend interface {
 
 	// ValidatorSet returns the validator set for the current round
 	ValidatorSet() ValidatorSet
-
-	// Hash hashes the proposal bytes
-	Hash(p []byte) []byte
 
 	// Init is used to signal the backend that a new round is going to start.
 	Init()
@@ -343,24 +339,26 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 			continue
 		}
 
+		// TODO: Validate that the fields required for Preprepare are set (Proposal and Hash)
 		if msg.From != p.state.proposer {
 			p.logger.Printf("[ERROR] msg received from wrong proposer: expected=%s, found=%s", p.state.proposer, msg.From)
 			continue
 		}
 
 		// retrieve the proposal
-		if err := p.backend.Validate(msg.Proposal); err != nil {
+		proposal := &Proposal{
+			Data: msg.Proposal,
+			Hash: msg.Hash,
+		}
+		if err := p.backend.Validate(proposal); err != nil {
 			p.logger.Printf("[ERROR] failed to validate proposal. Error message: %v", err)
 			p.setState(RoundChangeState)
 			return
 		}
 
 		if p.state.locked {
-			hash1 := p.backend.Hash(msg.Proposal)
-			hash2 := p.backend.Hash(p.state.proposal.Data)
-
 			// the state is locked, we need to receive the same proposal
-			if bytes.Equal(hash1, hash2) {
+			if p.state.proposal.Equal(proposal) {
 				// fast-track and send a commit message and wait for validations
 				p.sendCommitMsg()
 				p.setState(ValidateState)
@@ -368,10 +366,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 				p.handleStateErr(errIncorrectLockedProposal)
 			}
 		} else {
-			p.state.proposal = &Proposal{
-				Data: msg.Proposal,
-			}
-
+			p.state.proposal = proposal
 			p.sendPrepareMsg()
 			p.setState(ValidateState)
 		}
@@ -489,7 +484,7 @@ func (p *Pbft) runCommitState(ctx context.Context) {
 	defer span.End()
 
 	committedSeals := p.state.getCommittedSeals()
-	proposal := p.state.proposal.Data
+	proposal := p.state.proposal.Copy()
 
 	// at this point either if it works or not we need to unlock the state
 	// to allow for other proposals to be produced if it insertion fails
@@ -654,9 +649,7 @@ func (p *Pbft) gossip(msgType MsgType) {
 	// if the message is commit, we need to add the committed seal
 	if msg.Type == MessageReq_Commit {
 		// seal the hash of the proposal
-		hash := p.backend.Hash(p.state.proposal.Data)
-
-		seal, err := p.validator.Sign(hash)
+		seal, err := p.validator.Sign(p.state.proposal.Hash)
 		if err != nil {
 			p.logger.Printf("[ERROR] failed to commit seal. Error message: %v", err)
 			return
