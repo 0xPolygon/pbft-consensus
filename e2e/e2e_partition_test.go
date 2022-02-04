@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/0xPolygon/pbft-consensus"
 	"github.com/stretchr/testify/assert"
 )
 
