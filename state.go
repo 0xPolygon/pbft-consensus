@@ -207,6 +207,10 @@ func newState() *currentState {
 	return c
 }
 
+func (c *currentState) IsLocked() bool {
+	return c.locked
+}
+
 func (c *currentState) GetSequence() uint64 {
 	return c.view.Sequence
 }

@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"os"
 	"sync"
 	"testing"
@@ -422,16 +423,15 @@ func (f *fsm) IsStuck(num uint64) (uint64, bool) {
 }
 
 func (f *fsm) BuildProposal() (*pbft.Proposal, error) {
+	// make different proposal for each sequence/round
+	prop := make([]byte, 8)
+	_, _ = rand.Read(prop)
 	proposal := &pbft.Proposal{
-		Data: []byte{byte(f.Height())},
+		Data: prop,
 		Time: time.Now().Add(1 * time.Second),
 	}
 	proposal.Hash = hash(proposal.Data)
 	return proposal, nil
-}
-
-func (f *fsm) setValidationFails(v bool) {
-	f.validationFails = v
 }
 
 func (f *fsm) Validate(proposal *pbft.Proposal) error {
@@ -488,6 +488,7 @@ func (v *valString) CalcProposer(round uint64) pbft.NodeID {
 	}
 
 	pick := seed % uint64(v.Len())
+
 	return (v.nodes)[pick]
 }
 
