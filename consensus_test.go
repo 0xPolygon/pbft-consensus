@@ -70,7 +70,7 @@ func TestTransition_AcceptState_Proposer_Locked(t *testing.T) {
 	i := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
 	i.setState(AcceptState)
 
-	i.state.locked = true
+	i.state.lock(0)
 	i.state.proposal = &Proposal{
 		Data: mockProposal,
 		Hash: digest,
@@ -224,8 +224,7 @@ func TestTransition_AcceptState_Validator_ProposerInvalid(t *testing.T) {
 func TestTransition_AcceptState_Validator_LockWrong(t *testing.T) {
 	// We are a validator and have a locked state in 'proposal1'.
 	// We receive an invalid proposal 'proposal2' with different data.
-
-	i := newMockPbft(t, []string{"A", "B", "C"}, "B")
+	i := newMockPbft(t, []string{"A", "B", "C", "D"}, "B")
 	i.state.view = ViewMsg(1, 0)
 	i.setState(AcceptState)
 
@@ -234,7 +233,8 @@ func TestTransition_AcceptState_Validator_LockWrong(t *testing.T) {
 		Data: mockProposal,
 		Hash: digest,
 	}
-	i.state.lock()
+
+	i.state.lock(0)
 
 	// emit the wrong locked proposal
 	i.emitMsg(&MessageReq{
@@ -267,7 +267,8 @@ func TestTransition_AcceptState_Validator_LockCorrect(t *testing.T) {
 		Data: proposal,
 		Hash: digest,
 	}
-	i.state.locked = true
+
+	i.state.lock(0)
 
 	i.emitMsg(&MessageReq{
 		From:     "A",
@@ -911,8 +912,8 @@ func (m *mockPbft) expect(res expectResult) {
 	if size := len(m.state.committed); uint64(size) != res.commitMsgs {
 		m.t.Fatalf("incorrect commit messages %d %d", size, res.commitMsgs)
 	}
-	if m.state.locked != res.locked {
-		m.t.Fatalf("incorrect locked %v %v", m.state.locked, res.locked)
+	if m.state.IsLocked() != res.locked {
+		m.t.Fatalf("incorrect locked %v %v", m.state.IsLocked(), res.locked)
 	}
 	if size := len(m.respMsg); uint64(size) != res.outgoing {
 		m.t.Fatalf("incorrect outgoing messages %v %v", size, res.outgoing)

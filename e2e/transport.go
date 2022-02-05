@@ -89,13 +89,13 @@ func (t *genericGossipTransport) withFlowMap(flowMap map[uint64]roundMetadata) *
 
 // Function determining whether a message should be gossiped, based on provided flow map, which describes messages routing per round.
 func (t *genericGossipTransport) shouldGossipBasedOnMsgFlowMap(msg *pbft.MessageReq, senderId pbft.NodeID, receiverId pbft.NodeID) bool {
-	roundMedatada, ok := t.flowMap[msg.View.Round]
+	roundMetadata, ok := t.flowMap[msg.View.Round]
 	if !ok {
 		return false
 	}
 
-	if roundMedatada.round == msg.View.Round {
-		receivers, ok := roundMedatada.routingMap[sender(senderId)]
+	if roundMetadata.round == msg.View.Round {
+		receivers, ok := roundMetadata.routingMap[sender(senderId)]
 		if !ok {
 			return false
 		}

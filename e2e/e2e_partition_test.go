@@ -50,14 +50,15 @@ func TestE2E_Partition_Liveness(t *testing.T) {
 	transport := newGenericGossipTransport()
 	// If livenessGossipHandler returns false, message should not be transported.
 	livenessGossipHandler := func(senderId, receiverId pbft.NodeID, msg *pbft.MessageReq) bool {
+		if msg.View.Round <= 1 && msg.Type == pbft.MessageReq_Commit {
+			// Cut all the commit messages gossiping for round 0 and 1
+			return false
+		}
+
 		if msg.View.Round > 1 || msg.View.Sequence > 2 {
 			// Faulty node is unresponsive after round 1, and all the other nodes are gossiping all the messages.
 			return senderId != faultyNodeId && receiverId != faultyNodeId
 		} else {
-			if msg.View.Round <= 1 && msg.Type == pbft.MessageReq_Commit {
-				// Cut all the commit messages gossiping for round 0 and 1
-				return false
-			}
 			if msg.View.Round == 1 && senderId == faultyNodeId &&
 				(msg.Type == pbft.MessageReq_RoundChange || msg.Type == pbft.MessageReq_Commit) {
 				// Case where we are in round 1 and 2 different nodes will lock the proposal
@@ -79,7 +80,12 @@ func TestE2E_Partition_Liveness(t *testing.T) {
 
 	// log to check what is the end state
 	for _, n := range c.nodes {
-		t.Logf("Node %v, isProposalLocked: %v, proposal data: %v\n", n.name, n.pbft.IsStateLocked(), n.pbft.GetProposal().Data)
+		proposal := n.pbft.GetProposal()
+		if proposal != nil {
+			t.Logf("Node %v, isProposalLocked: %v, proposal data: %v\n", n.name, n.pbft.IsStateLocked(), proposal.Data)
+		} else {
+			t.Logf("Node %v, isProposalLocked: %v, no proposal set\n", n.name, n.pbft.IsStateLocked())
+		}
 	}
 
 	assert.NoError(t, err)

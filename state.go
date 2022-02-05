@@ -47,7 +47,7 @@ type MessageReq struct {
 	// hash of the proposal
 	Hash []byte
 
-	// proposal is the arbitrary data proposal (only for preprepare messages)
+	// proposal is the arbitrary data proposal (relayed only for preprepare messages)
 	Proposal []byte
 }
 
@@ -192,8 +192,9 @@ type currentState struct {
 	// List of round change messages
 	roundMessages map[uint64]map[NodeID]*MessageReq
 
-	// Locked signals whether the proposal is locked
-	locked bool
+	// Locked round signals whether the proposal is locked and in which round.
+	// If it is nil, it means that proposal isn't locked.
+	lockedRound *uint64
 
 	// Describes whether there has been an error during the computation
 	err error
@@ -208,7 +209,16 @@ func newState() *currentState {
 }
 
 func (c *currentState) IsLocked() bool {
-	return c.locked
+	return c.lockedRound != nil
+}
+
+func (c *currentState) lock(round uint64) {
+	c.lockedRound = &round
+}
+
+func (c *currentState) unlock() {
+	c.proposal = nil
+	c.lockedRound = nil
 }
 
 func (c *currentState) GetSequence() uint64 {
@@ -283,15 +293,6 @@ func (c *currentState) resetRoundMsgs() {
 // CalcProposer calculates the proposer and sets it to the state
 func (c *currentState) CalcProposer() {
 	c.proposer = c.validators.CalcProposer(c.view.Round)
-}
-
-func (c *currentState) lock() {
-	c.locked = true
-}
-
-func (c *currentState) unlock() {
-	c.proposal = nil
-	c.locked = false
 }
 
 // cleanRound deletes the specific round messages
