@@ -66,7 +66,7 @@ type cluster struct {
 	hook   transportHook
 }
 
-func newPBFTCluster(t *testing.T, name, prefix string, count int, hook ...transportHook) *cluster {
+func NewPBFTCluster(t *testing.T, name, prefix string, count int, hook ...transportHook) *cluster {
 	names := make([]string, count)
 	for i := 0; i < count; i++ {
 		names[i] = fmt.Sprintf("%s_%d", prefix, i)
