@@ -26,22 +26,20 @@ func (s *Scenario) CheckProposal() {
 
 type Action interface {
 	// TODO: Add Setup() method?
-	Apply()
-	Revert()
+	Apply(c *Cluster)
+	Revert(c *Cluster)
 }
 
 // This action encapsulates logic for dropping nodes action.
 type DropNodeAction struct {
-	c                *cluster
 	nodesCount       int
 	nodesToDrop      int
 	droppingInterval time.Duration
 	duration         time.Duration
 }
 
-func NewDropNodeAction(cluster *cluster, nodeCount, nodesToDrop int, droppingInterval, duration time.Duration) *DropNodeAction {
+func NewDropNodeAction(nodeCount, nodesToDrop int, droppingInterval, duration time.Duration) *DropNodeAction {
 	return &DropNodeAction{
-		c:                cluster,
 		nodesCount:       nodeCount,
 		nodesToDrop:      nodesToDrop,
 		droppingInterval: droppingInterval,
@@ -49,9 +47,9 @@ func NewDropNodeAction(cluster *cluster, nodeCount, nodesToDrop int, droppingInt
 	}
 }
 
-func (a *DropNodeAction) Apply() {
-	ticker := time.NewTicker(a.droppingInterval)
-	after := time.After(a.duration)
+func (dn *DropNodeAction) Apply(c *Cluster) {
+	ticker := time.NewTicker(dn.droppingInterval)
+	after := time.After(dn.duration)
 	for {
 		select {
 		case <-ticker.C:
@@ -66,8 +64,8 @@ func (a *DropNodeAction) Apply() {
 	}
 }
 
-func (dn *DropNodeAction) Revert() {
-	for _, node := range dn.c.nodes {
+func (dn *DropNodeAction) Revert(c *Cluster) {
+	for _, node := range c.nodes {
 		if !node.IsRunning() {
 			node.Start()
 		}
