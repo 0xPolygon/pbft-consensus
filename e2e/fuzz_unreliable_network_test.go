@@ -19,7 +19,7 @@ func TestFuzz_Unreliable_Network(t *testing.T) {
 	currentHeight := uint64(0)
 	jitterMax := 500 * time.Millisecond
 	hook := newPartitionTransport(jitterMax)
-	c := newPBFTCluster(t, "network_unreliable", "prt", nodesCount, hook)
+	c := NewPBFTCluster(t, "network_unreliable", "prt", nodesCount, hook)
 	t.Logf("Starting cluster with %d nodes, max faulty %d.\n", nodesCount, maxFaulty)
 	c.Start()
 	defer c.Stop()
