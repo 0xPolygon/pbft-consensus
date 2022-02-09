@@ -59,14 +59,14 @@ func initTracer(name string) *sdktrace.TracerProvider {
 	return tracerProvider
 }
 
-type cluster struct {
+type Cluster struct {
 	t      *testing.T
 	nodes  map[string]*node
 	tracer *sdktrace.TracerProvider
 	hook   transportHook
 }
 
-func NewPBFTCluster(t *testing.T, name, prefix string, count int, hook ...transportHook) *cluster {
+func NewPBFTCluster(t *testing.T, name, prefix string, count int, hook ...transportHook) *Cluster {
 	names := make([]string, count)
 	for i := 0; i < count; i++ {
 		names[i] = fmt.Sprintf("%s_%d", prefix, i)
@@ -77,7 +77,7 @@ func NewPBFTCluster(t *testing.T, name, prefix string, count int, hook ...transp
 		tt.addHook(hook[0])
 	}
 
-	c := &cluster{
+	c := &Cluster{
 		t:      t,
 		nodes:  map[string]*node{},
 		tracer: initTracer("fuzzy_" + name),
@@ -92,7 +92,7 @@ func NewPBFTCluster(t *testing.T, name, prefix string, count int, hook ...transp
 	return c
 }
 
-func (c *cluster) syncWithNetwork(ourselves string) (uint64, []*pbft.SealedProposal) {
+func (c *Cluster) syncWithNetwork(ourselves string) (uint64, []*pbft.SealedProposal) {
 	var height uint64
 	var proposals []*pbft.SealedProposal
 
@@ -116,7 +116,7 @@ func (c *cluster) syncWithNetwork(ourselves string) (uint64, []*pbft.SealedPropo
 	return height, proposals
 }
 
-func (c *cluster) resolveNodes(nodes ...[]string) []string {
+func (c *Cluster) resolveNodes(nodes ...[]string) []string {
 	queryNodes := []string{}
 	if len(nodes) == 1 {
 		for _, n := range nodes[0] {
@@ -133,7 +133,7 @@ func (c *cluster) resolveNodes(nodes ...[]string) []string {
 	return queryNodes
 }
 
-func (c *cluster) IsStuck(timeout time.Duration, nodes ...[]string) {
+func (c *Cluster) IsStuck(timeout time.Duration, nodes ...[]string) {
 	queryNodes := c.resolveNodes(nodes...)
 
 	nodeHeight := map[string]uint64{}
@@ -164,7 +164,7 @@ func (c *cluster) IsStuck(timeout time.Duration, nodes ...[]string) {
 	}
 }
 
-func (c *cluster) WaitForHeight(num uint64, timeout time.Duration, nodes ...[]string) error {
+func (c *Cluster) WaitForHeight(num uint64, timeout time.Duration, nodes ...[]string) error {
 	// we need to check every node in the ensemble?
 	// yes, this should test if everyone can agree on the final set.
 	// note, if we include drops, we need to do sync otherwise this will never work
@@ -193,7 +193,7 @@ func (c *cluster) WaitForHeight(num uint64, timeout time.Duration, nodes ...[]st
 	}
 }
 
-func (c *cluster) Nodes() []*node {
+func (c *Cluster) Nodes() []*node {
 	list := make([]*node, len(c.nodes))
 	i := 0
 	for _, n := range c.nodes {
@@ -203,21 +203,21 @@ func (c *cluster) Nodes() []*node {
 	return list
 }
 
-func (c *cluster) Start() {
+func (c *Cluster) Start() {
 	for _, n := range c.nodes {
 		n.Start()
 	}
 }
 
-func (c *cluster) StartNode(name string) {
+func (c *Cluster) StartNode(name string) {
 	c.nodes[name].Start()
 }
 
-func (c *cluster) StopNode(name string) {
+func (c *Cluster) StopNode(name string) {
 	c.nodes[name].Stop()
 }
 
-func (c *cluster) Stop() {
+func (c *Cluster) Stop() {
 	for _, n := range c.nodes {
 		n.Stop()
 	}
@@ -226,14 +226,14 @@ func (c *cluster) Stop() {
 	}
 }
 
-func (c *cluster) FailNode(name string) {
+func (c *Cluster) FailNode(name string) {
 	c.nodes[name].setFaultyNode(true)
 }
 
 type node struct {
 	lock sync.Mutex
 
-	c *cluster
+	c *Cluster
 
 	name     string
 	pbft     *pbft.Pbft
@@ -391,6 +391,10 @@ func (n *node) Stop() {
 func (n *node) Restart() {
 	n.Stop()
 	n.Start()
+}
+
+func (n *node) GetName() string {
+	return n.name
 }
 
 type key string
