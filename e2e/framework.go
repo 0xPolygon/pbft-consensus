@@ -60,7 +60,7 @@ func initTracer(name string) *sdktrace.TracerProvider {
 	return tracerProvider
 }
 
-type cluster struct {
+type Cluster struct {
 	t               *testing.T
 	lock            sync.Mutex
 	nodes           map[string]*node
@@ -69,7 +69,7 @@ type cluster struct {
 	sealedProposals []*pbft.SealedProposal
 }
 
-func NewPBFTCluster(t *testing.T, name, prefix string, count int, hook ...transportHook) *cluster {
+func NewPBFTCluster(t *testing.T, name, prefix string, count int, hook ...transportHook) *Cluster {
 	names := make([]string, count)
 	for i := 0; i < count; i++ {
 		names[i] = fmt.Sprintf("%s_%d", prefix, i)
@@ -80,7 +80,7 @@ func NewPBFTCluster(t *testing.T, name, prefix string, count int, hook ...transp
 		tt.addHook(hook[0])
 	}
 
-	c := &cluster{
+	c := &Cluster{
 		t:               t,
 		nodes:           map[string]*node{},
 		tracer:          initTracer("fuzzy_" + name),
@@ -97,12 +97,12 @@ func NewPBFTCluster(t *testing.T, name, prefix string, count int, hook ...transp
 }
 
 // getSyncIndex returns an index up to which the node is synced with the network
-func (c *cluster) getSyncIndex(node string) int64 {
+func (c *Cluster) getSyncIndex(node string) int64 {
 	return c.nodes[node].getSyncIndex()
 }
 
 // insertFinalProposal inserts final proposal from the node to the cluster
-func (c *cluster) insertFinalProposal(p *pbft.SealedProposal) {
+func (c *Cluster) insertFinalProposal(p *pbft.SealedProposal) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
@@ -118,7 +118,7 @@ func (c *cluster) insertFinalProposal(p *pbft.SealedProposal) {
 	}
 }
 
-func (c *cluster) resolveNodes(nodes ...[]string) []string {
+func (c *Cluster) resolveNodes(nodes ...[]string) []string {
 	queryNodes := []string{}
 	if len(nodes) == 1 {
 		for _, n := range nodes[0] {
@@ -135,7 +135,7 @@ func (c *cluster) resolveNodes(nodes ...[]string) []string {
 	return queryNodes
 }
 
-func (c *cluster) IsStuck(timeout time.Duration, nodes ...[]string) {
+func (c *Cluster) IsStuck(timeout time.Duration, nodes ...[]string) {
 	queryNodes := c.resolveNodes(nodes...)
 
 	nodeHeight := map[string]uint64{}
@@ -166,7 +166,7 @@ func (c *cluster) IsStuck(timeout time.Duration, nodes ...[]string) {
 	}
 }
 
-func (c *cluster) WaitForHeight(num uint64, timeout time.Duration, nodes ...[]string) error {
+func (c *Cluster) WaitForHeight(num uint64, timeout time.Duration, nodes ...[]string) error {
 	// we need to check every node in the ensemble?
 	// yes, this should test if everyone can agree on the final set.
 	// note, if we include drops, we need to do sync otherwise this will never work
@@ -204,7 +204,7 @@ func (n *node) getNodeHeight() uint64 {
 	return uint64(n.getSyncIndex()) + 1
 }
 
-func (c *cluster) syncWithNetwork(nodeID string) (uint64, int64) {
+func (c *Cluster) syncWithNetwork(nodeID string) (uint64, int64) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
@@ -230,7 +230,7 @@ func (c *cluster) syncWithNetwork(nodeID string) (uint64, int64) {
 	return height, syncIndex
 }
 
-func (c *cluster) getProposer(index int64) pbft.NodeID {
+func (c *Cluster) getProposer(index int64) pbft.NodeID {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
@@ -251,7 +251,7 @@ func (n *node) currentHeight() uint64 {
 	return height
 }
 
-func (c *cluster) Nodes() []*node {
+func (c *Cluster) Nodes() []*node {
 	list := make([]*node, len(c.nodes))
 	i := 0
 	for _, n := range c.nodes {
@@ -261,21 +261,21 @@ func (c *cluster) Nodes() []*node {
 	return list
 }
 
-func (c *cluster) Start() {
+func (c *Cluster) Start() {
 	for _, n := range c.nodes {
 		n.Start()
 	}
 }
 
-func (c *cluster) StartNode(name string) {
+func (c *Cluster) StartNode(name string) {
 	c.nodes[name].Start()
 }
 
-func (c *cluster) StopNode(name string) {
+func (c *Cluster) StopNode(name string) {
 	c.nodes[name].Stop()
 }
 
-func (c *cluster) Stop() {
+func (c *Cluster) Stop() {
 	for _, n := range c.nodes {
 		n.Stop()
 	}
@@ -288,7 +288,7 @@ type node struct {
 	// index of node synchronization with the cluster
 	localSyncIndex int64
 
-	c *cluster
+	c *Cluster
 
 	name     string
 	pbft     *pbft.Pbft
@@ -434,6 +434,10 @@ func (n *node) IsRunning() bool {
 func (n *node) Restart() {
 	n.Stop()
 	n.Start()
+}
+
+func (n *node) GetName() string {
+	return n.name
 }
 
 type key string
