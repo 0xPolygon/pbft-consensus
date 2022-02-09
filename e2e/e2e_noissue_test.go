@@ -8,7 +8,7 @@ import (
 )
 
 func TestE2E_NoIssue(t *testing.T) {
-	c := newPBFTCluster(t, "noissue", "noissue", 5, newRandomTransport(300*time.Millisecond))
+	c := NewPBFTCluster(t, "noissue", "noissue", 5, newRandomTransport(300*time.Millisecond))
 	c.Start()
 	defer c.Stop()
 
