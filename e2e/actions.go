@@ -39,29 +39,32 @@ type Action interface {
 
 // This action encapsulates logic for dropping nodes action.
 type DropNodeAction struct {
-	nodesToDrop      int
+	dropCount                int
+	dropProbabilityThreshold int
+	// TODO: Idea: Extract these two fields to another action (called PeriodicAction), which would receive as a parameter another action and would run it?
 	droppingInterval time.Duration
 	duration         time.Duration
 }
 
-func NewDropNodeAction(nodesToDrop int, droppingInterval, duration time.Duration) *DropNodeAction {
+func NewDropNodeAction(dropCount, dropProbabilityThreshold int, droppingInterval, duration time.Duration) *DropNodeAction {
 	return &DropNodeAction{
-		nodesToDrop:      nodesToDrop,
-		droppingInterval: droppingInterval,
-		duration:         duration,
+		dropCount:                dropCount,
+		dropProbabilityThreshold: dropProbabilityThreshold,
+		droppingInterval:         droppingInterval,
+		duration:                 duration,
 	}
 }
 
 func (dn *DropNodeAction) Validate(c *Cluster) error {
 	nodesCount := len(c.nodes)
-	if dn.nodesToDrop >= nodesCount {
-		return fmt.Errorf("trying to drop more nodes (%d) than available in the cluster (%d)", dn.nodesToDrop, nodesCount)
+	if dn.dropCount >= nodesCount {
+		return fmt.Errorf("trying to drop more nodes (%d) than available in the cluster (%d)", dn.dropCount, nodesCount)
 	}
 	runningNodes := c.GetRunningNodes()
-	nodesLeft := len(runningNodes) - dn.nodesToDrop
+	nodesLeft := len(runningNodes) - dn.dropCount
 	if nodesLeft < pbft.MaxFaultyNodes(nodesCount) {
 		return fmt.Errorf("dropping %d nodes would jeopardize Byzantine fault tollerancy.\nExpected at least %d nodes to run, but action would leave it to %d",
-			dn.nodesToDrop, pbft.MaxFaultyNodes(nodesCount), nodesLeft)
+			dn.dropCount, pbft.MaxFaultyNodes(nodesCount), nodesLeft)
 	}
 	return nil
 }
@@ -78,15 +81,19 @@ func (dn *DropNodeAction) Apply(c *Cluster) {
 		select {
 		case <-ticker.C:
 			var runningNodes []*node
-			for i := 0; i < dn.nodesToDrop; i++ {
-				log.Printf("Running nodes: %v", runningNodes)
+			for i := 0; i < dn.dropCount; i++ {
 				runningNodes = c.GetRunningNodes()
-				if len(runningNodes) == 0 {
-					ticker.Stop()
-					return
+				log.Printf("Running nodes: %v", runningNodes)
+				if pbft.MaxFaultyNodes(len(runningNodes)) <= len(runningNodes) {
+					// It is necessary to maintain number of running nodes above of max faulty nodes count
+					stoppedNodes := c.GetStoppedNodes()
+					if len(stoppedNodes) > 0 {
+						nodeToStart := stoppedNodes[rand.Intn(len(stoppedNodes))]
+						nodeToStart.Start()
+					}
 				}
 				// Add probability to stop a node
-				if rand.Intn(100) > 50 {
+				if rand.Intn(100)+1 > dn.dropProbabilityThreshold {
 					nodeToStop := runningNodes[rand.Intn(len(runningNodes))]
 					log.Printf("Dropping node '%s'.", nodeToStop.name)
 					c.StopNode(nodeToStop.name)
