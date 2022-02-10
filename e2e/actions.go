@@ -76,6 +76,9 @@ func (dn *DropNodeAction) Apply(c *Cluster) {
 
 	ticker := time.NewTicker(dn.droppingInterval)
 	after := time.After(dn.duration)
+
+	// TODO: extract calculation
+	maxFaultyNodes := (len(c.nodes) - 1) / 3
 	for {
 		select {
 		case <-ticker.C:
@@ -83,7 +86,7 @@ func (dn *DropNodeAction) Apply(c *Cluster) {
 			for i := 0; i < dn.dropCount; i++ {
 				runningNodes = c.GetRunningNodes()
 				log.Printf("Running nodes: %v", runningNodes)
-				if pbft.MaxFaultyNodes(len(runningNodes)) <= len(runningNodes) {
+				if len(runningNodes) <= maxFaultyNodes {
 					// It is necessary to maintain number of running nodes above of max faulty nodes count
 					stoppedNodes := c.GetStoppedNodes()
 					if len(stoppedNodes) > 0 {
