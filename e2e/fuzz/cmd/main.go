@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"log"
 	"math/rand"
@@ -18,15 +17,13 @@ func main() {
 	log.Printf("Starting PolyBFT fuzz runner...")
 	log.Printf("Node count: %v\n", *initialNodesCount)
 	log.Printf("Duration: %v\n", *duration)
-
 	rand.Seed(time.Now().Unix())
 
-	ctx, cancelFn := context.WithTimeout(context.Background(), *duration)
-	defer cancelFn()
-
-	// Setup a runner and run it
-	runner := fuzz.Setup(*initialNodesCount)
-	runner.Run(ctx)
-
-	log.Println("PolyBFT fuzz runner is stopped.")
+	runner := fuzz.NewRunner(*initialNodesCount)
+	err := runner.Run(*duration)
+	if err != nil {
+		log.Printf("Error while running PolyBFT fuzz runner: %s\n", err)
+	} else {
+		log.Println("PolyBFT fuzz runner is stopped.")
+	}
 }
