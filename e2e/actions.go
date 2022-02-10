@@ -5,8 +5,6 @@ import (
 	"log"
 	"math/rand"
 	"time"
-
-	"github.com/0xPolygon/pbft-consensus"
 )
 
 type Scenario struct {
@@ -56,14 +54,16 @@ func NewDropNodeAction(dropCount, dropProbabilityThreshold int, droppingInterval
 
 func (dn *DropNodeAction) Validate(c *Cluster) error {
 	nodesCount := len(c.nodes)
+	// TODO: extract calculation?
+	maxFaulty := (nodesCount - 1) / 3
 	if dn.dropCount >= nodesCount {
 		return fmt.Errorf("trying to drop more nodes (%d) than available in the cluster (%d)", dn.dropCount, nodesCount)
 	}
 	runningNodes := c.GetRunningNodes()
 	nodesLeft := len(runningNodes) - dn.dropCount
-	if nodesLeft < pbft.MaxFaultyNodes(nodesCount) {
+	if nodesLeft < maxFaulty {
 		return fmt.Errorf("dropping %d nodes would jeopardize Byzantine fault tollerancy.\nExpected at least %d nodes to run, but action would leave it to %d",
-			dn.dropCount, pbft.MaxFaultyNodes(nodesCount), nodesLeft)
+			dn.dropCount, maxFaulty, nodesLeft)
 	}
 	return nil
 }
@@ -73,12 +73,11 @@ func (dn *DropNodeAction) Apply(c *Cluster) {
 		log.Printf("[WARNING] Skipping drop node action. Reason: '%s'", err)
 		return
 	}
-
+	// TODO: extract calculation?
+	maxFaulty := (len(c.nodes) - 1) / 3
 	ticker := time.NewTicker(dn.droppingInterval)
 	after := time.After(dn.duration)
 
-	// TODO: extract calculation
-	maxFaultyNodes := (len(c.nodes) - 1) / 3
 	for {
 		select {
 		case <-ticker.C:
@@ -86,7 +85,7 @@ func (dn *DropNodeAction) Apply(c *Cluster) {
 			for i := 0; i < dn.dropCount; i++ {
 				runningNodes = c.GetRunningNodes()
 				log.Printf("Running nodes: %v", runningNodes)
-				if len(runningNodes) <= maxFaultyNodes {
+				if len(runningNodes) <= maxFaulty {
 					// It is necessary to maintain number of running nodes above of max faulty nodes count
 					stoppedNodes := c.GetStoppedNodes()
 					if len(stoppedNodes) > 0 {
