@@ -403,7 +403,7 @@ func (n *node) isFaulty() bool {
 
 func (n *node) Start() {
 	if n.IsRunning() {
-		panic("already started")
+		panic(fmt.Errorf("node '%s' is already started", n))
 	}
 
 	// create the ctx and the cancelFn
@@ -470,6 +470,10 @@ func (n *node) Restart() {
 }
 
 func (n *node) GetName() string {
+	return n.name
+}
+
+func (n *node) String() string {
 	return n.name
 }
 
@@ -591,4 +595,12 @@ func (v *valString) Includes(id pbft.NodeID) bool {
 
 func (v *valString) Len() int {
 	return len(v.nodes)
+}
+
+// TODO: Remove and adapt once PR https://github.com/0xPolygon/pbft-consensus/pull/23 gets merged
+func GetMaxFaultyNodes(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	return (n - 1) / 3
 }

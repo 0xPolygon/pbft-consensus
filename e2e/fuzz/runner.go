@@ -20,7 +20,7 @@ func NewRunner(initialNodesCount uint) *Runner {
 	dn := e2e.NewDropNodeAction(2, 50, 1*time.Second, 10*time.Second)
 	return &Runner{
 		allActions: []e2e.Action{dn},
-		scenarios:  []*e2e.Scenario{e2e.NewScenario()}, // todo not used?
+		scenarios:  []*e2e.Scenario{e2e.NewScenario()}, // TODO: Some of the following PR will rely on this slice
 		cluster:    e2e.NewPBFTCluster(nil, "fuzz_cluster", "NODE", int(initialNodesCount)),
 		wg:         sync.WaitGroup{},
 	}
@@ -41,8 +41,7 @@ func (r *Runner) Run(d time.Duration) error {
 				return
 			default:
 				// TODO: Loop by scenarios and extract actions, sleep some time between actions?
-				// Scenarios should be somehow created by indexing actions array (randomize scenarios picking?)
-				// Are scenarios predefined or dynamically created (in a random manner)?
+				// Scenarios should be somehow created by indexing actions array (randomize scenarios picking)
 				r.allActions[getActionIndex()].Apply(r.cluster)
 			}
 
@@ -66,7 +65,7 @@ func validateNodes(c *e2e.Cluster) {
 		currentHeight := c.GetMaxHeight(runningNodes)
 		expectedHeight := currentHeight + 10
 		log.Printf("Current height %v and waiting expected %v height.\n", currentHeight, expectedHeight)
-		err := c.WaitForHeight(expectedHeight, 1*time.Minute, runningNodes)
+		err := c.WaitForHeight(expectedHeight, 5*time.Minute, runningNodes)
 		if err != nil {
 			panic("Desired height not reached.")
 		}
@@ -78,15 +77,14 @@ func validateNodes(c *e2e.Cluster) {
 
 // validateCluster checks wheter there is enough running nodes that can make consensus
 func validateCluster(c *e2e.Cluster) ([]string, bool) {
-	stoppedNodes := 0
+	totalNodesCount := 0
 	var runningNodes []string
 	for _, n := range c.Nodes() {
 		if n.IsRunning() {
 			runningNodes = append(runningNodes, n.GetName())
-		} else {
-			stoppedNodes++
 		}
+		totalNodesCount++
 	}
-
-	return runningNodes, (len(c.Nodes())-1)/3 >= stoppedNodes
+	stoppedNodesCount := totalNodesCount - len(runningNodes)
+	return runningNodes, stoppedNodesCount <= e2e.GetMaxFaultyNodes(totalNodesCount)
 }
