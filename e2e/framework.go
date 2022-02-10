@@ -215,6 +215,21 @@ func (c *Cluster) Nodes() []*node {
 	return list
 }
 
+func (c *Cluster) GetFilteredNodes(filter func(*node) bool) (filteredNodes []*node) {
+	for _, n := range c.nodes {
+		if filter(n) {
+			filteredNodes = append(filteredNodes, n)
+		}
+	}
+	return
+}
+
+func (c *Cluster) GetRunningNodes() (runningNodes []*node) {
+	return c.GetFilteredNodes(func(n *node) bool {
+		return n.IsRunning()
+	})
+}
+
 func (c *Cluster) Start() {
 	for _, n := range c.nodes {
 		n.Start()
@@ -394,7 +409,7 @@ func (n *node) IsRunning() bool {
 
 func (n *node) Stop() {
 	if n.cancelFn == nil {
-		panic("already stopped")
+		panic(fmt.Errorf("node %s is already stopped", n.name))
 	}
 	n.cancelFn()
 	n.cancelFn = nil
@@ -407,6 +422,10 @@ func (n *node) Restart() {
 
 func (n *node) GetName() string {
 	return n.name
+}
+
+func (n *node) String() string {
+	return n.GetName()
 }
 
 type key string

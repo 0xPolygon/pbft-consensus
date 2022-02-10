@@ -19,7 +19,7 @@ type Runner struct {
 
 func Setup(initialNodesCount uint) *Runner {
 	// example of DropNodeAction
-	dn := e2e.NewDropNodeAction(5, 2, 1*time.Second, 10*time.Second)
+	dn := e2e.NewDropNodeAction(2, 1*time.Second, 10*time.Second)
 	return &Runner{
 		allActions: []e2e.Action{dn},
 		scenarios:  []*e2e.Scenario{e2e.NewScenario()},
@@ -89,6 +89,5 @@ func validateCluster(c *e2e.Cluster) ([]string, bool) {
 			stoppedNodes++
 		}
 	}
-	nodesCnt := len(c.Nodes())
-	return runningNodes, pbft.MaxFaultyNodes(nodesCnt) >= stoppedNodes
+	return runningNodes, pbft.MaxFaultyNodes(len(c.Nodes())) >= stoppedNodes
 }
