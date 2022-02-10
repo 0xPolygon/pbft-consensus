@@ -25,7 +25,6 @@ func main() {
 	defer cancelFn()
 	runner := fuzz.Setup(*initialNodesCount)
 	runner.Run(ctx)
-	// validate the progress
 
 	log.Println("Exiting...")
 }
