@@ -6,22 +6,24 @@ import (
 )
 
 type Scenario struct {
-	actions []*Action
+	actions []Action
 }
 
 func NewScenario() *Scenario {
 	return &Scenario{
-		actions: make([]*Action, 0),
+		actions: make([]Action, 0),
 	}
 }
 
-func (s *Scenario) AddAction(action *Action) *Scenario {
+func (s *Scenario) AddAction(action Action) *Scenario {
 	s.actions = append(s.actions, action)
 	return s
 }
 
-func (s *Scenario) CheckProposal() {
-
+func (s *Scenario) CleanUp(cluster *Cluster) {
+	for _, action := range s.actions {
+		action.Revert(cluster)
+	}
 }
 
 type Action interface {
