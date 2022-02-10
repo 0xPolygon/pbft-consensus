@@ -33,7 +33,6 @@ func (r *Runner) Run(ctx context.Context) error {
 	defer r.cluster.Stop()
 
 	r.wg.Add(1)
-	var height uint64
 	go func(ctx context.Context) {
 		// TODO: select test case and validate the end state against the cluster
 		for {
@@ -46,22 +45,11 @@ func (r *Runner) Run(ctx context.Context) error {
 				// TODO: Loop by scenarios and extract actions.
 				// Scenarios should be somehow created by indexing actions array (randomize scenarios picking?)
 				// Are scenarios predefined or dynamically created (in a random manner)?
-
 				r.allActions[getActionIndex()].Apply(r.cluster)
 			}
 
-			// TODO: Check should we have proposal built and do we have it built
-			if runningNodes, ok := validateCluster(r.cluster); ok {
-				// TODO: get height after validation so that there is a progress between 2 validations
-				height += 5
-				err := r.cluster.WaitForHeight(height, 1*time.Minute, runningNodes)
-				if err != nil {
-					panic("TODO")
-				}
-				log.Println("TODO: Cluster validation done")
-			} else {
-				log.Println("TODO: Not enough running nodes for consensus.")
-			}
+			validateNodes(r.cluster)
+			r.allActions[getActionIndex()].Revert(r.cluster)
 			// TODO: Loop through scenarios and invoke scenario.CleanUp(r.cluster)
 		}
 	}(ctx)
@@ -74,6 +62,23 @@ func getActionIndex() int {
 	return 0
 }
 
+// validateNodes checks if there is progress on the node height after the scenario run
+func validateNodes(c *e2e.Cluster) {
+	if runningNodes, ok := validateCluster(c); ok {
+		currentHeight := c.GetMaxHeight(runningNodes)
+		expectedHeight := currentHeight + 10
+		log.Printf("Current height %v and waiting expected %v height.\n", currentHeight, expectedHeight)
+		err := c.WaitForHeight(expectedHeight, 1*time.Minute, runningNodes)
+		if err != nil {
+			panic("Desired height not reached.")
+		}
+		log.Println("Cluster validation done.")
+	} else {
+		log.Println("Skipping validation, not enough running nodes for consensus.")
+	}
+}
+
+// validateCluster chacks wether there is enough running nodes that can make consensus
 func validateCluster(c *e2e.Cluster) ([]string, bool) {
 	stoppedNodes := 0
 	var runningNodes []string
