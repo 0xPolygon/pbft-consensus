@@ -164,6 +164,18 @@ func (c *Cluster) IsStuck(timeout time.Duration, nodes ...[]string) {
 	}
 }
 
+func (c *Cluster) GetMaxHeight(nodes ...[]string) uint64 {
+	queryNodes := c.resolveNodes(nodes...)
+	var max uint64
+	for _, node := range queryNodes {
+		h, _ := c.syncWithNetwork(node)
+		if h > max {
+			max = h
+		}
+	}
+	return max
+}
+
 func (c *Cluster) WaitForHeight(num uint64, timeout time.Duration, nodes ...[]string) error {
 	// we need to check every node in the ensemble?
 	// yes, this should test if everyone can agree on the final set.
