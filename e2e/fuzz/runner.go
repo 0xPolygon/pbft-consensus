@@ -29,7 +29,7 @@ func NewRunner(initialNodesCount uint) *Runner {
 func (r *Runner) Run(d time.Duration) error {
 	r.cluster.Start()
 	defer r.cluster.Stop()
-	done := time.After(d) // don't run forever/ ctx maybe?
+	done := time.After(d)
 
 	r.wg.Add(1)
 	go func() {
@@ -40,16 +40,14 @@ func (r *Runner) Run(d time.Duration) error {
 				log.Println("Done with execution")
 				return
 			default:
-				// TODO: Loop by scenarios and extract actions.
+				// TODO: Loop by scenarios and extract actions, sleep some time between actions?
 				// Scenarios should be somehow created by indexing actions array (randomize scenarios picking?)
 				// Are scenarios predefined or dynamically created (in a random manner)?
-				// todo loop through actions with some sleep?
 				r.allActions[getActionIndex()].Apply(r.cluster)
 			}
 
 			validateNodes(r.cluster)
 			r.allActions[getActionIndex()].Revert(r.cluster)
-			// TODO: Loop through scenarios and invoke scenario.CleanUp(r.cluster)
 		}
 	}()
 
@@ -58,6 +56,7 @@ func (r *Runner) Run(d time.Duration) error {
 }
 
 func getActionIndex() int {
+	// for now just return one action
 	return 0
 }
 
@@ -88,5 +87,6 @@ func validateCluster(c *e2e.Cluster) ([]string, bool) {
 			stoppedNodes++
 		}
 	}
+
 	return runningNodes, (len(c.Nodes())-1)/3 >= stoppedNodes
 }

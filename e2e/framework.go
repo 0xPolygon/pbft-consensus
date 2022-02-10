@@ -484,10 +484,6 @@ func (n *node) GetName() string {
 	return n.name
 }
 
-func (n *node) String() string {
-	return n.GetName()
-}
-
 type key string
 
 func (k key) NodeID() pbft.NodeID {
