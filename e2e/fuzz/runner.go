@@ -19,7 +19,7 @@ type Runner struct {
 
 func Setup(initialNodesCount uint) *Runner {
 	// example of DropNodeAction
-	dn := e2e.NewDropNodeAction(2, 1*time.Second, 10*time.Second)
+	dn := e2e.NewDropNodeAction(2, 50, 1*time.Second, 10*time.Second)
 	return &Runner{
 		allActions: []e2e.Action{dn},
 		scenarios:  []*e2e.Scenario{e2e.NewScenario()},
@@ -78,7 +78,7 @@ func validateNodes(c *e2e.Cluster) {
 	}
 }
 
-// validateCluster chacks wether there is enough running nodes that can make consensus
+// validateCluster checks wheter there is enough running nodes that can make consensus
 func validateCluster(c *e2e.Cluster) ([]string, bool) {
 	stoppedNodes := 0
 	var runningNodes []string
