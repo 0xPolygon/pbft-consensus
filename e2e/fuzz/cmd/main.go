@@ -10,7 +10,6 @@ import (
 )
 
 func main() {
-	// Define flags
 	initialNodesCount := flag.Uint("nodes", 5, "Count of initially started nodes")
 	duration := flag.Duration("duration", 1*time.Minute, "Duration of fuzz daemon running")
 	flag.Parse()
