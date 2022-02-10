@@ -282,9 +282,15 @@ func (c *Cluster) GetFilteredNodes(filter func(*node) bool) (filteredNodes []*no
 	return
 }
 
-func (c *Cluster) GetRunningNodes() (runningNodes []*node) {
+func (c *Cluster) GetRunningNodes() []*node {
 	return c.GetFilteredNodes(func(n *node) bool {
 		return n.IsRunning()
+	})
+}
+
+func (c *Cluster) GetStoppedNodes() []*node {
+	return c.GetFilteredNodes(func(n *node) bool {
+		return !n.IsRunning()
 	})
 }
 
