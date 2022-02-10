@@ -1,7 +1,6 @@
 package fuzz
 
 import (
-	"context"
 	"log"
 	"sync"
 	"time"
@@ -17,34 +16,35 @@ type Runner struct {
 	scenarios  []*e2e.Scenario
 }
 
-func Setup(initialNodesCount uint) *Runner {
+func NewRunner(initialNodesCount uint) *Runner {
 	// example of DropNodeAction
 	dn := e2e.NewDropNodeAction(2, 50, 1*time.Second, 10*time.Second)
 	return &Runner{
 		allActions: []e2e.Action{dn},
-		scenarios:  []*e2e.Scenario{e2e.NewScenario()},
+		scenarios:  []*e2e.Scenario{e2e.NewScenario()}, // todo not used?
 		cluster:    e2e.NewPBFTCluster(nil, "fuzz_cluster", "NODE", int(initialNodesCount)),
 		wg:         sync.WaitGroup{},
 	}
 }
 
-func (r *Runner) Run(ctx context.Context) error {
+func (r *Runner) Run(d time.Duration) error {
 	r.cluster.Start()
 	defer r.cluster.Stop()
+	done := time.After(d) // don't run forever/ ctx maybe?
 
 	r.wg.Add(1)
-	go func(ctx context.Context) {
-		// TODO: select test case and validate the end state against the cluster
+	go func() {
+		defer r.wg.Done()
 		for {
 			select {
-			case <-ctx.Done():
-				log.Println("Done executing")
-				r.wg.Done()
+			case <-done:
+				log.Println("Done with execution")
 				return
 			default:
 				// TODO: Loop by scenarios and extract actions.
 				// Scenarios should be somehow created by indexing actions array (randomize scenarios picking?)
 				// Are scenarios predefined or dynamically created (in a random manner)?
+				// todo loop through actions with some sleep?
 				r.allActions[getActionIndex()].Apply(r.cluster)
 			}
 
@@ -52,7 +52,7 @@ func (r *Runner) Run(ctx context.Context) error {
 			r.allActions[getActionIndex()].Revert(r.cluster)
 			// TODO: Loop through scenarios and invoke scenario.CleanUp(r.cluster)
 		}
-	}(ctx)
+	}()
 
 	r.wg.Wait()
 	return nil
