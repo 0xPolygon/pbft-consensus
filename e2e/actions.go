@@ -32,7 +32,6 @@ func (s *Scenario) CleanUp(cluster *Cluster) {
 
 type Action interface {
 	// TODO: Add Setup() method?
-	Validate(c *Cluster) error
 	Apply(c *Cluster)
 	Revert(c *Cluster)
 }
@@ -107,7 +106,9 @@ func (dn *DropNodeAction) Apply(c *Cluster) {
 	}
 }
 
+// Revert reverts all nodes that are not running
 func (dn *DropNodeAction) Revert(c *Cluster) {
+	log.Println("Reverting dropped nodes")
 	for _, node := range c.nodes {
 		if !node.IsRunning() {
 			node.Start()
