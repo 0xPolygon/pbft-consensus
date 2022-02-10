@@ -5,7 +5,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/0xPolygon/pbft-consensus"
 	"github.com/0xPolygon/pbft-consensus/e2e"
 )
 
@@ -89,5 +88,5 @@ func validateCluster(c *e2e.Cluster) ([]string, bool) {
 			stoppedNodes++
 		}
 	}
-	return runningNodes, pbft.MaxFaultyNodes(len(c.Nodes())) >= stoppedNodes
+	return runningNodes, (len(c.Nodes())-1)/3 >= stoppedNodes
 }
