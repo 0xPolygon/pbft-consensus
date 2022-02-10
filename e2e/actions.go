@@ -1,7 +1,9 @@
 package e2e
 
 import (
+	"fmt"
 	"log"
+	"math/rand"
 	"time"
 )
 
@@ -50,76 +52,69 @@ func NewDropNodeAction(dropCount, dropProbabilityThreshold int, droppingInterval
 }
 
 func (dn *DropNodeAction) Validate(c *Cluster) error {
-	// dummy validation of the node drops inside cluster
+	nodesCount := len(c.nodes)
+	if dn.dropCount >= nodesCount {
+		return fmt.Errorf("trying to drop more nodes (%d) than available in the cluster (%d)", dn.dropCount, nodesCount)
+	}
+	runningNodes := c.GetRunningNodes()
+	nodesLeft := len(runningNodes) - dn.dropCount
+	maxFaultyNodes := GetMaxFaultyNodes(nodesCount)
+	if nodesLeft < maxFaultyNodes {
+		return fmt.Errorf("dropping %d nodes would jeopardize Byzantine fault-tollerant conditions.\nExpected at least %d nodes to run, but action would leave it to %d",
+			dn.dropCount, maxFaultyNodes, nodesLeft)
+	}
 	return nil
-	/*
-		nodesCount := len(c.nodes)
-		// TODO: extract calculation?
-		maxFaulty := (nodesCount - 1) / 3
-		if dn.dropCount >= nodesCount {
-			return fmt.Errorf("trying to drop more nodes (%d) than available in the cluster (%d)", dn.dropCount, nodesCount)
-		}
-		runningNodes := c.GetRunningNodes()
-		nodesLeft := len(runningNodes) - dn.dropCount
-		if nodesLeft < maxFaulty {
-			return fmt.Errorf("dropping %d nodes would jeopardize Byzantine fault tollerancy.\nExpected at least %d nodes to run, but action would leave it to %d",
-				dn.dropCount, maxFaulty, nodesLeft)
-		}
-		return nil
-	*/
+
 }
 
 func (dn *DropNodeAction) Apply(c *Cluster) {
-	// TODO dummy function that should randomly drop nodes.
-	/*
-		if err := dn.Validate(c); err != nil {
-			log.Printf("[WARNING] Skipping drop node action. Reason: '%s'", err)
+	if err := dn.Validate(c); err != nil {
+		log.Printf("[WARNING] Skipping drop node action. Reason: '%s'", err)
+		return
+	}
+
+	maxFaultyNodes := GetMaxFaultyNodes(len(c.nodes))
+	ticker := time.NewTicker(dn.droppingInterval)
+	after := time.After(dn.duration)
+
+	for {
+		select {
+		case <-ticker.C:
+			var runningNodes []*node
+			for i := 0; i < dn.dropCount; i++ {
+				runningNodes = c.GetRunningNodes()
+				log.Printf("%d. BEGIN Running nodes: %v", i+1, runningNodes)
+
+				// Stop a node with some probability
+				if rand.Intn(100)+1 > dn.dropProbabilityThreshold {
+					nodeToStop := runningNodes[rand.Intn(len(runningNodes))]
+					log.Printf("Dropping node '%s'.", nodeToStop)
+					c.StopNode(nodeToStop.name)
+				}
+
+				// Keep number of running nodes above max faulty nodes count
+				stoppedNodes := c.GetStoppedNodes()
+				for len(stoppedNodes) > maxFaultyNodes {
+					// Randomly choose a node, from the set of stopped nodes to be started again
+					nodeToStart := stoppedNodes[rand.Intn(len(stoppedNodes))]
+					log.Printf("Starting node '%s'.", nodeToStart)
+					nodeToStart.Start()
+					stoppedNodes = c.GetStoppedNodes()
+				}
+				log.Printf("%d. END Running nodes: %v", i+1, c.GetRunningNodes())
+			}
+		case <-after:
+			ticker.Stop()
+			log.Println("Done dropping nodes.")
 			return
 		}
-		// TODO: extract calculation?
-		maxFaulty := (len(c.nodes) - 1) / 3
-		ticker := time.NewTicker(dn.droppingInterval)
-		after := time.After(dn.duration)
-
-		for {
-			select {
-			case <-ticker.C:
-				var runningNodes []*node
-				for i := 0; i < dn.dropCount; i++ {
-					runningNodes = c.GetRunningNodes()
-					log.Printf("Running nodes: %v", runningNodes)
-					if len(runningNodes) <= maxFaulty {
-						// It is necessary to maintain number of running nodes above of max faulty nodes count
-						stoppedNodes := c.GetStoppedNodes()
-						if len(stoppedNodes) > 0 {
-							nodeToStart := stoppedNodes[rand.Intn(len(stoppedNodes))]
-							log.Printf("Restarting node '%s'.", nodeToStart.name)
-							nodeToStart.Start()
-						}
-					}
-					// Add probability to stop a node
-					if rand.Intn(100)+1 > dn.dropProbabilityThreshold {
-						nodeToStop := runningNodes[rand.Intn(len(runningNodes))]
-						if maxFaulty > len(c.GetStoppedNodes()) {
-							log.Printf("Dropping node '%s'.", nodeToStop.name)
-							c.StopNode(nodeToStop.name)
-						}
-					}
-				}
-			case <-after:
-				ticker.Stop()
-				log.Println("Done dropping nodes.")
-				return
-			}
-		}*/
+	}
 }
 
 // Revert reverts all nodes that are not running
 func (dn *DropNodeAction) Revert(c *Cluster) {
 	log.Println("Reverting dropped nodes")
-	for _, node := range c.nodes {
-		if !node.IsRunning() {
-			node.Start()
-		}
+	for _, node := range c.GetStoppedNodes() {
+		node.Start()
 	}
 }
