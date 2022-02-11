@@ -9,20 +9,18 @@ import (
 )
 
 type Runner struct {
-	wg         sync.WaitGroup
-	cluster    *e2e.Cluster
-	allActions []e2e.Action
-	scenarios  []*e2e.Scenario
+	wg        sync.WaitGroup
+	cluster   *e2e.Cluster
+	scenarios []*e2e.Scenario
 }
 
 func NewRunner(initialNodesCount uint) *Runner {
-	// example of DropNodeAction
-	dn := e2e.NewDropNodeAction(2, 50, 1*time.Second, 10*time.Second)
+	// TODO: Receive number of scenarios and actions per scenarios as parameters?
+	scenarionGen := e2e.NewScenarioGenerator(3, 2)
 	return &Runner{
-		allActions: []e2e.Action{dn},
-		scenarios:  []*e2e.Scenario{e2e.NewScenario()}, // TODO: Some of the following PR will rely on this slice
-		cluster:    e2e.NewPBFTCluster(nil, "fuzz_cluster", "NODE", int(initialNodesCount)),
-		wg:         sync.WaitGroup{},
+		wg:        sync.WaitGroup{},
+		cluster:   e2e.NewPBFTCluster(nil, "fuzz_cluster", "NODE", int(initialNodesCount)),
+		scenarios: scenarionGen.GenerateScenarios(),
 	}
 }
 
@@ -40,23 +38,19 @@ func (r *Runner) Run(d time.Duration) error {
 				log.Println("Done with execution")
 				return
 			default:
-				// TODO: Loop by scenarios and extract actions, sleep some time between actions?
-				// Scenarios should be somehow created by indexing actions array (randomize scenarios picking)
-				r.allActions[getActionIndex()].Apply(r.cluster)
 			}
 
-			validateNodes(r.cluster)
-			r.allActions[getActionIndex()].Revert(r.cluster)
+			// TODO: Sleep some time between actions?
+			for _, scenario := range r.scenarios {
+				scenario.Execute(r.cluster)
+				validateNodes(r.cluster)
+				scenario.CleanUp(r.cluster)
+			}
 		}
 	}()
 
 	r.wg.Wait()
 	return nil
-}
-
-func getActionIndex() int {
-	// for now just return one action
-	return 0
 }
 
 // validateNodes checks if there is progress on the node height after the scenario run

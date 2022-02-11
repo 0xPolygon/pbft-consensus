@@ -7,33 +7,12 @@ import (
 	"time"
 )
 
-type Scenario struct {
-	actions []Action
-}
-
-func NewScenario() *Scenario {
-	return &Scenario{
-		actions: make([]Action, 0),
-	}
-}
-
-func (s *Scenario) AddAction(action Action) *Scenario {
-	s.actions = append(s.actions, action)
-	return s
-}
-
-func (s *Scenario) CleanUp(cluster *Cluster) {
-	for _, action := range s.actions {
-		action.Revert(cluster)
-	}
-}
-
 type Action interface {
 	Apply(c *Cluster)
 	Revert(c *Cluster)
 }
 
-// This action encapsulates logic for dropping nodes action.
+// Encapsulates logic for dropping nodes action.
 type DropNodeAction struct {
 	dropCount                int
 	dropProbabilityThreshold int
@@ -42,7 +21,7 @@ type DropNodeAction struct {
 	duration         time.Duration
 }
 
-func NewDropNodeAction(dropCount, dropProbabilityThreshold int, droppingInterval, duration time.Duration) *DropNodeAction {
+func newDropNodeAction(dropCount, dropProbabilityThreshold int, droppingInterval, duration time.Duration) *DropNodeAction {
 	return &DropNodeAction{
 		dropCount:                dropCount,
 		dropProbabilityThreshold: dropProbabilityThreshold,
@@ -117,4 +96,21 @@ func (dn *DropNodeAction) Revert(c *Cluster) {
 	for _, node := range c.GetStoppedNodes() {
 		node.Start()
 	}
+}
+
+// Holds all available pre-defined actions
+type actionRepository struct {
+	actions []Action
+}
+
+func newActionRepository() *actionRepository {
+	return &actionRepository{actions: createActions()}
+}
+
+func createActions() []Action {
+	actions := []Action{
+		newDropNodeAction(2, 50, 1*time.Second, 10*time.Second),
+		newDropNodeAction(2, 70, 500*time.Millisecond, 10*time.Second),
+	}
+	return actions
 }
