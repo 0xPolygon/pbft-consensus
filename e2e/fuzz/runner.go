@@ -65,7 +65,7 @@ func validateNodes(c *e2e.Cluster) {
 		currentHeight := c.GetMaxHeight(runningNodes)
 		expectedHeight := currentHeight + 10
 		log.Printf("Current height %v and waiting expected %v height.\n", currentHeight, expectedHeight)
-		err := c.WaitForHeight(expectedHeight, 1*time.Minute, runningNodes)
+		err := c.WaitForHeight(expectedHeight, 5*time.Minute, runningNodes)
 		if err != nil {
 			panic("Desired height not reached.")
 		}
@@ -85,5 +85,6 @@ func validateCluster(c *e2e.Cluster) ([]string, bool) {
 		}
 		totalNodesCount++
 	}
-	return runningNodes, len(runningNodes) >= e2e.QuorumSize(totalNodesCount)
+	stoppedNodesCount := totalNodesCount - len(runningNodes)
+	return runningNodes, stoppedNodesCount <= e2e.GetMaxFaultyNodes(totalNodesCount)
 }

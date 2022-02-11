@@ -556,7 +556,3 @@ func GetMaxFaultyNodes(n int) int {
 	}
 	return (n - 1) / 3
 }
-
-func QuorumSize(n int) int {
-	return 2*GetMaxFaultyNodes(n) + 1
-}

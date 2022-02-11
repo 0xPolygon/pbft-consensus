@@ -53,15 +53,15 @@ func NewDropNodeAction(dropCount, dropProbabilityThreshold int, droppingInterval
 
 func (dn *DropNodeAction) Validate(c *Cluster) error {
 	nodesCount := len(c.nodes)
-	quorumSize := QuorumSize(len(c.nodes))
 	if dn.dropCount >= nodesCount {
 		return fmt.Errorf("trying to drop more nodes (%d) than available in the cluster (%d)", dn.dropCount, nodesCount)
 	}
 	runningNodes := c.GetRunningNodes()
 	nodesLeft := len(runningNodes) - dn.dropCount
-	if nodesLeft < quorumSize {
-		return fmt.Errorf("dropping %d nodes would jeopardize minimum node needed for quorum.\nExpected at least %d nodes to run, but action would leave it to %d",
-			dn.dropCount, quorumSize, nodesLeft)
+	maxFaultyNodes := GetMaxFaultyNodes(nodesCount)
+	if nodesLeft < maxFaultyNodes {
+		return fmt.Errorf("dropping %d nodes would jeopardize Byzantine fault-tollerant conditions.\nExpected at least %d nodes to run, but action would leave it to %d",
+			dn.dropCount, maxFaultyNodes, nodesLeft)
 	}
 	return nil
 
@@ -73,7 +73,7 @@ func (dn *DropNodeAction) Apply(c *Cluster) {
 		return
 	}
 
-	quorum := QuorumSize(len(c.nodes))
+	maxFaultyNodes := GetMaxFaultyNodes(len(c.nodes))
 	ticker := time.NewTicker(dn.droppingInterval)
 	after := time.After(dn.duration)
 
@@ -83,28 +83,25 @@ func (dn *DropNodeAction) Apply(c *Cluster) {
 			var runningNodes []*node
 			for i := 0; i < dn.dropCount; i++ {
 				runningNodes = c.GetRunningNodes()
-				log.Printf("Running nodes: %v", runningNodes)
+				log.Printf("%d. BEGIN Running nodes: %v", i+1, runningNodes)
 
 				// Stop a node with some probability
 				if rand.Intn(100)+1 > dn.dropProbabilityThreshold {
 					nodeToStop := runningNodes[rand.Intn(len(runningNodes))]
-					if quorum > len(c.GetStoppedNodes()) {
-						log.Printf("Dropping node '%s'.", nodeToStop)
-						c.StopNode(nodeToStop.name)
-					}
+					log.Printf("Dropping node '%s'.", nodeToStop)
+					c.StopNode(nodeToStop.name)
 				}
 
-				runningNodes = c.GetRunningNodes()
-				if len(runningNodes) < quorum {
-					// Keep number of running nodes above quorum size count
-					stoppedNodes := c.GetStoppedNodes()
-					if len(stoppedNodes) > 0 {
-						// Randomly choose a node, from the set of stopped nodes to be started again
-						nodeToStart := stoppedNodes[rand.Intn(len(stoppedNodes))]
-						log.Printf("Starting node '%s'.", nodeToStart)
-						nodeToStart.Start()
-					}
+				// Keep number of running nodes above max faulty nodes count
+				stoppedNodes := c.GetStoppedNodes()
+				for len(stoppedNodes) > maxFaultyNodes {
+					// Randomly choose a node, from the set of stopped nodes to be started again
+					nodeToStart := stoppedNodes[rand.Intn(len(stoppedNodes))]
+					log.Printf("Starting node '%s'.", nodeToStart)
+					nodeToStart.Start()
+					stoppedNodes = c.GetStoppedNodes()
 				}
+				log.Printf("%d. END Running nodes: %v", i+1, c.GetRunningNodes())
 			}
 		case <-after:
 			ticker.Stop()
