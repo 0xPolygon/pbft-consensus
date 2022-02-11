@@ -74,6 +74,28 @@ func TestState_FaultyNodesCount(t *testing.T) {
 	}
 }
 
+func Test_QuorumSize(t *testing.T) {
+	cases := []struct {
+		TotalNodesCount, QuorumSize int
+	}{
+		{1, 1},
+		{2, 1},
+		{3, 1},
+		{4, 3},
+		{5, 3},
+		{6, 3},
+		{7, 5},
+		{8, 5},
+		{9, 5},
+		{10, 7},
+		{100, 67},
+	}
+
+	for _, c := range cases {
+		assert.Equal(t, c.QuorumSize, QuorumSize(c.TotalNodesCount))
+	}
+}
+
 func TestState_ValidNodesCount(t *testing.T) {
 	cases := []struct {
 		TotalNodesCount, ValidNodesCount int

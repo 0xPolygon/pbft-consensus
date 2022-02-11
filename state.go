@@ -208,7 +208,7 @@ func (c *currentState) NumValid() int {
 	// 2 * F + 1
 	// + 1 is up to the caller to add
 	// the current node tallying the messages will include its own message
-	return 2 * c.MaxFaultyNodes()
+	return QuorumSize(c.validators.Len()) - 1
 }
 
 // getErr returns the current error, if any, and consumes it

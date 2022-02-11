@@ -780,3 +780,10 @@ func MaxFaultyNodes(nodesCount int) int {
 	}
 	return (nodesCount - 1) / 3
 }
+
+// Calculates quorum size (namely the number of required messages of some type in order to proceed to the next state in PolyBFT state machine).
+// It is calculated by formula:
+// 2 * F + 1, where F denotes maximum count of faulty nodes in order to have Byzantine fault tollerant property satisfied.
+func QuorumSize(nodesCount int) int {
+	return 2*MaxFaultyNodes(nodesCount) + 1
+}
