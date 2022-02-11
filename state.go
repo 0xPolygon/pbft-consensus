@@ -84,7 +84,7 @@ func (v *View) Copy() *View {
 }
 
 func (v *View) String() string {
-	return fmt.Sprintf("(%d, %d)", v.Sequence, v.Round)
+	return fmt.Sprintf("(Sequence=%d, Round=%d)", v.Sequence, v.Round)
 }
 
 func ViewMsg(sequence, round uint64) *View {
