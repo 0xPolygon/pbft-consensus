@@ -70,7 +70,7 @@ func TestState_FaultyNodesCount(t *testing.T) {
 		s := newState()
 		s.validators = convertToMockValidatorSet(generateValidatorNodes(c.TotalNodesCount, "validator"))
 
-		assert.Equal(t, s.MaxFaultyNodes(), c.FaultyNodesCount)
+		assert.Equal(t, c.FaultyNodesCount, s.MaxFaultyNodes())
 	}
 }
 
@@ -116,7 +116,7 @@ func TestState_ValidNodesCount(t *testing.T) {
 		s := newState()
 		s.validators = convertToMockValidatorSet(generateValidatorNodes(c.TotalNodesCount, "validator"))
 
-		assert.Equal(t, s.NumValid(), c.ValidNodesCount)
+		assert.Equal(t, c.ValidNodesCount, s.NumValid())
 	}
 }
 
@@ -139,14 +139,14 @@ func TestState_AddMessages(t *testing.T) {
 	s.addMessage(pool.createMessage("B", MessageReq_Commit))
 	s.addMessage(pool.createMessage("B", MessageReq_Commit))
 
-	assert.Equal(t, s.numCommitted(), 2)
+	assert.Equal(t, 2, s.numCommitted())
 
 	// -- test prepare messages --
 	s.addMessage(pool.createMessage("C", MessageReq_Prepare))
 	s.addMessage(pool.createMessage("C", MessageReq_Prepare))
 	s.addMessage(pool.createMessage("D", MessageReq_Prepare))
 
-	assert.Equal(t, s.numPrepared(), 2)
+	assert.Equal(t, 2, s.numPrepared())
 
 	// -- test round change messages --
 	rounds := 2
