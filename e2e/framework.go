@@ -596,11 +596,3 @@ func (v *valString) Includes(id pbft.NodeID) bool {
 func (v *valString) Len() int {
 	return len(v.nodes)
 }
-
-// TODO: Remove and adapt once PR https://github.com/0xPolygon/pbft-consensus/pull/23 gets merged
-func GetMaxFaultyNodes(n int) int {
-	if n <= 0 {
-		return 0
-	}
-	return (n - 1) / 3
-}

@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/0xPolygon/pbft-consensus"
 	"github.com/0xPolygon/pbft-consensus/e2e"
 )
 
@@ -12,15 +13,13 @@ type Runner struct {
 	wg         sync.WaitGroup
 	cluster    *e2e.Cluster
 	allActions []e2e.Action
-	scenarios  []*e2e.Scenario
 }
 
 func NewRunner(initialNodesCount uint) *Runner {
 	// example of DropNodeAction
-	dn := e2e.NewDropNodeAction(2, 50, 1*time.Second, 10*time.Second)
+	dn := &e2e.DropNodeAction{}
 	return &Runner{
 		allActions: []e2e.Action{dn},
-		scenarios:  []*e2e.Scenario{e2e.NewScenario()}, // TODO: Some of the following PR will rely on this slice
 		cluster:    e2e.NewPBFTCluster(nil, "fuzz_cluster", "NODE", int(initialNodesCount)),
 		wg:         sync.WaitGroup{},
 	}
@@ -86,5 +85,5 @@ func validateCluster(c *e2e.Cluster) ([]string, bool) {
 		totalNodesCount++
 	}
 	stoppedNodesCount := totalNodesCount - len(runningNodes)
-	return runningNodes, stoppedNodesCount <= e2e.GetMaxFaultyNodes(totalNodesCount)
+	return runningNodes, stoppedNodesCount <= pbft.MaxFaultyNodes(totalNodesCount)
 }
