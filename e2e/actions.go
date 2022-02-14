@@ -4,64 +4,29 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
-	"time"
+
+	"github.com/0xPolygon/pbft-consensus"
 )
-
-type Scenario struct {
-	actions []Action
-}
-
-func NewScenario() *Scenario {
-	return &Scenario{
-		actions: make([]Action, 0),
-	}
-}
-
-func (s *Scenario) AddAction(action Action) *Scenario {
-	s.actions = append(s.actions, action)
-	return s
-}
-
-func (s *Scenario) CleanUp(cluster *Cluster) {
-	for _, action := range s.actions {
-		action.Revert(cluster)
-	}
-}
 
 type Action interface {
 	Apply(c *Cluster)
 	Revert(c *Cluster)
 }
 
-// This action encapsulates logic for dropping nodes action.
+// Encapsulates logic for dropping nodes action.
 type DropNodeAction struct {
-	dropCount                int
-	dropProbabilityThreshold int
-	// TODO: Idea: Extract these two fields to another action (called PeriodicAction), which would receive as a parameter another action and would run it?
-	droppingInterval time.Duration
-	duration         time.Duration
-}
-
-func NewDropNodeAction(dropCount, dropProbabilityThreshold int, droppingInterval, duration time.Duration) *DropNodeAction {
-	return &DropNodeAction{
-		dropCount:                dropCount,
-		dropProbabilityThreshold: dropProbabilityThreshold,
-		droppingInterval:         droppingInterval,
-		duration:                 duration,
-	}
 }
 
 func (dn *DropNodeAction) Validate(c *Cluster) error {
-	nodesCount := len(c.nodes)
-	if dn.dropCount >= nodesCount {
-		return fmt.Errorf("trying to drop more nodes (%d) than available in the cluster (%d)", dn.dropCount, nodesCount)
+	runningNodes := len(c.GetRunningNodes())
+	if runningNodes <= 0 {
+		return fmt.Errorf("no nodes are currently running")
 	}
-	runningNodes := c.GetRunningNodes()
-	nodesLeft := len(runningNodes) - dn.dropCount
-	maxFaultyNodes := GetMaxFaultyNodes(nodesCount)
-	if nodesLeft < maxFaultyNodes {
-		return fmt.Errorf("dropping %d nodes would jeopardize Byzantine fault-tollerant conditions.\nExpected at least %d nodes to run, but action would leave it to %d",
-			dn.dropCount, maxFaultyNodes, nodesLeft)
+	maxFaultyNodes := pbft.MaxFaultyNodes(len(c.nodes))
+	remainingNodes := runningNodes - 1
+	if remainingNodes < maxFaultyNodes {
+		return fmt.Errorf("dropping a node would jeopardize Byzantine fault-tollerant conditions.\nExpected at least %d nodes to run, but action would leave it to %d",
+			maxFaultyNodes, remainingNodes)
 	}
 	return nil
 
@@ -73,42 +38,24 @@ func (dn *DropNodeAction) Apply(c *Cluster) {
 		return
 	}
 
-	maxFaultyNodes := GetMaxFaultyNodes(len(c.nodes))
-	ticker := time.NewTicker(dn.droppingInterval)
-	after := time.After(dn.duration)
+	maxFaultyNodes := pbft.MaxFaultyNodes(len(c.nodes))
+	runningNodes := c.GetRunningNodes()
+	log.Printf("BEGIN Running nodes: %v", runningNodes)
 
-	for {
-		select {
-		case <-ticker.C:
-			var runningNodes []*node
-			for i := 0; i < dn.dropCount; i++ {
-				runningNodes = c.GetRunningNodes()
-				log.Printf("%d. BEGIN Running nodes: %v", i+1, runningNodes)
+	// Stop a node with some probability
+	nodeToStop := runningNodes[rand.Intn(len(runningNodes))]
+	log.Printf("Dropping node '%s'.", nodeToStop)
+	c.StopNode(nodeToStop.name)
 
-				// Stop a node with some probability
-				if rand.Intn(100)+1 > dn.dropProbabilityThreshold {
-					nodeToStop := runningNodes[rand.Intn(len(runningNodes))]
-					log.Printf("Dropping node '%s'.", nodeToStop)
-					c.StopNode(nodeToStop.name)
-				}
-
-				// Keep number of running nodes above max faulty nodes count
-				stoppedNodes := c.GetStoppedNodes()
-				for len(stoppedNodes) > maxFaultyNodes {
-					// Randomly choose a node, from the set of stopped nodes to be started again
-					nodeToStart := stoppedNodes[rand.Intn(len(stoppedNodes))]
-					log.Printf("Starting node '%s'.", nodeToStart)
-					nodeToStart.Start()
-					stoppedNodes = c.GetStoppedNodes()
-				}
-				log.Printf("%d. END Running nodes: %v", i+1, c.GetRunningNodes())
-			}
-		case <-after:
-			ticker.Stop()
-			log.Println("Done dropping nodes.")
-			return
-		}
+	// Keep number of running nodes above max faulty nodes count
+	stoppedNodes := c.GetStoppedNodes()
+	if len(stoppedNodes) > maxFaultyNodes {
+		// Randomly choose a node, from the set of stopped nodes to be started again
+		nodeToStart := stoppedNodes[rand.Intn(len(stoppedNodes))]
+		log.Printf("Starting node '%s'.", nodeToStart)
+		nodeToStart.Start()
 	}
+	log.Printf("END Running nodes: %v", c.GetRunningNodes())
 }
 
 // Revert reverts all nodes that are not running
