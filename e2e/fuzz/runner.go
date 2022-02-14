@@ -10,6 +10,11 @@ import (
 	"github.com/0xPolygon/pbft-consensus/e2e"
 )
 
+var (
+	revertThreshold        = 30
+	maxSleepBetweenActions = 10
+)
+
 type Runner struct {
 	wg               sync.WaitGroup
 	cluster          *e2e.Cluster
@@ -43,22 +48,20 @@ func (r *Runner) Run(d time.Duration) error {
 				pick := rand.Intn(len(r.availableActions))
 				r.availableActions[pick].Apply(r.cluster)
 				actionsApplied = append(actionsApplied, pick)
-
-				// TODO: sleep some time after the actions is applied?
-				wait := time.Duration(rand.Intn(5)+3) * time.Second
+				wait := time.Duration(rand.Intn(maxSleepBetweenActions)) * time.Second
 				time.Sleep(wait)
 
 				// keep all un reverted actions
 				var notRevertedAction []int
-				for _, i := range actionsApplied {
-					if !shouldRevert() {
-						notRevertedAction = append(notRevertedAction, i)
+				for _, aIdx := range actionsApplied {
+					if shouldRevert() {
+						r.availableActions[aIdx].Revert(r.cluster)
+					} else {
+						notRevertedAction = append(notRevertedAction, aIdx)
 					}
 				}
 				actionsApplied = notRevertedAction
-
 				validateNodes(r.cluster)
-
 				// TODO: Invoke revert of actions which are probabilistically determined to be reverted.
 			}
 		}
@@ -98,10 +101,10 @@ func validateCluster(c *e2e.Cluster) ([]string, bool) {
 	return runningNodes, stoppedNodesCount <= pbft.MaxFaultyNodes(totalNodesCount)
 }
 
+// shouldRevert is used to randomly chose if particular action should be reverted base on the threshold
 func shouldRevert() bool {
 	revertProbability := rand.Intn(100) + 1
-	// TODO: dropping probability from config?
-	return revertProbability >= 30
+	return revertProbability >= revertThreshold
 }
 
 func getAvailableActions() []e2e.Action {
