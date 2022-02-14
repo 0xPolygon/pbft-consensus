@@ -1,7 +1,6 @@
 package fuzz
 
 import (
-	"fmt"
 	"log"
 	"math/rand"
 	"sync"
@@ -12,24 +11,23 @@ import (
 )
 
 type Runner struct {
-	wg         sync.WaitGroup
-	cluster    *e2e.Cluster
-	allActions []e2e.Action
+	wg               sync.WaitGroup
+	cluster          *e2e.Cluster
+	availableActions []e2e.Action
+	// TODO: Add runningActions slice, which will be randomly & dynamically generated and will contain sequence of actions being executed?
 }
 
 func NewRunner(initialNodesCount uint) *Runner {
-	// example of DropNodeAction
-	dn := &e2e.DropNodeAction{}
 	return &Runner{
-		allActions: []e2e.Action{dn},
-		cluster:    e2e.NewPBFTCluster(nil, "fuzz_cluster", "NODE", int(initialNodesCount)),
-		wg:         sync.WaitGroup{},
+		availableActions: getAvailableActions(),
+		cluster:          e2e.NewPBFTCluster(nil, "fuzz_cluster", "NODE", int(initialNodesCount)),
+		wg:               sync.WaitGroup{},
 	}
 }
 
 func (r *Runner) Run(d time.Duration) error {
 	r.cluster.Start()
-	// todo we need to stop the cluster, what about tracer inside cluster stop?
+	// TODO: we need to stop the cluster, what about tracer inside cluster stop?
 	// defer r.cluster.Stop()
 	done := time.After(d)
 	actionsApplied := make([]int, 0)
@@ -42,14 +40,11 @@ func (r *Runner) Run(d time.Duration) error {
 				log.Println("Done with execution")
 				return
 			default:
-				// TODO: Loop by scenarios and extract actions, sleep some time between actions?
-				// Scenarios should be somehow created by indexing actions array (randomize scenarios picking)
-				pick := getActionIndex()
-				r.allActions[pick].Apply(r.cluster)
-				fmt.Println("Apply drop")
+				pick := rand.Intn(len(r.availableActions))
+				r.availableActions[pick].Apply(r.cluster)
 				actionsApplied = append(actionsApplied, pick)
 
-				// todo sleep some time after the actions is applied?
+				// TODO: sleep some time after the actions is applied?
 				wait := time.Duration(rand.Intn(5)+3) * time.Second
 				time.Sleep(wait)
 
@@ -64,7 +59,7 @@ func (r *Runner) Run(d time.Duration) error {
 
 				validateNodes(r.cluster)
 
-				// r.allActions[getActionIndex()].Revert(r.cluster)
+				// TODO: Invoke revert of actions which are probabilistically determined to be reverted.
 			}
 		}
 	}()
@@ -104,17 +99,14 @@ func validateCluster(c *e2e.Cluster) ([]string, bool) {
 }
 
 func shouldRevert() bool {
-	c := rand.Intn(100) + 1
-	// TODO dropping probability from config?
-	if c >= 30 {
-		return true
-	}
-
-	return false
-
+	revertProbability := rand.Intn(100) + 1
+	// TODO: dropping probability from config?
+	return revertProbability >= 30
 }
 
-func getActionIndex() int {
-	// for now just return one action
-	return 0
+func getAvailableActions() []e2e.Action {
+	// TODO: add more actions here once implemented...
+	return []e2e.Action{
+		&e2e.DropNodeAction{},
+	}
 }
