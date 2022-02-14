@@ -1,7 +1,9 @@
 package fuzz
 
 import (
+	"fmt"
 	"log"
+	"math/rand"
 	"sync"
 	"time"
 
@@ -27,9 +29,10 @@ func NewRunner(initialNodesCount uint) *Runner {
 
 func (r *Runner) Run(d time.Duration) error {
 	r.cluster.Start()
-	defer r.cluster.Stop()
+	// todo we need to stop the cluster, what about tracer inside cluster stop?
+	// defer r.cluster.Stop()
 	done := time.After(d)
-
+	actionsApplied := make([]int, 0)
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
@@ -41,21 +44,33 @@ func (r *Runner) Run(d time.Duration) error {
 			default:
 				// TODO: Loop by scenarios and extract actions, sleep some time between actions?
 				// Scenarios should be somehow created by indexing actions array (randomize scenarios picking)
-				r.allActions[getActionIndex()].Apply(r.cluster)
-			}
+				pick := getActionIndex()
+				r.allActions[pick].Apply(r.cluster)
+				fmt.Println("Apply drop")
+				actionsApplied = append(actionsApplied, pick)
 
-			validateNodes(r.cluster)
-			r.allActions[getActionIndex()].Revert(r.cluster)
+				// todo sleep some time after the actions is applied?
+				wait := time.Duration(rand.Intn(5)+3) * time.Second
+				time.Sleep(wait)
+
+				// keep all un reverted actions
+				var notRevertedAction []int
+				for _, i := range actionsApplied {
+					if !shouldRevert() {
+						notRevertedAction = append(notRevertedAction, i)
+					}
+				}
+				actionsApplied = notRevertedAction
+
+				validateNodes(r.cluster)
+
+				// r.allActions[getActionIndex()].Revert(r.cluster)
+			}
 		}
 	}()
 
 	r.wg.Wait()
 	return nil
-}
-
-func getActionIndex() int {
-	// for now just return one action
-	return 0
 }
 
 // validateNodes checks if there is progress on the node height after the scenario run
@@ -86,4 +101,20 @@ func validateCluster(c *e2e.Cluster) ([]string, bool) {
 	}
 	stoppedNodesCount := totalNodesCount - len(runningNodes)
 	return runningNodes, stoppedNodesCount <= pbft.MaxFaultyNodes(totalNodesCount)
+}
+
+func shouldRevert() bool {
+	c := rand.Intn(100) + 1
+	// TODO dropping probability from config?
+	if c >= 30 {
+		return true
+	}
+
+	return false
+
+}
+
+func getActionIndex() int {
+	// for now just return one action
+	return 0
 }
