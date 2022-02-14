@@ -52,6 +52,7 @@ func TestState_FaultyNodesCount(t *testing.T) {
 	cases := []struct {
 		TotalNodesCount, FaultyNodesCount int
 	}{
+		{0, 0},
 		{1, 0},
 		{2, 0},
 		{3, 0},
@@ -69,7 +70,29 @@ func TestState_FaultyNodesCount(t *testing.T) {
 		s := newState()
 		s.validators = convertToMockValidatorSet(generateValidatorNodes(c.TotalNodesCount, "validator"))
 
-		assert.Equal(t, s.MaxFaultyNodes(), c.FaultyNodesCount)
+		assert.Equal(t, c.FaultyNodesCount, s.MaxFaultyNodes())
+	}
+}
+
+func Test_QuorumSize(t *testing.T) {
+	cases := []struct {
+		TotalNodesCount, QuorumSize int
+	}{
+		{1, 1},
+		{2, 1},
+		{3, 1},
+		{4, 3},
+		{5, 3},
+		{6, 3},
+		{7, 5},
+		{8, 5},
+		{9, 5},
+		{10, 7},
+		{100, 67},
+	}
+
+	for _, c := range cases {
+		assert.Equal(t, c.QuorumSize, QuorumSize(c.TotalNodesCount))
 	}
 }
 
@@ -93,7 +116,7 @@ func TestState_ValidNodesCount(t *testing.T) {
 		s := newState()
 		s.validators = convertToMockValidatorSet(generateValidatorNodes(c.TotalNodesCount, "validator"))
 
-		assert.Equal(t, s.NumValid(), c.ValidNodesCount)
+		assert.Equal(t, c.ValidNodesCount, s.NumValid())
 	}
 }
 
@@ -116,14 +139,14 @@ func TestState_AddMessages(t *testing.T) {
 	s.addMessage(pool.createMessage("B", MessageReq_Commit))
 	s.addMessage(pool.createMessage("B", MessageReq_Commit))
 
-	assert.Equal(t, s.numCommitted(), 2)
+	assert.Equal(t, 2, s.numCommitted())
 
 	// -- test prepare messages --
 	s.addMessage(pool.createMessage("C", MessageReq_Prepare))
 	s.addMessage(pool.createMessage("C", MessageReq_Prepare))
 	s.addMessage(pool.createMessage("D", MessageReq_Prepare))
 
-	assert.Equal(t, s.numPrepared(), 2)
+	assert.Equal(t, 2, s.numPrepared())
 
 	// -- test round change messages --
 	rounds := 2
