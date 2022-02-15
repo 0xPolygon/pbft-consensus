@@ -44,11 +44,23 @@ type MessageReq struct {
 	// view is the view assigned to the message
 	View *View
 
-	// hash of the proposal (only for prepare messages)
+	// hash of the proposal
 	Hash []byte
 
 	// proposal is the arbitrary data proposal (only for preprepare messages)
 	Proposal []byte
+}
+
+func (m *MessageReq) Validate() error {
+	// Hash field has to exist for state != RoundStateChange
+	if m.Type != MessageReq_RoundChange {
+		if m.Hash == nil {
+			return fmt.Errorf("hash is empty for type %s", m.Type.String())
+		}
+	}
+
+	// TODO
+	return nil
 }
 
 func (m *MessageReq) SetProposal(proposal []byte) {

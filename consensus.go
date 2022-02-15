@@ -1,6 +1,7 @@
 package pbft
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log"
@@ -345,7 +346,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 			continue
 		}
 
-		// retrieve the proposal
+		// retrieve the proposal, the backend MUST validate that the hash belongs to the proposal
 		proposal := &Proposal{
 			Data: msg.Proposal,
 			Hash: msg.Hash,
@@ -411,6 +412,12 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 			p.setState(RoundChangeState)
 			span.End()
 			return
+		}
+
+		// the message must have our local hash
+		if !bytes.Equal(msg.Hash, p.state.proposal.Hash) {
+			p.logger.Print(fmt.Sprintf("[WARN]: incorrect hash in %s message", msg.Type.String()))
+			continue
 		}
 
 		switch msg.Type {
@@ -637,6 +644,13 @@ func (p *Pbft) gossip(msgType MsgType) {
 		Type: msgType,
 		From: p.validator.NodeID(),
 	}
+	if msgType != MessageReq_RoundChange {
+		// Except for round change message in which we are deciding on the proposer,
+		// the rest of the consensus message require the hash:
+		// 1. Preprepare: notify the validators of the proposal + hash
+		// 2. Prepare + Commit: safe check to only include messages from our round.
+		msg.Hash = p.state.proposal.Hash
+	}
 
 	// add View
 	msg.View = p.state.view.Copy()
@@ -733,6 +747,11 @@ func (p *Pbft) getNextMessage(span trace.Span, timeout time.Duration) (*MessageR
 
 // PushMessage pushes a new message to the message queue
 func (p *Pbft) PushMessage(msg *MessageReq) {
+	if err := msg.Validate(); err != nil {
+		p.logger.Printf("[ERROR]: failed to validate msg: %v", err)
+		return
+	}
+
 	p.msgQueue.pushMessage(msg)
 
 	select {
