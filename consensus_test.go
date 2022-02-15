@@ -947,6 +947,10 @@ func (m *mockBackend) HookIsStuckHandler(isStuck isStuckDelegate) *mockBackend {
 	return m
 }
 
+func (m *mockBackend) ValidateCommit(seal []byte) error {
+	return nil
+}
+
 func (m *mockBackend) Hash(p []byte) []byte {
 	h := sha1.New()
 	h.Write(p)
