@@ -2,11 +2,14 @@ package pbft
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha1"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
 	"os"
+	"sync"
 	"testing"
 	"time"
 )
@@ -15,8 +18,6 @@ var (
 	mockProposal  = []byte{0x1, 0x2, 0x3}
 	mockProposal1 = []byte{0x1, 0x2, 0x3, 0x4}
 )
-
-type gossipDelegate func(*MessageReq) error
 
 type mockPbft struct {
 	*Pbft
@@ -28,6 +29,12 @@ type mockPbft struct {
 	sequence uint64
 	cancelFn context.CancelFunc
 	gossipFn gossipDelegate
+}
+
+type gossipDelegate func(*MessageReq) error
+
+func (m *mockPbft) HookGossipHandler(gossipFn gossipDelegate) {
+	m.gossipFn = gossipFn
 }
 
 func (m *mockPbft) emitMsg(msg *MessageReq) {
@@ -58,7 +65,14 @@ func (m *mockPbft) CalculateTimeout() time.Duration {
 	return time.Millisecond
 }
 
-func newMockPbft(t *testing.T, accounts []string, account string, backendArg ...*mockBackend) *mockPbft {
+type backendConfigCallback func(backend *mockBackend)
+
+func newMockPbft(
+	t *testing.T,
+	accounts []string,
+	account string,
+	backendConfigCallback ...backendConfigCallback,
+) *mockPbft {
 	pool := newTesterAccountPool()
 	pool.add(accounts...)
 
@@ -87,13 +101,11 @@ func newMockPbft(t *testing.T, accounts []string, account string, backendArg ...
 		WithRoundTimeout(func(u uint64) time.Duration { return time.Millisecond }))
 
 	// initialize backend mock
-	var backend *mockBackend
-	if len(backendArg) == 1 && backendArg[0] != nil {
-		backend = backendArg[0]
-		backend.mock = m
-	} else {
-		backend = newMockBackend(accounts, m)
+	backend := newMockBackend(accounts, m)
+	if len(backendConfigCallback) == 1 && backendConfigCallback[0] != nil {
+		backendConfigCallback[0](backend)
 	}
+
 	_ = m.Pbft.SetBackend(backend)
 
 	m.state.proposal = &Proposal{
@@ -251,4 +263,139 @@ func (m *mockBackend) ValidatorSet() ValidatorSet {
 }
 
 func (m *mockBackend) Init() {
+}
+
+type mockPBFTCluster struct {
+	nodes []*mockPbft
+}
+
+// newMockPBFTClusterWithMap creates a new mock PBFT cluster with set backends
+func newMockPBFTClusterWithBackends(
+	t *testing.T,
+	nodePrefix string,
+	numNodes uint64,
+	backendCallbackMap map[int]backendConfigCallback,
+) *mockPBFTCluster {
+	t.Helper()
+
+	if numNodes < 1 {
+		return nil
+	}
+
+	// Generate the node names
+	nodeNames := generateMockClusterNames(nodePrefix, numNodes)
+
+	// Instantiate each node in the cluster
+	nodes := make([]*mockPbft, numNodes)
+	for indx, nodeName := range nodeNames {
+		// If the backend for the node is set, use it
+		backendCallback, _ := backendCallbackMap[indx]
+		nodes[indx] = newMockPbft(
+			t,
+			nodeNames,
+			nodeName,
+			backendCallback,
+		)
+	}
+
+	return &mockPBFTCluster{
+		nodes: nodes,
+	}
+}
+
+// newMockPBFTCluster create a mock PBFT cluster with default backends
+func newMockPBFTCluster(
+	t *testing.T,
+	nodePrefix string,
+	numNodes uint64,
+) *mockPBFTCluster {
+	return newMockPBFTClusterWithBackends(t, nodePrefix, numNodes, map[int]backendConfigCallback{})
+}
+
+// generateMockClusterNames generates node names using the specified prefix
+func generateMockClusterNames(nodePrefix string, numNodes uint64) []string {
+	nodeNames := make([]string, numNodes)
+	for i := uint64(0); i < numNodes; i++ {
+		nodeNames[i] = fmt.Sprintf("%s%d", nodePrefix, i)
+	}
+
+	return nodeNames
+}
+
+func generateRandomBytes(size int) ([]byte, error) {
+	b := make([]byte, size)
+	_, err := rand.Read(b)
+	if err != nil {
+		return nil, err
+	}
+
+	return b, nil
+}
+
+func (mc *mockPBFTCluster) runAcceptState() {
+	runAcceptState(mc.nodes)
+}
+
+func runAcceptState(nodes []*mockPbft) {
+	var wg sync.WaitGroup
+
+	for _, node := range nodes {
+		wg.Add(1)
+
+		go func(node *mockPbft) {
+			defer wg.Done()
+
+			node.runAcceptState(context.Background())
+		}(node)
+	}
+
+	wg.Wait()
+}
+
+func (mc *mockPBFTCluster) runValidateState() {
+	var wg sync.WaitGroup
+
+	for _, node := range mc.nodes {
+		wg.Add(1)
+
+		go func(node *mockPbft) {
+			defer wg.Done()
+
+			node.runValidateState(context.Background())
+		}(node)
+	}
+
+	wg.Wait()
+}
+
+func (mc *mockPBFTCluster) runRoundChangeState() {
+	var wg sync.WaitGroup
+
+	for _, node := range mc.nodes {
+		wg.Add(1)
+
+		go func(node *mockPbft) {
+			defer wg.Done()
+
+			node.runRoundChangeState(context.Background())
+		}(node)
+	}
+
+	wg.Wait()
+}
+
+func (mc *mockPBFTCluster) runCommitState() {
+	var wg sync.WaitGroup
+
+	for _, node := range mc.nodes {
+		wg.Add(1)
+
+		go func(node *mockPbft) {
+			defer wg.Done()
+
+			node.runCommitState(context.Background())
+		}(node)
+	}
+
+	wg.Wait()
 }

@@ -126,9 +126,9 @@ func TestTransition_AcceptState_Proposer_FailedBuildProposal(t *testing.T) {
 	}
 
 	validatorIds := []string{"A", "B", "C"}
-	backend := newMockBackend(validatorIds, nil).HookBuildProposalHandler(buildProposalFailure)
-
-	m := newMockPbft(t, validatorIds, "A", backend)
+	m := newMockPbft(t, validatorIds, "A", func(backend *mockBackend) {
+		backend.HookBuildProposalHandler(buildProposalFailure)
+	})
 	m.state.view = ViewMsg(1, 0)
 	m.setState(AcceptState)
 
@@ -274,9 +274,9 @@ func TestTransition_AcceptState_Validate_ProposalFail(t *testing.T) {
 	}
 
 	validatorIds := []string{"A", "B", "C"}
-	backend := newMockBackend(validatorIds, nil).HookValidateHandler(validateProposalFunc)
-
-	m := newMockPbft(t, validatorIds, "C", backend)
+	m := newMockPbft(t, validatorIds, "C", func(backend *mockBackend) {
+		backend.HookValidateHandler(validateProposalFunc)
+	})
 	m.state.view = ViewMsg(1, 0)
 	m.setState(AcceptState)
 
@@ -480,9 +480,9 @@ func TestTransition_RoundChangeState_Stuck(t *testing.T) {
 	}
 
 	validatorIds := []string{"A", "B", "C"}
-	mockBackend := newMockBackend(validatorIds, nil).HookIsStuckHandler(isStuckFn)
-
-	m := newMockPbft(t, validatorIds, "A", mockBackend)
+	m := newMockPbft(t, validatorIds, "A", func(backend *mockBackend) {
+		backend.HookIsStuckHandler(isStuckFn)
+	})
 	m.SetState(RoundChangeState)
 
 	m.runCycle(context.Background())
@@ -748,4 +748,97 @@ func TestGossip_SignProposalFailed(t *testing.T) {
 	assert.Empty(t, m.msgQueue.acceptStateQueue)
 	assert.Empty(t, m.msgQueue.roundChangeStateQueue)
 	assert.Empty(t, m.msgQueue.validateStateQueue)
+}
+
+func TestPBFT_Persistence(t *testing.T) {
+	nodePrefix := "node_"
+	numNodes := uint64(5)
+
+	// Generate block proposals
+	var (
+		firstProposal  []byte
+		secondProposal []byte
+		genErr         error
+	)
+
+	if firstProposal, genErr = generateRandomBytes(4); genErr != nil {
+		t.Fatalf("unable to generate first proposal, %v", genErr)
+	}
+
+	getFirstProposal := func() (*Proposal, error) {
+		return &Proposal{
+			Data: firstProposal,
+			Time: time.Now(),
+		}, nil
+	}
+
+	getSecondProposal := func() (*Proposal, error) {
+		return &Proposal{
+			Data: secondProposal,
+			Time: time.Now(),
+		}, nil
+	}
+
+	if secondProposal, genErr = generateRandomBytes(4); genErr != nil {
+		t.Fatalf("unable to generate second proposal, %v", genErr)
+	}
+
+	// Create a cluster of numNodes, including 1 Byzantine node
+	cluster := newMockPBFTClusterWithBackends(
+		t,
+		nodePrefix,
+		numNodes,
+		map[int]backendConfigCallback{
+			// Node 0 is the proposer for the first block
+			0: func(backend *mockBackend) {
+				backend.HookBuildProposalHandler(getFirstProposal)
+			},
+
+			// Node 1 is the proposer for the second block
+			1: func(backend *mockBackend) {
+				backend.HookBuildProposalHandler(getSecondProposal)
+			},
+		},
+	)
+
+	gossipHandler := func(msg *MessageReq) error {
+		for _, node := range cluster.nodes {
+			node.PushMessage(msg)
+		}
+
+		return nil
+	}
+
+	for _, node := range cluster.nodes {
+		node.HookGossipHandler(gossipHandler)
+	}
+
+	//v := cluster.nodes[2]
+	//W := append(cluster.nodes[:2], cluster.nodes[3:]...) // All nodes apart from v
+	//Whonest := cluster.nodes[:4]                         // All honest nodes in W
+	//byzantineNode := cluster.nodes[4]                    // node 5 is Byzantine, inside of set W
+
+	// Run accept state
+	cluster.runAcceptState()
+
+	// Check that all nodes are working with the data after running accept state
+	for _, node := range cluster.nodes {
+		// Everyone is working with the same proposal
+		assert.Equal(t, firstProposal, node.state.proposal.Data)
+
+		// Everyone is working with the same proposer
+		assert.Equal(t, cluster.nodes[0].validator.NodeID(), node.state.proposer)
+
+		// Everyone is working with the same state
+		assert.Equal(t, uint64(ValidateState), node.state.state)
+	}
+
+	// Run validate state
+	cluster.runValidateState()
+
+	// Check that all nodes are working with the same data after running validate state
+	for _, node := range cluster.nodes {
+		// Everyone is working with the same state
+		assert.Equal(t, uint64(CommitState), node.state.state)
+	}
 }
