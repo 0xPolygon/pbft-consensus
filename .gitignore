@@ -1,2 +1,2 @@
 # Exclude the IDE folders from the VCS
-./idea
+.idea
