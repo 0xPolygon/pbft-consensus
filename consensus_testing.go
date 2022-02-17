@@ -312,15 +312,6 @@ func newMockPBFTClusterWithBackends(
 	}
 }
 
-// newMockPBFTCluster create a mock PBFT cluster with default backends
-func newMockPBFTCluster(
-	t *testing.T,
-	nodePrefix string,
-	numNodes uint64,
-) *mockPBFTCluster {
-	return newMockPBFTClusterWithBackends(t, nodePrefix, numNodes, map[int]backendConfigCallback{})
-}
-
 // generateMockClusterNames generates node names using the specified prefix
 func generateMockClusterNames(nodePrefix string, numNodes uint64) []string {
 	nodeNames := make([]string, numNodes)
