@@ -1,6 +1,7 @@
 package pbft
 
 import (
+	"bytes"
 	"container/heap"
 	"context"
 	"errors"
@@ -622,7 +623,13 @@ func TestTransition_CommitState_DoneState(t *testing.T) {
 
 // Test CommitState to RoundChange transition.
 func TestTransition_CommitState_RoundChange(t *testing.T) {
-	m := newMockPbft(t, []string{"A", "B", "C"}, "A")
+	failedInsertion := func(_ *SealedProposal) error {
+		return errFailedToInsertProposal
+	}
+
+	m := newMockPbft(t, []string{"A", "B", "C"}, "A", func(backend *mockBackend) {
+		backend.HookInsertHandler(failedInsertion)
+	})
 	m.state.view = ViewMsg(1, 0)
 	m.setState(CommitState)
 
@@ -750,6 +757,14 @@ func TestGossip_SignProposalFailed(t *testing.T) {
 	assert.Empty(t, m.msgQueue.validateStateQueue)
 }
 
+// TestPBFT_Persistence aims to validate the persistence problem described in the paper
+// for IBFT analysis, Section 5 Persistence analysis, proof for Lemma 9 (https://arxiv.org/pdf/1901.07160.pdf)
+//
+// Terminology:
+// v - random honest validator
+// W - set of all nodes (honest and byzantine), without v
+// Whonest - set of all honest nodes
+// This test assumes numNodes >= 4 && F(numNodes) >= 1
 func TestPBFT_Persistence(t *testing.T) {
 	nodePrefix := "node_"
 	numNodes := uint64(5)
@@ -761,8 +776,14 @@ func TestPBFT_Persistence(t *testing.T) {
 		genErr         error
 	)
 
+	// The first proposal is for round 0, where Node 0 is the proposer
 	if firstProposal, genErr = generateRandomBytes(4); genErr != nil {
 		t.Fatalf("unable to generate first proposal, %v", genErr)
+	}
+
+	// The second proposal is for round 1, where Node 1 is the proposer
+	if secondProposal, genErr = generateRandomBytes(4); genErr != nil {
+		t.Fatalf("unable to generate second proposal, %v", genErr)
 	}
 
 	getFirstProposal := func() (*Proposal, error) {
@@ -779,8 +800,15 @@ func TestPBFT_Persistence(t *testing.T) {
 		}, nil
 	}
 
-	if secondProposal, genErr = generateRandomBytes(4); genErr != nil {
-		t.Fatalf("unable to generate second proposal, %v", genErr)
+	// This is invoked at the commit state, where nodes from W should
+	// fail to validate a commit signature from Node 4 (byzantine), but Node 2 (v) should
+	// not error out, because Node 4 (byzantine) sent him a correctly formed commit message for the first proposal
+	invalidateProposal := func(proposal *SealedProposal) error {
+		if bytes.Equal(firstProposal, proposal.Proposal) {
+			return errors.New("invalid commit signature size")
+		}
+
+		return nil
 	}
 
 	// Create a cluster of numNodes, including 1 Byzantine node
@@ -789,18 +817,43 @@ func TestPBFT_Persistence(t *testing.T) {
 		nodePrefix,
 		numNodes,
 		map[int]backendConfigCallback{
-			// Node 0 is the proposer for the first block
+			// Node 0 is the proposer for the first proposal
 			0: func(backend *mockBackend) {
+				// Set the hook for building the first proposal for round 0
 				backend.HookBuildProposalHandler(getFirstProposal)
+
+				// Since Node 0 is part of Whonest, it should error out due to a
+				// malformed commit seal
+				backend.HookInsertHandler(invalidateProposal)
 			},
 
-			// Node 1 is the proposer for the second block
+			// Node 1 is the proposer for the second block.
+			// The assumption is that the second proposal is different from the first one
 			1: func(backend *mockBackend) {
+				// Set the hook for building the second proposal for round 1
 				backend.HookBuildProposalHandler(getSecondProposal)
+
+				// Since Node 1 is part of Whonest, it should error out due to a
+				// malformed commit seal
+				backend.HookInsertHandler(invalidateProposal)
+			},
+
+			3: func(backend *mockBackend) {
+				// Since Node 3 is part of Whonest, it should error out due to a
+				// malformed commit seal
+				backend.HookInsertHandler(invalidateProposal)
+			},
+
+			4: func(backend *mockBackend) {
+				// Node 4 is the byzantine node, it should follow along other nodes
+				// in Whonest into Round Change state after failing to insert a proposal
+				backend.HookInsertHandler(invalidateProposal)
 			},
 		},
 	)
 
+	// gossipHandler is a handler for gossip messages that simulates
+	// a network environment, where messages are broadcast to all nodes
 	gossipHandler := func(msg *MessageReq) error {
 		for _, node := range cluster.nodes {
 			node.PushMessage(msg)
@@ -813,32 +866,99 @@ func TestPBFT_Persistence(t *testing.T) {
 		node.HookGossipHandler(gossipHandler)
 	}
 
-	//v := cluster.nodes[2]
-	//W := append(cluster.nodes[:2], cluster.nodes[3:]...) // All nodes apart from v
-	//Whonest := cluster.nodes[:4]                         // All honest nodes in W
-	//byzantineNode := cluster.nodes[4]                    // node 5 is Byzantine, inside of set W
+	// v is Node 2
+	v := cluster.nodes[2]
+
+	// W is the set of all nodes apart from v (including the byzantine node)
+	W := make([]*mockPbft, numNodes-1)
+	copy(W[:2], cluster.nodes[:2])
+	copy(W[2:], cluster.nodes[3:])
 
 	// Run accept state
 	cluster.runAcceptState()
 
 	// Check that all nodes are working with the data after running accept state
-	for _, node := range cluster.nodes {
-		// Everyone is working with the same proposal
-		assert.Equal(t, firstProposal, node.state.proposal.Data)
+	assert.NoError(
+		t,
+		verifyAllSameProposal(
+			cluster.nodes,
+			verifyProposalParams{
+				proposal: firstProposal,
+				proposer: cluster.nodes[0].validator.NodeID(),
+			},
+		),
+	)
 
-		// Everyone is working with the same proposer
-		assert.Equal(t, cluster.nodes[0].validator.NodeID(), node.state.proposer)
-
-		// Everyone is working with the same state
-		assert.Equal(t, uint64(ValidateState), node.state.state)
-	}
+	// Everyone is working with the same state [Validate state]
+	assert.NoError(t, verifyAllInState(cluster.nodes, ValidateState))
 
 	// Run validate state
 	cluster.runValidateState()
 
-	// Check that all nodes are working with the same data after running validate state
-	for _, node := range cluster.nodes {
-		// Everyone is working with the same state
-		assert.Equal(t, uint64(CommitState), node.state.state)
-	}
+	// Everyone is working with the same state [Commit state]
+	assert.NoError(t, verifyAllInState(cluster.nodes, CommitState))
+
+	// Save the sequence v is working with
+	vSequence := v.state.view.Sequence
+
+	// Run the commit state
+	cluster.runCommitState()
+
+	// Nodes in Whonest (Node 0, 1, 3 and 4) should be in the round change state
+	// due to receiving a malformed commit signature from the byzantine node 4.
+	// We simulate this invalid commit signature by making sure the backend "checked it" and errored out
+	assert.NoError(t, verifyAllInState(W, RoundChangeState))
+
+	// Node 2, who received Quorum(n) valid Commit messages should be done with the cycle.
+	// When Node 2 is in the Done state, it means it successfully inserted the block
+	assert.NoError(t, verifyAllInState([]*mockPbft{v}, DoneState))
+
+	// Run the round change state, so nodes in W can start a new round
+	runRoundChangeState(W)
+
+	// Make sure all nodes in W are in round 1
+	assert.NoError(t, verifyAllInRound(W, 1))
+
+	// Make sure all nodes in W are in Accept State
+	assert.NoError(t, verifyAllInState(W, AcceptState))
+
+	// Run accept state
+	runAcceptState(W)
+
+	// Make sure all nodes in W are in Validate State
+	assert.NoError(t, verifyAllInState(W, ValidateState))
+
+	// Check that all nodes are working with the data after running accept state
+	assert.NoError(
+		t,
+		verifyAllSameProposal(
+			W,
+			verifyProposalParams{
+				proposal: secondProposal,
+				proposer: cluster.nodes[1].validator.NodeID(),
+			},
+		),
+	)
+
+	// Run validate state
+	runValidateState(W)
+
+	// Make sure all nodes in W are in Commit State
+	assert.NoError(t, verifyAllInState(W, CommitState))
+
+	// Make sure they are all on the same height / sequence (optional check)
+	assert.NoError(t, verifyAllAtSequence(W, 1))
+
+	// Save the sequence W is working on
+	wSequence := W[0].state.view.Sequence
+
+	// Run commit state
+	runCommitState(W)
+
+	// Make sure all nodes in W are in Done State
+	assert.NoError(t, verifyAllInState(W, DoneState))
+
+	// At this point, all nodes in W have inserted the second proposal, for the same sequence as v.
+	// v has inserted the first proposal, which means they have differing data for the same sequence
+	assert.Equal(t, vSequence, wSequence)
 }

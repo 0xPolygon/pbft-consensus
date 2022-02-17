@@ -1,6 +1,7 @@
 package pbft
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha1"
@@ -192,12 +193,15 @@ func (m *mockPbft) expect(res expectResult) {
 type buildProposalDelegate func() (*Proposal, error)
 type validateDelegate func([]byte) error
 type isStuckDelegate func(uint64) (uint64, bool)
+type insertDelegate func(proposal *SealedProposal) error
+
 type mockBackend struct {
 	mock            *mockPbft
 	validators      *valString
 	buildProposalFn buildProposalDelegate
 	validateFn      validateDelegate
 	isStuckFn       isStuckDelegate
+	insertFn        insertDelegate
 }
 
 func (m *mockBackend) HookBuildProposalHandler(buildProposal buildProposalDelegate) *mockBackend {
@@ -212,6 +216,11 @@ func (m *mockBackend) HookValidateHandler(validate validateDelegate) *mockBacken
 
 func (m *mockBackend) HookIsStuckHandler(isStuck isStuckDelegate) *mockBackend {
 	m.isStuckFn = isStuck
+	return m
+}
+
+func (m *mockBackend) HookInsertHandler(insert insertDelegate) *mockBackend {
+	m.insertFn = insert
 	return m
 }
 
@@ -251,10 +260,10 @@ func (m *mockBackend) IsStuck(num uint64) (uint64, bool) {
 }
 
 func (m *mockBackend) Insert(pp *SealedProposal) error {
-	// TODO:
-	if pp.Proposer == "" {
-		return errVerificationFailed
+	if m.insertFn != nil {
+		return m.insertFn(pp)
 	}
+
 	return nil
 }
 
@@ -353,9 +362,13 @@ func runAcceptState(nodes []*mockPbft) {
 }
 
 func (mc *mockPBFTCluster) runValidateState() {
+	runValidateState(mc.nodes)
+}
+
+func runValidateState(nodes []*mockPbft) {
 	var wg sync.WaitGroup
 
-	for _, node := range mc.nodes {
+	for _, node := range nodes {
 		wg.Add(1)
 
 		go func(node *mockPbft) {
@@ -369,9 +382,13 @@ func (mc *mockPBFTCluster) runValidateState() {
 }
 
 func (mc *mockPBFTCluster) runRoundChangeState() {
+	runRoundChangeState(mc.nodes)
+}
+
+func runRoundChangeState(nodes []*mockPbft) {
 	var wg sync.WaitGroup
 
-	for _, node := range mc.nodes {
+	for _, node := range nodes {
 		wg.Add(1)
 
 		go func(node *mockPbft) {
@@ -385,9 +402,13 @@ func (mc *mockPBFTCluster) runRoundChangeState() {
 }
 
 func (mc *mockPBFTCluster) runCommitState() {
+	runCommitState(mc.nodes)
+}
+
+func runCommitState(nodes []*mockPbft) {
 	var wg sync.WaitGroup
 
-	for _, node := range mc.nodes {
+	for _, node := range nodes {
 		wg.Add(1)
 
 		go func(node *mockPbft) {
@@ -398,4 +419,77 @@ func (mc *mockPBFTCluster) runCommitState() {
 	}
 
 	wg.Wait()
+}
+
+func verifyAllInState(nodes []*mockPbft, state PbftState) error {
+	for _, node := range nodes {
+		if PbftState(node.state.state) != state {
+			return fmt.Errorf(
+				"node %s not in state %s",
+				node.validator.NodeID(),
+				state.String(),
+			)
+		}
+	}
+
+	return nil
+}
+
+func verifyAllInRound(nodes []*mockPbft, round uint64) error {
+	for _, node := range nodes {
+		if node.state.view.Round != round {
+			return fmt.Errorf(
+				"node %s not in round %d",
+				node.validator.NodeID(),
+				round,
+			)
+		}
+	}
+
+	return nil
+}
+
+func verifyAllAtSequence(nodes []*mockPbft, sequence uint64) error {
+	for _, node := range nodes {
+		if node.state.view.Sequence != sequence {
+			return fmt.Errorf(
+				"node %s not at sequence %d",
+				node.validator.NodeID(),
+				sequence,
+			)
+		}
+	}
+
+	return nil
+}
+
+type verifyProposalParams struct {
+	proposal []byte
+	proposer NodeID
+}
+
+func verifyAllSameProposal(
+	nodes []*mockPbft,
+	params verifyProposalParams,
+) error {
+	for _, node := range nodes {
+		// Everyone is working with the same proposal
+		if !bytes.Equal(node.state.proposal.Data, params.proposal) {
+			return fmt.Errorf(
+				"node %s doesn't have the same proposal",
+				node.validator.NodeID(),
+			)
+		}
+
+		// Everyone is working with the same proposal
+		if node.state.proposer != params.proposer {
+			return fmt.Errorf(
+				"node %s doesn't have the same proposer",
+				node.validator.NodeID(),
+			)
+		}
+
+	}
+
+	return nil
 }

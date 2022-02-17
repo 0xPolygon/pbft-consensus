@@ -602,7 +602,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 		num := p.state.AddRoundMessage(msg)
 
 		if num == p.state.NumValid() {
-			// start a new round inmediatly
+			// start a new round immediately
 			p.state.view.Round = msg.View.Round
 			p.setState(AcceptState)
 		} else if num == p.state.MaxFaultyNodes()+1 {
