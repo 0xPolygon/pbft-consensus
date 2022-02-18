@@ -426,6 +426,7 @@ func (f *fsm) BuildProposal() (*pbft.Proposal, error) {
 		Data: []byte{byte(f.Height())},
 		Time: time.Now().Add(1 * time.Second),
 	}
+	proposal.Hash = hash(proposal.Data)
 	return proposal, nil
 }
 
@@ -433,7 +434,7 @@ func (f *fsm) setValidationFails(v bool) {
 	f.validationFails = v
 }
 
-func (f *fsm) Validate(proposal []byte) error {
+func (f *fsm) Validate(proposal *pbft.Proposal) error {
 	if f.validationFails {
 		return fmt.Errorf("validation error")
 	}
@@ -456,7 +457,7 @@ func (f *fsm) ValidatorSet() pbft.ValidatorSet {
 	return &vv
 }
 
-func (f *fsm) Hash(p []byte) []byte {
+func hash(p []byte) []byte {
 	h := sha1.New()
 	h.Write(p)
 	return h.Sum(nil)
