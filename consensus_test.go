@@ -61,6 +61,7 @@ func TestTransition_AcceptState_Proposer_Locked(t *testing.T) {
 	i.state.locked = true
 	i.state.proposal = &Proposal{
 		Data: mockProposal,
+		Hash: digest,
 	}
 
 	i.runCycle(context.Background())
@@ -219,6 +220,7 @@ func TestTransition_AcceptState_Validator_LockWrong(t *testing.T) {
 	// locked proposal
 	i.state.proposal = &Proposal{
 		Data: mockProposal,
+		Hash: digest,
 	}
 	i.state.lock()
 
@@ -227,6 +229,7 @@ func TestTransition_AcceptState_Validator_LockWrong(t *testing.T) {
 		From:     "A",
 		Type:     MessageReq_Preprepare,
 		Proposal: mockProposal1,
+		Hash:     digest1,
 		View:     ViewMsg(1, 0),
 	})
 
@@ -248,7 +251,10 @@ func TestTransition_AcceptState_Validator_LockCorrect(t *testing.T) {
 	// locked proposal
 	proposal := mockProposal
 
-	i.state.proposal = &Proposal{Data: proposal}
+	i.state.proposal = &Proposal{
+		Data: proposal,
+		Hash: digest,
+	}
 	i.state.locked = true
 
 	i.emitMsg(&MessageReq{
@@ -270,7 +276,7 @@ func TestTransition_AcceptState_Validator_LockCorrect(t *testing.T) {
 
 // Test that when validating proposal fails, state machine switches to RoundChangeState.
 func TestTransition_AcceptState_Validate_ProposalFail(t *testing.T) {
-	validateProposalFunc := func(proposal []byte) error {
+	validateProposalFunc := func(p *Proposal) error {
 		return errors.New("failed to validate a proposal")
 	}
 
@@ -280,11 +286,6 @@ func TestTransition_AcceptState_Validate_ProposalFail(t *testing.T) {
 	})
 	m.state.view = ViewMsg(1, 0)
 	m.setState(AcceptState)
-
-	m.setProposal(&Proposal{
-		Data: mockProposal,
-		Time: time.Now(),
-	})
 
 	// Prepare messages
 	m.emitMsg(&MessageReq{
@@ -495,10 +496,6 @@ func TestTransition_ValidateState_MoveToCommitState(t *testing.T) {
 	// we receive enough prepare messages to lock and commit the proposal
 	m := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
 	m.setState(ValidateState)
-	m.setProposal(&Proposal{
-		Data: mockProposal,
-		Time: time.Now().Add(1 * time.Second),
-	})
 
 	// Prepare messages
 	m.emitMsg(&MessageReq{
@@ -567,6 +564,7 @@ func TestTransition_ValidateState_WrongMessageType(t *testing.T) {
 		From:     "A",
 		Type:     MessageReq_Preprepare,
 		Proposal: mockProposal,
+		Hash:     digest,
 		View:     ViewMsg(1, 0),
 	}
 	heap.Push(&m.msgQueue.validateStateQueue, msg)
@@ -577,10 +575,6 @@ func TestTransition_ValidateState_WrongMessageType(t *testing.T) {
 func TestTransition_ValidateState_DiscardMessage(t *testing.T) {
 	m := newMockPbft(t, []string{"A", "B"}, "A")
 	m.setState(ValidateState)
-	m.setProposal(&Proposal{
-		Data: mockProposal,
-		Time: time.Now().Add(1 * time.Second),
-	})
 	m.state.view = ViewMsg(1, 2)
 
 	// Send message from the past (it should be discarded)
@@ -790,6 +784,7 @@ func TestPBFT_Persistence(t *testing.T) {
 		return &Proposal{
 			Data: firstProposal,
 			Time: time.Now(),
+			Hash: hashProposalData(firstProposal),
 		}, nil
 	}
 
@@ -797,6 +792,7 @@ func TestPBFT_Persistence(t *testing.T) {
 		return &Proposal{
 			Data: secondProposal,
 			Time: time.Now(),
+			Hash: hashProposalData(secondProposal),
 		}, nil
 	}
 
@@ -804,7 +800,7 @@ func TestPBFT_Persistence(t *testing.T) {
 	// fail to validate a commit signature from Node 4 (byzantine), but Node 2 (v) should
 	// not error out, because Node 4 (byzantine) sent him a correctly formed commit message for the first proposal
 	invalidateProposal := func(proposal *SealedProposal) error {
-		if bytes.Equal(firstProposal, proposal.Proposal) {
+		if bytes.Equal(firstProposal, proposal.Proposal.Data) {
 			return errors.New("invalid commit signature size")
 		}
 
