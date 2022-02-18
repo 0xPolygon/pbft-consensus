@@ -465,7 +465,7 @@ func (f *fsm) Hash(p []byte) []byte {
 func (f *fsm) Init() {
 }
 
-func (f *fsm) ValidateCommit(seal []byte) error {
+func (f *fsm) ValidateCommit(node pbft.NodeID, seal []byte) error {
 	return nil
 }
 
