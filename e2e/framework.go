@@ -466,6 +466,10 @@ func hash(p []byte) []byte {
 func (f *fsm) Init() {
 }
 
+func (f *fsm) ValidateCommit(node pbft.NodeID, seal []byte) error {
+	return nil
+}
+
 type valString struct {
 	nodes        []pbft.NodeID
 	lastProposer pbft.NodeID

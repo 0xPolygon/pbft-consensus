@@ -115,6 +115,9 @@ type Backend interface {
 
 	// IsStuck returns whether the pbft is stucked
 	IsStuck(num uint64) (uint64, bool)
+
+	// ValidateCommit is used to validate that a given commit is valid
+	ValidateCommit(from NodeID, seal []byte) error
 }
 
 // Pbft represents the PBFT consensus mechanism object
@@ -425,6 +428,10 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 			p.state.addPrepared(msg)
 
 		case MessageReq_Commit:
+			if err := p.backend.ValidateCommit(msg.From, msg.Seal); err != nil {
+				p.logger.Printf("[ERROR]: failed to validate commit: %v", err)
+				continue
+			}
 			p.state.addCommitted(msg)
 
 		default:
