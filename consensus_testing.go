@@ -18,9 +18,6 @@ import (
 var (
 	mockProposal = []byte{0x1, 0x2, 0x3}
 	digest       = []byte{0x1}
-
-	mockProposal1 = []byte{0x1, 0x2, 0x3, 0x4}
-	digest1       = []byte{0x2}
 )
 
 type mockPbft struct {

@@ -224,12 +224,18 @@ func TestTransition_AcceptState_Validator_LockWrong(t *testing.T) {
 	}
 	i.state.lock()
 
+	// Create a different proposal
+	wrongProposal, genErr := generateRandomBytes(4)
+	if genErr != nil {
+		t.Fatalf("unable to generate random bytes, %v", genErr)
+	}
+
 	// emit the wrong locked proposal
 	i.emitMsg(&MessageReq{
 		From:     "A",
 		Type:     MessageReq_Preprepare,
-		Proposal: mockProposal1,
-		Hash:     digest1,
+		Proposal: wrongProposal,
+		Hash:     wrongProposal[:1],
 		View:     ViewMsg(1, 0),
 	})
 
