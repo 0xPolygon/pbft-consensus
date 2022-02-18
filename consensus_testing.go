@@ -198,14 +198,18 @@ type buildProposalDelegate func() (*Proposal, error)
 type validateDelegate func(proposal *Proposal) error
 type isStuckDelegate func(uint64) (uint64, bool)
 type insertDelegate func(proposal *SealedProposal) error
+type validateCommitDelegate func(NodeID, []byte) error
 
 type mockBackend struct {
-	mock            *mockPbft
-	validators      *valString
-	buildProposalFn buildProposalDelegate
-	validateFn      validateDelegate
-	isStuckFn       isStuckDelegate
-	insertFn        insertDelegate
+	mock       *mockPbft
+	validators *valString
+
+	// Hook helpers //
+	buildProposalFn  buildProposalDelegate
+	validateFn       validateDelegate
+	isStuckFn        isStuckDelegate
+	insertFn         insertDelegate
+	validateCommitFn validateCommitDelegate
 }
 
 func (m *mockBackend) HookBuildProposalHandler(buildProposal buildProposalDelegate) *mockBackend {
@@ -228,14 +232,13 @@ func (m *mockBackend) HookInsertHandler(insert insertDelegate) *mockBackend {
 	return m
 }
 
-func (m *mockBackend) ValidateCommit(_ NodeID, _ []byte) error {
-	return nil
+func (m *mockBackend) HookValidateCommitHandler(validateCommit validateCommitDelegate) *mockBackend {
+	m.validateCommitFn = validateCommit
+	return m
 }
 
 func (m *mockBackend) Hash(p []byte) []byte {
-	h := sha1.New()
-	h.Write(p)
-	return h.Sum(nil)
+	return hashProposalData(p)
 }
 
 func (m *mockBackend) BuildProposal() (*Proposal, error) {
@@ -270,6 +273,14 @@ func (m *mockBackend) IsStuck(num uint64) (uint64, bool) {
 func (m *mockBackend) Insert(pp *SealedProposal) error {
 	if m.insertFn != nil {
 		return m.insertFn(pp)
+	}
+
+	return nil
+}
+
+func (m *mockBackend) ValidateCommit(nodeID NodeID, commit []byte) error {
+	if m.validateCommitFn != nil {
+		return m.validateCommitFn(nodeID, commit)
 	}
 
 	return nil
