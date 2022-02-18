@@ -1,28 +1,16 @@
 package pbft
 
 import (
+	"bytes"
 	"container/heap"
 	"context"
-	"crypto/sha1"
 	"errors"
 	"fmt"
-	"io"
-	"io/ioutil"
-	"log"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-)
-
-var (
-	mockProposal = []byte{0x1, 0x2, 0x3}
-	digest       = []byte{0x1}
-
-	mockProposal1 = []byte{0x1, 0x2, 0x3, 0x4}
-	digest1       = []byte{0x2}
 )
 
 func TestTransition_AcceptState_ToSyncState(t *testing.T) {
@@ -140,9 +128,9 @@ func TestTransition_AcceptState_Proposer_FailedBuildProposal(t *testing.T) {
 	}
 
 	validatorIds := []string{"A", "B", "C"}
-	backend := newMockBackend(validatorIds, nil).HookBuildProposalHandler(buildProposalFailure)
-
-	m := newMockPbft(t, validatorIds, "A", backend)
+	m := newMockPbft(t, validatorIds, "A", func(backend *mockBackend) {
+		backend.HookBuildProposalHandler(buildProposalFailure)
+	})
 	m.state.view = ViewMsg(1, 0)
 	m.setState(AcceptState)
 
@@ -236,12 +224,18 @@ func TestTransition_AcceptState_Validator_LockWrong(t *testing.T) {
 	}
 	i.state.lock()
 
+	// Create a different proposal
+	wrongProposal, genErr := generateRandomBytes(4)
+	if genErr != nil {
+		t.Fatalf("unable to generate random bytes, %v", genErr)
+	}
+
 	// emit the wrong locked proposal
 	i.emitMsg(&MessageReq{
 		From:     "A",
 		Type:     MessageReq_Preprepare,
-		Proposal: mockProposal1,
-		Hash:     digest1,
+		Proposal: wrongProposal,
+		Hash:     wrongProposal[:1],
 		View:     ViewMsg(1, 0),
 	})
 
@@ -293,9 +287,9 @@ func TestTransition_AcceptState_Validate_ProposalFail(t *testing.T) {
 	}
 
 	validatorIds := []string{"A", "B", "C"}
-	backend := newMockBackend(validatorIds, nil).HookValidateHandler(validateProposalFunc)
-
-	m := newMockPbft(t, validatorIds, "C", backend)
+	m := newMockPbft(t, validatorIds, "C", func(backend *mockBackend) {
+		backend.HookValidateHandler(validateProposalFunc)
+	})
 	m.state.view = ViewMsg(1, 0)
 	m.setState(AcceptState)
 
@@ -494,9 +488,9 @@ func TestTransition_RoundChangeState_Stuck(t *testing.T) {
 	}
 
 	validatorIds := []string{"A", "B", "C"}
-	mockBackend := newMockBackend(validatorIds, nil).HookIsStuckHandler(isStuckFn)
-
-	m := newMockPbft(t, validatorIds, "A", mockBackend)
+	m := newMockPbft(t, validatorIds, "A", func(backend *mockBackend) {
+		backend.HookIsStuckHandler(isStuckFn)
+	})
 	m.SetState(RoundChangeState)
 
 	m.runCycle(context.Background())
@@ -629,7 +623,13 @@ func TestTransition_CommitState_DoneState(t *testing.T) {
 
 // Test CommitState to RoundChange transition.
 func TestTransition_CommitState_RoundChange(t *testing.T) {
-	m := newMockPbft(t, []string{"A", "B", "C"}, "A")
+	failedInsertion := func(_ *SealedProposal) error {
+		return errFailedToInsertProposal
+	}
+
+	m := newMockPbft(t, []string{"A", "B", "C"}, "A", func(backend *mockBackend) {
+		backend.HookInsertHandler(failedInsertion)
+	})
 	m.state.view = ViewMsg(1, 0)
 	m.setState(CommitState)
 
@@ -757,248 +757,210 @@ func TestGossip_SignProposalFailed(t *testing.T) {
 	assert.Empty(t, m.msgQueue.validateStateQueue)
 }
 
-type gossipDelegate func(*MessageReq) error
+// TestPBFT_Persistence aims to validate the persistence problem described in the paper
+// for IBFT analysis, Section 5 Persistence analysis, proof for Lemma 9 (https://arxiv.org/pdf/1901.07160.pdf)
+//
+// Terminology:
+// v - random honest validator
+// W - set of all nodes (honest and byzantine), without v
+// Whonest - set of all honest nodes
+// This test assumes numNodes >= 4 && F(numNodes) >= 1
+func TestPBFT_Persistence(t *testing.T) {
+	nodePrefix := "node_"
+	numNodes := uint64(5)
 
-type mockPbft struct {
-	*Pbft
+	// Generate block proposals
+	var (
+		firstProposal  []byte
+		secondProposal []byte
+		genErr         error
+	)
 
-	t        *testing.T
-	pool     *testerAccountPool
-	respMsg  []*MessageReq
-	proposal *Proposal
-	sequence uint64
-	cancelFn context.CancelFunc
-	gossipFn gossipDelegate
-}
-
-func (m *mockPbft) emitMsg(msg *MessageReq) {
-	if msg.Hash == nil {
-		// Use default safe value
-		msg.Hash = digest
-	}
-	m.Pbft.PushMessage(msg)
-}
-
-func (m *mockPbft) addMessage(msg *MessageReq) {
-	m.state.addMessage(msg)
-}
-
-func (m *mockPbft) Gossip(msg *MessageReq) error {
-	if m.gossipFn != nil {
-		return m.gossipFn(msg)
-	}
-	m.respMsg = append(m.respMsg, msg)
-	return nil
-}
-
-func (m *mockPbft) CalculateTimeout() time.Duration {
-	return time.Millisecond
-}
-
-func newMockPbft(t *testing.T, accounts []string, account string, backendArg ...*mockBackend) *mockPbft {
-	pool := newTesterAccountPool()
-	pool.add(accounts...)
-
-	m := &mockPbft{
-		t:        t,
-		pool:     pool,
-		respMsg:  []*MessageReq{},
-		sequence: 1, // use by default sequence=1
+	// The first proposal is for round 0, where Node 0 is the proposer
+	if firstProposal, genErr = generateRandomBytes(4); genErr != nil {
+		t.Fatalf("unable to generate first proposal, %v", genErr)
 	}
 
-	// initialize the signing account
-	var acct *testerAccount
-	if account == "" {
-		// not in validator set, create a new one (not part of the validator set)
-		pool.add("xx")
-		acct = pool.get("xx")
-	} else {
-		acct = pool.get(account)
+	// The second proposal is for round 1, where Node 1 is the proposer
+	if secondProposal, genErr = generateRandomBytes(4); genErr != nil {
+		t.Fatalf("unable to generate second proposal, %v", genErr)
 	}
 
-	loggerOutput := getDefaultLoggerOutput()
-
-	// initialize pbft
-	m.Pbft = New(acct, m,
-		WithLogger(log.New(loggerOutput, "", log.LstdFlags)),
-		WithRoundTimeout(func(u uint64) time.Duration { return time.Millisecond }))
-
-	// initialize backend mock
-	var backend *mockBackend
-	if len(backendArg) == 1 && backendArg[0] != nil {
-		backend = backendArg[0]
-		backend.mock = m
-	} else {
-		backend = newMockBackend(accounts, m)
-	}
-	_ = m.Pbft.SetBackend(backend)
-
-	m.state.proposal = &Proposal{
-		Data: mockProposal,
-		Time: time.Now(),
-		Hash: digest,
+	getFirstProposal := func() (*Proposal, error) {
+		return &Proposal{
+			Data: firstProposal,
+			Time: time.Now(),
+			Hash: hashProposalData(firstProposal),
+		}, nil
 	}
 
-	ctx, cancelFn := context.WithCancel(context.Background())
-	m.Pbft.ctx = ctx
-	m.cancelFn = cancelFn
-
-	return m
-}
-
-func getDefaultLoggerOutput() io.Writer {
-	if os.Getenv("SILENT") == "true" {
-		return ioutil.Discard
-	}
-	return os.Stdout
-}
-
-func newMockBackend(validatorIds []string, mockPbft *mockPbft) *mockBackend {
-	return &mockBackend{
-		mock:       mockPbft,
-		validators: newMockValidatorSet(validatorIds).(*valString),
-	}
-}
-
-func (m *mockPbft) Close() {
-	m.cancelFn()
-}
-
-// setProposal sets the proposal that will get returned if the pbft consensus
-// calls the backend 'BuildProposal' function.
-func (m *mockPbft) setProposal(p *Proposal) {
-	if p.Hash == nil {
-		h := sha1.New()
-		h.Write(p.Data)
-		p.Hash = h.Sum(nil)
-	}
-	m.proposal = p
-}
-
-type expectResult struct {
-	state    PbftState
-	sequence uint64
-	round    uint64
-	locked   bool
-	err      error
-
-	// num of messages
-	prepareMsgs uint64
-	commitMsgs  uint64
-
-	// outgoing messages
-	outgoing uint64
-}
-
-// expect is a test helper function
-// printed information from this one will be skipped
-// may be called from simultaneosly from multiple gorutines
-func (m *mockPbft) expect(res expectResult) {
-	m.t.Helper()
-
-	if sequence := m.state.view.Sequence; sequence != res.sequence {
-		m.t.Fatalf("incorrect sequence %d %d", sequence, res.sequence)
-	}
-	if round := m.state.view.Round; round != res.round {
-		m.t.Fatalf("incorrect round %d %d", round, res.round)
-	}
-	if m.getState() != res.state {
-		m.t.Fatalf("incorrect state %s %s", m.getState(), res.state)
-	}
-	if size := len(m.state.prepared); uint64(size) != res.prepareMsgs {
-		m.t.Fatalf("incorrect prepared messages %d %d", size, res.prepareMsgs)
-	}
-	if size := len(m.state.committed); uint64(size) != res.commitMsgs {
-		m.t.Fatalf("incorrect commit messages %d %d", size, res.commitMsgs)
-	}
-	if m.state.locked != res.locked {
-		m.t.Fatalf("incorrect locked %v %v", m.state.locked, res.locked)
-	}
-	if size := len(m.respMsg); uint64(size) != res.outgoing {
-		m.t.Fatalf("incorrect outgoing messages %v %v", size, res.outgoing)
-	}
-	if m.state.err != res.err {
-		m.t.Fatalf("incorrect error %v %v", m.state.err, res.err)
-	}
-}
-
-type buildProposalDelegate func() (*Proposal, error)
-type validateDelegate func(*Proposal) error
-type isStuckDelegate func(uint64) (uint64, bool)
-
-type mockBackend struct {
-	mock            *mockPbft
-	validators      *valString
-	buildProposalFn buildProposalDelegate
-	validateFn      validateDelegate
-	isStuckFn       isStuckDelegate
-}
-
-func (m *mockBackend) HookBuildProposalHandler(buildProposal buildProposalDelegate) *mockBackend {
-	m.buildProposalFn = buildProposal
-	return m
-}
-
-func (m *mockBackend) HookValidateHandler(validate validateDelegate) *mockBackend {
-	m.validateFn = validate
-	return m
-}
-
-func (m *mockBackend) HookIsStuckHandler(isStuck isStuckDelegate) *mockBackend {
-	m.isStuckFn = isStuck
-	return m
-}
-
-func (m *mockBackend) ValidateCommit(from NodeID, seal []byte) error {
-	return nil
-}
-
-func (m *mockBackend) Hash(p []byte) []byte {
-	h := sha1.New()
-	h.Write(p)
-	return h.Sum(nil)
-}
-
-func (m *mockBackend) BuildProposal() (*Proposal, error) {
-	if m.buildProposalFn != nil {
-		return m.buildProposalFn()
+	getSecondProposal := func() (*Proposal, error) {
+		return &Proposal{
+			Data: secondProposal,
+			Time: time.Now(),
+			Hash: hashProposalData(secondProposal),
+		}, nil
 	}
 
-	if m.mock.proposal == nil {
-		panic("add a proposal in the test")
+	// This is invoked at the commit state, where nodes from W should
+	// fail to validate a commit signature from Node 4 (byzantine), but Node 2 (v) should
+	// not error out, because Node 4 (byzantine) sent him a correctly formed commit message for the first proposal
+	invalidateProposal := func(proposal *SealedProposal) error {
+		if bytes.Equal(firstProposal, proposal.Proposal.Data) {
+			return errors.New("invalid commit signature size")
+		}
+
+		return nil
 	}
-	return m.mock.proposal, nil
-}
 
-func (m *mockBackend) Height() uint64 {
-	return m.mock.sequence
-}
+	// Create a cluster of numNodes, including 1 Byzantine node
+	cluster := newMockPBFTClusterWithBackends(
+		t,
+		nodePrefix,
+		numNodes,
+		map[int]backendConfigCallback{
+			// Node 0 is the proposer for the first proposal
+			0: func(backend *mockBackend) {
+				// Set the hook for building the first proposal for round 0
+				backend.HookBuildProposalHandler(getFirstProposal)
 
-func (m *mockBackend) Validate(proposal *Proposal) error {
-	if m.validateFn != nil {
-		return m.validateFn(proposal)
+				// Since Node 0 is part of Whonest, it should error out due to a
+				// malformed commit seal
+				backend.HookInsertHandler(invalidateProposal)
+			},
+
+			// Node 1 is the proposer for the second block.
+			// The assumption is that the second proposal is different from the first one
+			1: func(backend *mockBackend) {
+				// Set the hook for building the second proposal for round 1
+				backend.HookBuildProposalHandler(getSecondProposal)
+
+				// Since Node 1 is part of Whonest, it should error out due to a
+				// malformed commit seal
+				backend.HookInsertHandler(invalidateProposal)
+			},
+
+			3: func(backend *mockBackend) {
+				// Since Node 3 is part of Whonest, it should error out due to a
+				// malformed commit seal
+				backend.HookInsertHandler(invalidateProposal)
+			},
+
+			4: func(backend *mockBackend) {
+				// Node 4 is the byzantine node, it should follow along other nodes
+				// in Whonest into Round Change state after failing to insert a proposal
+				backend.HookInsertHandler(invalidateProposal)
+			},
+		},
+	)
+
+	// gossipHandler is a handler for gossip messages that simulates
+	// a network environment, where messages are broadcast to all nodes
+	gossipHandler := func(msg *MessageReq) error {
+		for _, node := range cluster.nodes {
+			node.PushMessage(msg)
+		}
+
+		return nil
 	}
-	return nil
-}
 
-func (m *mockBackend) IsStuck(num uint64) (uint64, bool) {
-	if m.isStuckFn != nil {
-		return m.isStuckFn(num)
+	for _, node := range cluster.nodes {
+		node.HookGossipHandler(gossipHandler)
 	}
-	return 0, false
-}
 
-func (m *mockBackend) Insert(pp *SealedProposal) error {
-	// TODO:
-	if pp.Proposer == "" {
-		return errVerificationFailed
-	}
-	return nil
-}
+	// v is Node 2
+	v := cluster.nodes[2]
 
-func (m *mockBackend) ValidatorSet() ValidatorSet {
-	return m.validators
-}
+	// W is the set of all nodes apart from v (including the byzantine node)
+	W := make([]*mockPbft, numNodes-1)
+	copy(W[:2], cluster.nodes[:2])
+	copy(W[2:], cluster.nodes[3:])
 
-func (m *mockBackend) Init() {
+	// Run accept state
+	cluster.runAcceptState()
+
+	// Check that all nodes are working with the data after running accept state
+	assert.NoError(
+		t,
+		verifyAllSameProposal(
+			cluster.nodes,
+			verifyProposalParams{
+				proposal: firstProposal,
+				proposer: cluster.nodes[0].validator.NodeID(),
+			},
+		),
+	)
+
+	// Everyone is working with the same state [Validate state]
+	assert.NoError(t, verifyAllInState(cluster.nodes, ValidateState))
+
+	// Run validate state
+	cluster.runValidateState()
+
+	// Everyone is working with the same state [Commit state]
+	assert.NoError(t, verifyAllInState(cluster.nodes, CommitState))
+
+	// Save the sequence v is working with
+	vSequence := v.state.view.Sequence
+
+	// Run the commit state
+	cluster.runCommitState()
+
+	// Nodes in Whonest (Node 0, 1, 3 and 4) should be in the round change state
+	// due to receiving a malformed commit signature from the byzantine node 4.
+	// We simulate this invalid commit signature by making sure the backend "checked it" and errored out
+	assert.NoError(t, verifyAllInState(W, RoundChangeState))
+
+	// Node 2, who received Quorum(n) valid Commit messages should be done with the cycle.
+	// When Node 2 is in the Done state, it means it successfully inserted the block
+	assert.NoError(t, verifyAllInState([]*mockPbft{v}, DoneState))
+
+	// Run the round change state, so nodes in W can start a new round
+	runRoundChangeState(W)
+
+	// Make sure all nodes in W are in round 1
+	assert.NoError(t, verifyAllInRound(W, 1))
+
+	// Make sure all nodes in W are in Accept State
+	assert.NoError(t, verifyAllInState(W, AcceptState))
+
+	// Run accept state
+	runAcceptState(W)
+
+	// Make sure all nodes in W are in Validate State
+	assert.NoError(t, verifyAllInState(W, ValidateState))
+
+	// Check that all nodes are working with the data after running accept state
+	assert.NoError(
+		t,
+		verifyAllSameProposal(
+			W,
+			verifyProposalParams{
+				proposal: secondProposal,
+				proposer: cluster.nodes[1].validator.NodeID(),
+			},
+		),
+	)
+
+	// Run validate state
+	runValidateState(W)
+
+	// Make sure all nodes in W are in Commit State
+	assert.NoError(t, verifyAllInState(W, CommitState))
+
+	// Make sure they are all on the same height / sequence (optional check)
+	assert.NoError(t, verifyAllAtSequence(W, 1))
+
+	// Save the sequence W is working on
+	wSequence := W[0].state.view.Sequence
+
+	// Run commit state
+	runCommitState(W)
+
+	// Make sure all nodes in W are in Done State
+	assert.NoError(t, verifyAllInState(W, DoneState))
+
+	// At this point, all nodes in W have inserted the second proposal, for the same sequence as v.
+	// v has inserted the first proposal, which means they have differing data for the same sequence
+	assert.Equal(t, vSequence, wSequence)
 }

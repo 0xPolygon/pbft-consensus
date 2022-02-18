@@ -221,14 +221,14 @@ func (c *currentState) getCommittedSeals() [][]byte {
 
 // getState returns the current state
 func (c *currentState) getState() PbftState {
-	stateAddr := (*uint64)(&c.state)
+	stateAddr := &c.state
 
 	return PbftState(atomic.LoadUint64(stateAddr))
 }
 
 // setState sets the current state
 func (c *currentState) setState(s PbftState) {
-	stateAddr := (*uint64)(&c.state)
+	stateAddr := &c.state
 
 	atomic.StoreUint64(stateAddr, uint64(s))
 }
@@ -325,7 +325,7 @@ func (c *currentState) addCommitted(msg *MessageReq) {
 
 // addMessage adds a new message to one of the following message lists: committed, prepared, roundMessages
 func (c *currentState) addMessage(msg *MessageReq) {
-	addr := NodeID(msg.From)
+	addr := msg.From
 	if !c.validators.Includes(addr) {
 		// only include messages from validators
 		return
