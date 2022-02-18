@@ -947,7 +947,7 @@ func (m *mockBackend) HookIsStuckHandler(isStuck isStuckDelegate) *mockBackend {
 	return m
 }
 
-func (m *mockBackend) ValidateCommit(seal []byte) error {
+func (m *mockBackend) ValidateCommit(from NodeID, seal []byte) error {
 	return nil
 }
 
