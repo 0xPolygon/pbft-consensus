@@ -1,67 +1,47 @@
 package e2e
 
 import (
-	"fmt"
 	"log"
 	"math/rand"
+	"sync"
 
 	"github.com/0xPolygon/pbft-consensus"
 )
 
-type Action interface {
-	Apply(c *Cluster)
-	Revert(c *Cluster)
+type RevertFunc func()
+
+type FunctionalAction interface {
+	CanApply(c *Cluster) bool
+	Apply(c *Cluster) RevertFunc
 }
 
 // Encapsulates logic for dropping nodes action.
 type DropNodeAction struct {
+	lock sync.Mutex
 }
 
-func (dn *DropNodeAction) Validate(c *Cluster) error {
+func (dn *DropNodeAction) CanApply(c *Cluster) bool {
 	runningNodes := len(c.GetRunningNodes())
 	if runningNodes <= 0 {
-		return fmt.Errorf("no nodes are currently running")
+		return false
 	}
 	maxFaultyNodes := pbft.MaxFaultyNodes(len(c.nodes))
 	remainingNodes := runningNodes - 1
-	if remainingNodes < maxFaultyNodes {
-		return fmt.Errorf("dropping a node would jeopardize Byzantine fault-tollerant conditions.\nExpected at least %d nodes to run, but action would leave it to %d",
-			maxFaultyNodes, remainingNodes)
-	}
-	return nil
-
+	return remainingNodes >= maxFaultyNodes
 }
 
-func (dn *DropNodeAction) Apply(c *Cluster) {
-	if err := dn.Validate(c); err != nil {
-		log.Printf("[WARNING] Skipping drop node action. Reason: '%s'", err)
-		return
-	}
-
-	maxFaultyNodes := pbft.MaxFaultyNodes(len(c.nodes))
+func (dn *DropNodeAction) Apply(c *Cluster) RevertFunc {
 	runningNodes := c.GetRunningNodes()
-	log.Printf("BEGIN Running nodes: %v", runningNodes)
-
-	// Stop a node with some probability
 	nodeToStop := runningNodes[rand.Intn(len(runningNodes))]
-	log.Printf("Dropping node '%s'.", nodeToStop)
+	log.Printf("Dropping node: '%s'.", nodeToStop)
+
+	dn.lock.Lock()
 	c.StopNode(nodeToStop.name)
+	dn.lock.Unlock()
 
-	// Keep number of running nodes above max faulty nodes count
-	stoppedNodes := c.GetStoppedNodes()
-	if len(stoppedNodes) > maxFaultyNodes {
-		// Randomly choose a node, from the set of stopped nodes to be started again
-		nodeToStart := stoppedNodes[rand.Intn(len(stoppedNodes))]
-		log.Printf("Starting node '%s'.", nodeToStart)
-		nodeToStart.Start()
-	}
-	log.Printf("END Running nodes: %v", c.GetRunningNodes())
-}
-
-// Revert reverts all nodes that are not running
-func (dn *DropNodeAction) Revert(c *Cluster) {
-	log.Println("Reverting dropped nodes")
-	for _, node := range c.GetStoppedNodes() {
-		node.Start()
+	return func() {
+		dn.lock.Lock()
+		defer dn.lock.Unlock()
+		nodeToStop.Start()
 	}
 }
