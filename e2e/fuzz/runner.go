@@ -11,15 +11,13 @@ import (
 )
 
 var (
-	revertThreshold        = 30
-	maxSleepBetweenActions = 10
+	revertProbabilityThreshold = 20
 )
 
 type Runner struct {
 	wg               sync.WaitGroup
 	cluster          *e2e.Cluster
-	availableActions []e2e.Action
-	// TODO: Add runningActions slice, which will be randomly & dynamically generated and will contain sequence of actions being executed?
+	availableActions []e2e.FunctionalAction
 }
 
 func NewRunner(initialNodesCount uint) *Runner {
@@ -35,7 +33,17 @@ func (r *Runner) Run(d time.Duration) error {
 	// TODO: we need to stop the cluster, what about tracer inside cluster stop?
 	// defer r.cluster.Stop()
 	done := time.After(d)
-	actionsApplied := make([]int, 0)
+
+	// TODO: Randomize time interval?
+	applyTicker := time.NewTicker(5 * time.Second)
+	revertTicker := time.NewTicker(3 * time.Second)
+	validationTicker := time.NewTicker(10 * time.Second)
+	defer applyTicker.Stop()
+	defer revertTicker.Stop()
+	defer validationTicker.Stop()
+
+	var reverts []e2e.RevertFunc
+
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
@@ -44,25 +52,32 @@ func (r *Runner) Run(d time.Duration) error {
 			case <-done:
 				log.Println("Done with execution")
 				return
-			default:
-				pick := rand.Intn(len(r.availableActions))
-				r.availableActions[pick].Apply(r.cluster)
-				actionsApplied = append(actionsApplied, pick)
-				wait := time.Duration(rand.Intn(maxSleepBetweenActions)) * time.Second
-				time.Sleep(wait)
 
-				// keep all un reverted actions
-				var notRevertedAction []int
-				for _, aIdx := range actionsApplied {
-					if shouldRevert() {
-						r.availableActions[aIdx].Revert(r.cluster)
-					} else {
-						notRevertedAction = append(notRevertedAction, aIdx)
-					}
+			case <-applyTicker.C:
+				log.Printf("[RUNNER] Applying action.")
+				actionIndex := rand.Intn(len(r.availableActions))
+				action := r.availableActions[actionIndex]
+				if action.CanApply(r.cluster) {
+					revertFn := action.Apply(r.cluster)
+					reverts = append(reverts, revertFn)
 				}
-				actionsApplied = notRevertedAction
+
+			case <-revertTicker.C:
+				log.Printf("[RUNNER] Reverting action. %d revert actions available", len(reverts))
+				if len(reverts) == 0 {
+					continue
+				}
+
+				if shouldRevert() {
+					revertIndex := rand.Intn(len(reverts))
+					revertFn := reverts[revertIndex]
+					reverts = append(reverts[:revertIndex], reverts[revertIndex+1:]...)
+					revertFn()
+				}
+
+			case <-validationTicker.C:
+				log.Printf("[RUNNER] Validating nodes")
 				validateNodes(r.cluster)
-				// TODO: Invoke revert of actions which are probabilistically determined to be reverted.
 			}
 		}
 	}()
@@ -104,12 +119,12 @@ func validateCluster(c *e2e.Cluster) ([]string, bool) {
 // shouldRevert is used to randomly chose if particular action should be reverted base on the threshold
 func shouldRevert() bool {
 	revertProbability := rand.Intn(100) + 1
-	return revertProbability >= revertThreshold
+	return revertProbability >= revertProbabilityThreshold
 }
 
-func getAvailableActions() []e2e.Action {
+func getAvailableActions() []e2e.FunctionalAction {
 	// TODO: add more actions here once implemented...
-	return []e2e.Action{
+	return []e2e.FunctionalAction{
 		&e2e.DropNodeAction{},
 	}
 }
