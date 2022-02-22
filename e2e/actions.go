@@ -3,7 +3,6 @@ package e2e
 import (
 	"log"
 	"math/rand"
-	"sync"
 
 	"github.com/0xPolygon/pbft-consensus"
 )
@@ -17,7 +16,6 @@ type FunctionalAction interface {
 
 // Encapsulates logic for dropping nodes action.
 type DropNodeAction struct {
-	lock sync.Mutex
 }
 
 func (dn *DropNodeAction) CanApply(c *Cluster) bool {
@@ -35,13 +33,9 @@ func (dn *DropNodeAction) Apply(c *Cluster) RevertFunc {
 	nodeToStop := runningNodes[rand.Intn(len(runningNodes))]
 	log.Printf("Dropping node: '%s'.", nodeToStop)
 
-	dn.lock.Lock()
 	c.StopNode(nodeToStop.name)
-	dn.lock.Unlock()
 
 	return func() {
-		dn.lock.Lock()
-		defer dn.lock.Unlock()
 		nodeToStop.Start()
 	}
 }
