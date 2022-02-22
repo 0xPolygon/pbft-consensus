@@ -3,6 +3,7 @@ package e2e
 import (
 	"log"
 	"math/rand"
+	"time"
 
 	"github.com/0xPolygon/pbft-consensus"
 )
@@ -14,7 +15,7 @@ type FunctionalAction interface {
 	Apply(c *Cluster) RevertFunc
 }
 
-// Encapsulates logic for dropping nodes action.
+// DropNodeAction encapsulates logic for dropping nodes action.
 type DropNodeAction struct {
 }
 
@@ -37,5 +38,41 @@ func (dn *DropNodeAction) Apply(c *Cluster) RevertFunc {
 
 	return func() {
 		nodeToStop.Start()
+	}
+}
+
+type PartitionAction struct {
+}
+
+func (action *PartitionAction) CanApply(c *Cluster) bool {
+	return true
+}
+
+func (action *PartitionAction) Apply(c *Cluster) RevertFunc {
+	hook := newPartitionTransport(500 * time.Millisecond)
+	// create 2 partition with random number of nodes
+	// minority with no more than max faulty nodes and majority with the rest of the nodes
+	maxFaultyNodes := pbft.MaxFaultyNodes(len(c.nodes))
+
+	var minorityPartition []string
+	var majorityPartition []string
+	minorityPartitionSize := rand.Intn(maxFaultyNodes + 1)
+	i := 0
+	for n := range c.nodes {
+		if i < minorityPartitionSize {
+			minorityPartition = append(minorityPartition, n)
+			i++
+		} else {
+			majorityPartition = append(majorityPartition, n)
+		}
+	}
+	log.Printf("Partitions ratio %d/%d, [%v], [%v]\n", len(majorityPartition), len(minorityPartition), majorityPartition, minorityPartition)
+	hook.Partition(minorityPartition, majorityPartition)
+
+	c.hook = hook
+
+	return func() {
+		log.Println("Reverting partitions.")
+		c.hook.Reset()
 	}
 }

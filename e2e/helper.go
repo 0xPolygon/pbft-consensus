@@ -47,6 +47,16 @@ func executeInTimer(tickTime time.Duration, duration time.Duration, fn func(time
 	return end
 }
 
+func Contains(nodes []string, node string) bool {
+	for _, n := range nodes {
+		if n == node {
+			return true
+		}
+	}
+
+	return false
+}
+
 func isFuzzEnabled(t *testing.T) {
 	if os.Getenv("FUZZ") != "true" {
 		t.Skip("Fuzz tests are disabled.")

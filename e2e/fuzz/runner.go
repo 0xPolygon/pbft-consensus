@@ -91,8 +91,12 @@ func validateNodes(c *e2e.Cluster) {
 		currentHeight := c.GetMaxHeight(runningNodes)
 		expectedHeight := currentHeight + 10
 		log.Printf("Current height %v and waiting expected %v height.\n", currentHeight, expectedHeight)
-		err := c.WaitForHeight(expectedHeight, 1*time.Minute, runningNodes)
+		err := c.WaitForHeight(expectedHeight, 3*time.Minute, runningNodes)
 		if err != nil {
+			transportHook := c.GetTransportHook()
+			if transportHook != nil {
+				log.Printf("Cluster partitions: %v\n", transportHook.GetPartitions())
+			}
 			for _, n := range c.Nodes() {
 				log.Printf("Node: %v, running: %v\n", n.GetName(), n.IsRunning())
 			}
@@ -104,15 +108,38 @@ func validateNodes(c *e2e.Cluster) {
 	}
 }
 
-// validateCluster checks wheter there is enough running nodes that can make consensus
+// validateCluster checks if there is enough running nodes that can make consensus
 func validateCluster(c *e2e.Cluster) ([]string, bool) {
-	totalNodesCount := 0
+	totalNodesCount := len(c.Nodes())
 	var runningNodes []string
-	for _, n := range c.Nodes() {
-		if n.IsRunning() {
+	var partitions map[string][]string
+	// running nodes in majority partition
+	hook := c.GetTransportHook()
+	if hook != nil {
+		partitions = hook.GetPartitions()
+	}
+
+	var majorityPartition []string
+	if len(partitions) == 0 {
+		// there are no partitions
+		for _, n := range c.GetRunningNodes() {
+			majorityPartition = append(majorityPartition, n.GetName())
+		}
+	} else {
+		// get partition with the majority of nodes
+		// all subsets are the same
+		for _, p := range partitions {
+			if len(p) > len(majorityPartition) {
+				majorityPartition = p
+			}
+		}
+	}
+
+	// loop through running nodes and check if they are in majority partition
+	for _, n := range c.GetRunningNodes() {
+		if e2e.Contains(majorityPartition, n.GetName()) {
 			runningNodes = append(runningNodes, n.GetName())
 		}
-		totalNodesCount++
 	}
 	stoppedNodesCount := totalNodesCount - len(runningNodes)
 	return runningNodes, stoppedNodesCount <= pbft.MaxFaultyNodes(totalNodesCount)
@@ -120,13 +147,13 @@ func validateCluster(c *e2e.Cluster) ([]string, bool) {
 
 // shouldRevert is used to randomly chose if particular action should be reverted base on the threshold
 func shouldRevert() bool {
-	revertProbability := rand.Intn(100) + 1
+	revertProbability := rand.Intn(101)
 	return revertProbability >= revertProbabilityThreshold
 }
 
 func getAvailableActions() []e2e.FunctionalAction {
-	// TODO: add more actions here once implemented...
 	return []e2e.FunctionalAction{
 		&e2e.DropNodeAction{},
+		&e2e.PartitionAction{},
 	}
 }
