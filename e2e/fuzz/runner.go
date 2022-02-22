@@ -30,14 +30,13 @@ func NewRunner(initialNodesCount uint) *Runner {
 
 func (r *Runner) Run(d time.Duration) error {
 	r.cluster.Start()
-	// TODO: we need to stop the cluster, what about tracer inside cluster stop?
-	// defer r.cluster.Stop()
+	defer r.cluster.Stop()
 	done := time.After(d)
 
 	// TODO: Randomize time interval?
 	applyTicker := time.NewTicker(5 * time.Second)
 	revertTicker := time.NewTicker(3 * time.Second)
-	validationTicker := time.NewTicker(10 * time.Second)
+	validationTicker := time.NewTicker(1 * time.Minute)
 	defer applyTicker.Stop()
 	defer revertTicker.Stop()
 	defer validationTicker.Stop()
@@ -92,7 +91,7 @@ func validateNodes(c *e2e.Cluster) {
 		currentHeight := c.GetMaxHeight(runningNodes)
 		expectedHeight := currentHeight + 10
 		log.Printf("Current height %v and waiting expected %v height.\n", currentHeight, expectedHeight)
-		err := c.WaitForHeight(expectedHeight, 5*time.Minute, runningNodes)
+		err := c.WaitForHeight(expectedHeight, 1*time.Minute, runningNodes)
 		if err != nil {
 			panic("Desired height not reached.")
 		}

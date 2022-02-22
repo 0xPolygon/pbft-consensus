@@ -310,7 +310,9 @@ func (c *Cluster) StopNode(name string) {
 
 func (c *Cluster) Stop() {
 	for _, n := range c.nodes {
-		n.Stop()
+		if n.IsRunning() {
+			n.Stop()
+		}
 	}
 	if err := c.tracer.Shutdown(context.Background()); err != nil {
 		panic("failed to shutdown TracerProvider")
