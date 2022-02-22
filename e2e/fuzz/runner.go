@@ -93,6 +93,9 @@ func validateNodes(c *e2e.Cluster) {
 		log.Printf("Current height %v and waiting expected %v height.\n", currentHeight, expectedHeight)
 		err := c.WaitForHeight(expectedHeight, 1*time.Minute, runningNodes)
 		if err != nil {
+			for _, n := range c.Nodes() {
+				log.Printf("Node: %v, running: %v\n", n.GetName(), n.IsRunning())
+			}
 			panic("Desired height not reached.")
 		}
 		log.Println("Cluster validation done.")
