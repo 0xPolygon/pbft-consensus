@@ -265,6 +265,10 @@ func (c *Cluster) FailNode(name string) {
 	c.nodes[name].setFaultyNode(true)
 }
 
+func (c *Cluster) GetTransportHook() transportHook {
+	return c.hook
+}
+
 type node struct {
 	lock sync.Mutex
 
