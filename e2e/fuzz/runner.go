@@ -67,7 +67,7 @@ func (r *Runner) Run(d time.Duration) error {
 					continue
 				}
 
-				if shouldRevert() {
+				if e2e.ShouldApply(revertProbabilityThreshold) {
 					revertIndex := rand.Intn(len(reverts))
 					revertFn := reverts[revertIndex]
 					reverts = append(reverts[:revertIndex], reverts[revertIndex+1:]...)
@@ -143,12 +143,6 @@ func validateCluster(c *e2e.Cluster) ([]string, bool) {
 	}
 	stoppedNodesCount := totalNodesCount - len(runningNodes)
 	return runningNodes, stoppedNodesCount <= pbft.MaxFaultyNodes(totalNodesCount)
-}
-
-// shouldRevert is used to randomly chose if particular action should be reverted base on the threshold
-func shouldRevert() bool {
-	revertProbability := rand.Intn(101)
-	return revertProbability >= revertProbabilityThreshold
 }
 
 func getAvailableActions() []e2e.FunctionalAction {
