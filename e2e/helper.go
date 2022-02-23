@@ -58,6 +58,12 @@ func Contains(nodes []string, node string) bool {
 	return false
 }
 
+// ShouldApply is used to check if random event meets the threshold
+func ShouldApply(threshold int) bool {
+	r := rand.Intn(101)
+	return r >= threshold
+}
+
 func isFuzzEnabled(t *testing.T) {
 	if os.Getenv("FUZZ") != "true" {
 		t.Skip("Fuzz tests are disabled.")
