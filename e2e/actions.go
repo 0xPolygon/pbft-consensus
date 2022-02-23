@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"fmt"
 	"log"
 	"math/rand"
 	"sync"
@@ -81,4 +82,62 @@ func (action *PartitionAction) Apply(c *Cluster) RevertFunc {
 		log.Println("Reverting partitions.")
 		c.hook.Reset()
 	}
+}
+
+type FlowMapAction struct {
+	// todo can be used map[string][]string or
+	//  some better structure like https://pkg.go.dev/github.com/yourbasic/graph
+
+}
+
+// every node must be connected with n = 3f+1 => (n-1)/3
+
+func (f *FlowMapAction) Apply(c *Cluster) RevertFunc {
+	// for each node in the cluster add >= (n-1)/3 other connected nodes
+	// TODO this can be inside transport layer instead of the action
+	flowMap := make(map[string][]string)
+	for _, n := range c.nodes {
+		if _, ok := flowMap[n.GetName()]; !ok {
+			flowMap[n.GetName()] = []string{}
+		}
+		finish := false
+		for _, j := range c.nodes {
+			if len(flowMap[n.GetName()]) <= pbft.QuorumSize(len(c.nodes)) && finish == false { // todo check conditions and restructure
+				flowMap[n.GetName()] = append(flowMap[n.GetName()], j.GetName())
+				quorum := 0
+				for i, _ := range flowMap {
+					if len(flowMap[i]) >= pbft.QuorumSize(len(c.nodes)) {
+						quorum++
+					}
+					if quorum >= pbft.QuorumSize(len(c.nodes)) {
+						// we have enough nodes connected
+						if ShouldApply(80) {
+							continue
+						} else {
+							finish = true
+						}
+					}
+				}
+
+			} else {
+				// probabilistic add more nodes to the flow map
+				if ShouldApply(80) {
+					flowMap[n.GetName()] = append(flowMap[n.GetName()], j.GetName())
+				}
+			}
+		}
+	}
+	hook := newFlowMapTransport()
+	hook.flow(flowMap)
+
+	fmt.Printf("Flow map: %v\n", flowMap)
+
+	return func() {
+		log.Println("Reverting flow map.")
+		hook.Reset()
+	}
+}
+
+func (f *FlowMapAction) CanApply(c *Cluster) bool {
+	return true
 }

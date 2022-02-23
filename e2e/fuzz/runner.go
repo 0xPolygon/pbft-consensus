@@ -119,6 +119,7 @@ func validateCluster(c *e2e.Cluster) ([]string, bool) {
 		partitions = hook.GetPartitions()
 	}
 
+	// todo there can be disconnected nodes inside a partition
 	var majorityPartition []string
 	if len(partitions) == 0 {
 		// there are no partitions
@@ -135,6 +136,9 @@ func validateCluster(c *e2e.Cluster) ([]string, bool) {
 		}
 	}
 
+	// TODO there should be quorum of nodes that have >= (n-1)/3 connections of running nodes
+	// TODO filter nodes and then count of connections ???
+
 	// loop through running nodes and check if they are in majority partition
 	for _, n := range c.GetRunningNodes() {
 		if e2e.Contains(majorityPartition, n.GetName()) {
@@ -147,7 +151,8 @@ func validateCluster(c *e2e.Cluster) ([]string, bool) {
 
 func getAvailableActions() []e2e.FunctionalAction {
 	return []e2e.FunctionalAction{
-		&e2e.DropNodeAction{},
-		&e2e.PartitionAction{},
+		// &e2e.DropNodeAction{},
+		// &e2e.PartitionAction{},
+		&e2e.FlowMapAction{},
 	}
 }
