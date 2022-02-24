@@ -327,6 +327,14 @@ func (c *Cluster) Stop() {
 	}
 }
 
+func (c *Cluster) FailNode(name string) {
+	c.nodes[name].setFaultyNode(true)
+}
+
+func (c *Cluster) GetTransportHook() transportHook {
+	return c.hook
+}
+
 type node struct {
 	// index of node synchronization with the cluster
 	localSyncIndex int64
