@@ -44,6 +44,8 @@ func (t *transport) Gossip(msg *pbft.MessageReq) error {
 type transportHook interface {
 	Connects(from, to pbft.NodeID) bool
 	Gossip(from, to pbft.NodeID, msg *pbft.MessageReq) bool
+	Reset()
+	GetPartitions() map[string][]string
 }
 
 // latency transport
@@ -66,6 +68,13 @@ func (r *randomTransport) Gossip(from, to pbft.NodeID, msg *pbft.MessageReq) boo
 		time.Sleep(tt)
 	}
 	return true
+}
+func (r *randomTransport) Reset() {
+	// no impl
+}
+
+func (r *randomTransport) GetPartitions() map[string][]string {
+	return nil
 }
 
 type partitionTransport struct {
@@ -107,6 +116,10 @@ func (p *partitionTransport) Reset() {
 	defer p.lock.Unlock()
 
 	p.subsets = map[string][]string{}
+}
+
+func (p *partitionTransport) GetPartitions() map[string][]string {
+	return p.subsets
 }
 
 func (p *partitionTransport) addSubset(from string, to []string) {
