@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"math/rand"
 	"os"
 	"strconv"
 	"testing"
@@ -45,6 +46,22 @@ func executeInTimer(tickTime time.Duration, duration time.Duration, fn func(time
 		close(tickerDone)
 	}()
 	return end
+}
+
+func Contains(nodes []string, node string) bool {
+	for _, n := range nodes {
+		if n == node {
+			return true
+		}
+	}
+
+	return false
+}
+
+// ShouldApply is used to check if random event meets the threshold
+func ShouldApply(threshold int) bool {
+	r := rand.Intn(101)
+	return r >= threshold
 }
 
 func isFuzzEnabled(t *testing.T) {
