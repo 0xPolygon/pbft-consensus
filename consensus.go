@@ -196,7 +196,7 @@ func (p *Pbft) SetBackend(backend Backend) error {
 	return nil
 }
 
-// start starts the PBFT consensus state machine
+// Run start starts the PBFT consensus state machine
 func (p *Pbft) Run(ctx context.Context) {
 	p.ctx = ctx
 
@@ -673,6 +673,14 @@ func (p *Pbft) gossip(msgType MsgType) {
 	if err := p.transport.Gossip(msg); err != nil {
 		p.logger.Printf("[ERROR] failed to gossip. Error message: %v", err)
 	}
+}
+
+func (p *Pbft) GetProposal() *Proposal {
+	return p.state.proposal
+}
+
+func (p *Pbft) IsLocked() bool {
+	return p.state.locked
 }
 
 func (p *Pbft) GetState() PbftState {

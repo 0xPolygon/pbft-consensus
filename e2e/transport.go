@@ -99,6 +99,19 @@ func (f *flowMapTransport) isConnected(from, to pbft.NodeID) bool {
 		return false
 	}
 }
+
+func (f *flowMapTransport) Gossip(from, to pbft.NodeID, msg *pbft.MessageReq) bool {
+	f.lock.Lock()
+	isConnected := f.isConnected(from, to)
+	f.lock.Unlock()
+
+	if !isConnected {
+		return false
+	}
+
+	return true
+}
+
 func (f *flowMapTransport) Connects(from, to pbft.NodeID) bool {
 	f.lock.Lock()
 	defer f.lock.Unlock()
@@ -117,7 +130,7 @@ func (f *flowMapTransport) GetPartitions() map[string][]string {
 	return f.flowMap
 }
 
-func (f *flowMapTransport) flow(flowMap map[string][]string) {
+func (f *flowMapTransport) SetFlowMap(flowMap map[string][]string) {
 	f.flowMap = flowMap
 }
 
