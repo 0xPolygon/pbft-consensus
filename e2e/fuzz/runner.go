@@ -98,7 +98,7 @@ func validateNodes(c *e2e.Cluster) {
 				log.Printf("Cluster partitions: %v\n", transportHook.GetPartitions())
 			}
 			for _, n := range c.Nodes() {
-				log.Printf("Node: %v, running: %v\n", n.GetName(), n.IsRunning())
+				log.Printf("Node: %v, running: %v, locked: %v, proposal: %v\n", n.GetName(), n.IsRunning(), n.IsLocked(), n.GetProposal())
 			}
 			panic("Desired height not reached.")
 		}
@@ -118,41 +118,42 @@ func validateCluster(c *e2e.Cluster) ([]string, bool) {
 	if hook != nil {
 		partitions = hook.GetPartitions()
 	}
-
-	// todo there can be disconnected nodes inside a partition
-	var majorityPartition []string
+	// no partitions, so all running nodes are in the consensus
 	if len(partitions) == 0 {
-		// there are no partitions
 		for _, n := range c.GetRunningNodes() {
-			majorityPartition = append(majorityPartition, n.GetName())
+			runningNodes = append(runningNodes, n.GetName())
 		}
-	} else {
-		// get partition with the majority of nodes
-		// all subsets are the same
-		for _, p := range partitions {
-			if len(p) > len(majorityPartition) {
-				majorityPartition = p
+
+		return runningNodes, true
+	}
+
+	// check if there is enough messages coming to particular node
+	nodeConnections := make(map[string]int)
+	nodesMap := c.GetClusterNodes()
+	for node := range partitions {
+		nodes := partitions[node]
+		// count only connected running nodes
+		for _, n := range nodes {
+			if nodesMap[n].IsRunning() {
+				nodeConnections[n]++
 			}
 		}
 	}
-
-	// TODO there should be quorum of nodes that have >= (n-1)/3 connections of running nodes
-	// TODO filter nodes and then count of connections ???
-
-	// loop through running nodes and check if they are in majority partition
-	for _, n := range c.GetRunningNodes() {
-		if e2e.Contains(majorityPartition, n.GetName()) {
-			runningNodes = append(runningNodes, n.GetName())
+	// check whether there is enough connected nodes
+	for k, v := range nodeConnections {
+		if v >= c.MinValidNodes() {
+			runningNodes = append(runningNodes, k)
 		}
 	}
+
 	stoppedNodesCount := totalNodesCount - len(runningNodes)
 	return runningNodes, stoppedNodesCount <= pbft.MaxFaultyNodes(totalNodesCount)
 }
 
 func getAvailableActions() []e2e.FunctionalAction {
 	return []e2e.FunctionalAction{
-		// &e2e.DropNodeAction{},
-		// &e2e.PartitionAction{},
+		&e2e.DropNodeAction{},
+		&e2e.PartitionAction{},
 		&e2e.FlowMapAction{},
 	}
 }

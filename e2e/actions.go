@@ -1,7 +1,6 @@
 package e2e
 
 import (
-	"fmt"
 	"log"
 	"math/rand"
 	"sync"
@@ -51,7 +50,7 @@ func (dn *DropNodeAction) Apply(c *Cluster) RevertFunc {
 type PartitionAction struct {
 }
 
-func (action *PartitionAction) CanApply(c *Cluster) bool {
+func (action *PartitionAction) CanApply(_ *Cluster) bool {
 	return true
 }
 
@@ -84,53 +83,52 @@ func (action *PartitionAction) Apply(c *Cluster) RevertFunc {
 	}
 }
 
+var flowMapThreshold = 50
+
 type FlowMapAction struct {
-	// todo can be used map[string][]string or
-	//  some better structure like https://pkg.go.dev/github.com/yourbasic/graph
-
 }
-
-// every node must be connected with n = 3f+1 => (n-1)/3
 
 func (f *FlowMapAction) Apply(c *Cluster) RevertFunc {
 	// for each node in the cluster add >= (n-1)/3 other connected nodes
-	// TODO this can be inside transport layer instead of the action
 	flowMap := make(map[string][]string)
 	for _, n := range c.nodes {
 		if _, ok := flowMap[n.GetName()]; !ok {
 			flowMap[n.GetName()] = []string{}
 		}
-		finish := false
+		done := false
+		// generate map for every node in the cluster
 		for _, j := range c.nodes {
-			if len(flowMap[n.GetName()]) <= pbft.QuorumSize(len(c.nodes)) && finish == false { // todo check conditions and restructure
+			if len(flowMap[n.GetName()]) <= c.MinValidNodes() && done == false {
 				flowMap[n.GetName()] = append(flowMap[n.GetName()], j.GetName())
 				quorum := 0
-				for i, _ := range flowMap {
-					if len(flowMap[i]) >= pbft.QuorumSize(len(c.nodes)) {
+				for i := range flowMap {
+					if len(flowMap[i]) >= c.MinValidNodes() {
 						quorum++
 					}
-					if quorum >= pbft.QuorumSize(len(c.nodes)) {
-						// we have enough nodes connected
-						if ShouldApply(80) {
+					if quorum >= c.MinValidNodes() {
+						// we have enough for consensus but with probability add mode connected nodes
+						if ShouldApply(flowMapThreshold) {
 							continue
 						} else {
-							finish = true
+							done = true
 						}
 					}
 				}
 
 			} else {
 				// probabilistic add more nodes to the flow map
-				if ShouldApply(80) {
+				if ShouldApply(flowMapThreshold) {
 					flowMap[n.GetName()] = append(flowMap[n.GetName()], j.GetName())
 				}
 			}
 		}
 	}
-	hook := newFlowMapTransport()
-	hook.flow(flowMap)
 
-	fmt.Printf("Flow map: %v\n", flowMap)
+	hook := newFlowMapTransport()
+	hook.SetFlowMap(flowMap)
+	c.hook = hook
+
+	log.Printf("Generated flow map: %v\n", flowMap)
 
 	return func() {
 		log.Println("Reverting flow map.")
@@ -138,6 +136,6 @@ func (f *FlowMapAction) Apply(c *Cluster) RevertFunc {
 	}
 }
 
-func (f *FlowMapAction) CanApply(c *Cluster) bool {
+func (f *FlowMapAction) CanApply(_ *Cluster) bool {
 	return true
 }

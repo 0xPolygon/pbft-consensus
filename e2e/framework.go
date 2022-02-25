@@ -205,6 +205,10 @@ func (c *Cluster) WaitForHeight(num uint64, timeout time.Duration, nodes ...[]st
 	}
 }
 
+func (c *Cluster) GetClusterNodes() map[string]*node {
+	return c.nodes
+}
+
 func (c *Cluster) Nodes() []*node {
 	list := make([]*node, len(c.nodes))
 	i := 0
@@ -259,6 +263,11 @@ func (c *Cluster) Stop() {
 	if err := c.tracer.Shutdown(context.Background()); err != nil {
 		panic("failed to shutdown TracerProvider")
 	}
+}
+
+// MinValidNodes returns minimum valid nodes in order to have consensus
+func (c *Cluster) MinValidNodes() int {
+	return len(c.nodes) - pbft.MaxFaultyNodes(len(c.nodes))
 }
 
 func (c *Cluster) FailNode(name string) {
@@ -413,6 +422,14 @@ func (n *node) Start() {
 			}
 		}
 	}()
+}
+
+func (n *node) GetProposal() *pbft.Proposal {
+	return n.pbft.GetProposal()
+}
+
+func (n *node) IsLocked() bool {
+	return n.pbft.IsLocked()
 }
 
 func (n *node) IsRunning() bool {
