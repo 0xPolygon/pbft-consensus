@@ -102,14 +102,8 @@ func (f *flowMapTransport) isConnected(from, to pbft.NodeID) bool {
 
 func (f *flowMapTransport) Gossip(from, to pbft.NodeID, msg *pbft.MessageReq) bool {
 	f.lock.Lock()
-	isConnected := f.isConnected(from, to)
-	f.lock.Unlock()
-
-	if !isConnected {
-		return false
-	}
-
-	return true
+	defer f.lock.Unlock()
+	return f.isConnected(from, to)
 }
 
 func (f *flowMapTransport) Connects(from, to pbft.NodeID) bool {

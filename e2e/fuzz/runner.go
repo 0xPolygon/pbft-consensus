@@ -33,7 +33,6 @@ func (r *Runner) Run(d time.Duration) error {
 	defer r.cluster.Stop()
 	done := time.After(d)
 
-	// TODO: Randomize time interval?
 	applyTicker := time.NewTicker(5 * time.Second)
 	revertTicker := time.NewTicker(3 * time.Second)
 	validationTicker := time.NewTicker(1 * time.Minute)

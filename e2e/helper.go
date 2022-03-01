@@ -69,9 +69,3 @@ func isFuzzEnabled(t *testing.T) {
 		t.Skip("Fuzz tests are disabled.")
 	}
 }
-
-// ShouldApply is used to check if random event meets the threshold
-func ShouldApply(threshold int) bool {
-	r := rand.Intn(101)
-	return r >= threshold
-}
