@@ -1,7 +1,9 @@
 package fuzz
 
 import (
+	"fmt"
 	"log"
+	"math"
 	"math/rand"
 	"sync"
 	"time"
@@ -10,8 +12,11 @@ import (
 	"github.com/0xPolygon/pbft-consensus/e2e"
 )
 
-var (
+const (
 	revertProbabilityThreshold = 20
+	applyTimeInterval          = 5 * time.Second
+	revertTimeInterval         = 3 * time.Second
+	validationTimeInterval     = 1 * time.Minute
 )
 
 type Runner struct {
@@ -28,14 +33,20 @@ func NewRunner(initialNodesCount uint) *Runner {
 	}
 }
 
-func (r *Runner) Run(d time.Duration) error {
+func (r *Runner) Run(totalDuration time.Duration) error {
+	err := validateDuration(totalDuration)
+	if err != nil {
+		return err
+	}
+
 	r.cluster.Start()
 	defer r.cluster.Stop()
-	done := time.After(d)
 
-	applyTicker := time.NewTicker(5 * time.Second)
-	revertTicker := time.NewTicker(3 * time.Second)
-	validationTicker := time.NewTicker(1 * time.Minute)
+	done := time.After(totalDuration)
+
+	applyTicker := time.NewTicker(applyTimeInterval)
+	revertTicker := time.NewTicker(revertTimeInterval)
+	validationTicker := time.NewTicker(validationTimeInterval)
 	defer applyTicker.Stop()
 	defer revertTicker.Stop()
 	defer validationTicker.Stop()
@@ -81,6 +92,17 @@ func (r *Runner) Run(d time.Duration) error {
 	}()
 
 	r.wg.Wait()
+	return nil
+}
+
+// validateDuration is a sanity check validation which assures that total duration value is larger than all of the predefined time intervals within the runner.
+func validateDuration(totalDuration time.Duration) error {
+	largestIntervalInMillis := math.Max(float64(applyTimeInterval.Milliseconds()), float64(revertTimeInterval.Milliseconds()))
+	largestIntervalInMillis = math.Max(largestIntervalInMillis, float64(validationTimeInterval.Milliseconds()))
+	if float64(totalDuration.Milliseconds()) < largestIntervalInMillis {
+		largestIntervalInSeconds := largestIntervalInMillis / 1000
+		return fmt.Errorf("total duration is less than predefined time interval %vs. Set -duration to at least %vs", largestIntervalInSeconds, largestIntervalInSeconds)
+	}
 	return nil
 }
 

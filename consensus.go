@@ -196,7 +196,7 @@ func (p *Pbft) SetBackend(backend Backend) error {
 	return nil
 }
 
-// Run start starts the PBFT consensus state machine
+// Run starts the PBFT consensus state machine
 func (p *Pbft) Run(ctx context.Context) {
 	p.ctx = ctx
 

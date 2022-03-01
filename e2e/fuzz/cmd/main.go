@@ -21,7 +21,7 @@ func main() {
 	runner := fuzz.NewRunner(*initialNodesCount)
 	err := runner.Run(*duration)
 	if err != nil {
-		log.Printf("Error while running PolyBFT fuzz runner: %s\n", err)
+		log.Printf("Error while running PolyBFT fuzz runner: '%s'\n", err)
 	} else {
 		log.Println("PolyBFT fuzz runner is stopped.")
 	}
