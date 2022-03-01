@@ -1,7 +1,6 @@
 package e2e
 
 import (
-	"fmt"
 	"math"
 	"strconv"
 	"testing"
@@ -12,11 +11,7 @@ import (
 )
 
 // Test proves existence of liveness issues which is described in
-<<<<<<< HEAD
 // Correctness Analysis of Istanbul Byzantine Fault Tolerance (https://arxiv.org/pdf/1901.07160.pdf).
-=======
-// Correctness Analysis of Istanbul Byzantine Fault Tolerance(https://arxiv.org/pdf/1901.07160.pdf).
->>>>>>> 8fce256... Implement integration test that has issue with locking different proposals in 2 different rounds.
 // Specific problem this test is emulating is described in Chapter 7.1, Case 1.
 // Summary of the problem is that there are not enough nodes to lock on single proposal,
 // due to some issues where nodes being unable to deliver messages to all of the peers.
@@ -25,34 +20,21 @@ import (
 // This test creates a single cluster of 5 nodes, but instead of letting all the peers communicate with each other,
 // it routes messages only to specific nodes and induces that nodes lock on different proposal.
 // In the round=1, it marks one node as faulty (meaning that it doesn't takes part in gossiping).
-func TestE2E_Partition_Liveness(t *testing.T) {
+func TestE2E_Partition_LivenessIssue_Case1_FiveNodes_OneFaulty(t *testing.T) {
 	const nodesCnt = 5
 	round0 := roundMetadata{
 		round: 0,
-<<<<<<< HEAD
 		// induce locking A_3 and A_4 on one proposal
 		routingMap: map[sender]receivers{
-=======
-		// lock A_3 and A_4 on one proposal
-		routingMap: map[pbft.NodeID][]pbft.NodeID{
->>>>>>> 8fce256... Implement integration test that has issue with locking different proposals in 2 different rounds.
 			"A_0": {"A_3", "A_4"},
 			"A_3": {"A_0", "A_3", "A_4"},
 			"A_4": {"A_3", "A_4"},
 		},
 	}
-<<<<<<< HEAD
 	round1 := roundMetadata{
 		round: 1,
 		// induce locking lock A_0 and A_2 on another proposal
 		routingMap: map[sender]receivers{
-=======
-
-	round1 := roundMetadata{
-		round: 1,
-		// lock A_2 and A_0 on one proposal and A_1 will be faulty
-		routingMap: map[pbft.NodeID][]pbft.NodeID{
->>>>>>> 8fce256... Implement integration test that has issue with locking different proposals in 2 different rounds.
 			"A_0": {"A_0", "A_2", "A_3", "A_4"},
 			"A_1": {"A_0", "A_2", "A_3", "A_4"},
 			"A_2": {"A_0", "A_1", "A_2", "A_3", "A_4"},
@@ -84,46 +66,12 @@ func TestE2E_Partition_Liveness(t *testing.T) {
 			}
 		}
 
-<<<<<<< HEAD
 		return transport.shouldGossipBasedOnMsgFlowMap(msg, senderId, receiverId)
 	}
 
 	transport.withFlowMap(flowMap).withGossipHandler(livenessGossipHandler)
 
 	c := newPBFTCluster(t, "liveness_issue", "A", nodesCnt, transport)
-=======
-		msgFlow, ok := flowMap[msg.View.Round]
-		if !ok {
-			return false
-		}
-
-		if msgFlow.round == msg.View.Round {
-			receivers, ok := msgFlow.routingMap[sender]
-			if !ok {
-				return false
-			}
-
-			// do not send commit messages for rounds <=1
-			if msg.Type == pbft.MessageReq_Commit {
-				return false
-			}
-
-			foundReceiver := false
-			for _, v := range receivers {
-				if v == receiver {
-					foundReceiver = true
-					break
-				}
-			}
-			return foundReceiver
-		}
-		return true
-	}
-
-	hook := newGenericGossipTransport(livenessGossipArbitrage)
-
-	c := newPBFTCluster(t, "liveness_issue", "A", nodesCnt, hook)
->>>>>>> 8fce256... Implement integration test that has issue with locking different proposals in 2 different rounds.
 	c.Start()
 	defer c.Stop()
 
@@ -131,33 +79,38 @@ func TestE2E_Partition_Liveness(t *testing.T) {
 
 	// log to check what is the end state
 	for _, n := range c.nodes {
-<<<<<<< HEAD
 		t.Logf("Node %v, isProposalLocked: %v, proposal data: %v\n", n.name, n.pbft.IsStateLocked(), n.pbft.GetProposal().Data)
-=======
-		t.Logf("Node %v, isProposalLocked: %v, proposal data: %v\n", n.name, n.pbft.IsStateLocked(), n.pbft.Proposal().Data)
->>>>>>> 8fce256... Implement integration test that has issue with locking different proposals in 2 different rounds.
 	}
 
 	assert.NoError(t, err)
 }
 
-func TestE2E_Partition_Liveness_case2(t *testing.T) {
+// Test proves existence of liveness issues which is described in
+// Correctness Analysis of Istanbul Byzantine Fault Tolerance(https://arxiv.org/pdf/1901.07160.pdf).
+// Specific problem this test is emulating is described in Chapter 7.1, Case 2.
+// Summary of the problem is that there are not enough nodes to lock on single proposal,
+// due to some issues where nodes being unable to deliver messages to all of the peers.
+// When there are (nh) = 6 nodes, and they are split into three subsets, all locked on different proposals, where one of the nodes becomes faulty,
+// nodes are unable to reach a consensus on a single proposal, resulting in continuous RoundChange.
+// This test creates a single cluster of 6 nodes, but instead of letting all the peers communicate with each other,
+// it routes messages only to specific nodes and induces that nodes lock on different proposal.
+// In the round=3, it marks one node as faulty (meaning that it doesn't takes part in gossiping).
+func TestE2E_Partition_LivenessIssue_Case2_SixNodes_OneFaulty(t *testing.T) {
 	const nodesCnt = 6
 	round0 := roundMetadata{
 		round: 0,
-		// A_0 prop
 		// lock A_1, A_4
-		routingMap: map[pbft.NodeID][]pbft.NodeID{
+		routingMap: map[sender]receivers{
 			"A_0": {"A_1", "A_3", "A_4"},
 			"A_3": {"A_1", "A_3", "A_4"},
 			"A_4": {"A_1", "A_4"},
 		},
 	}
 
-	round1 := roundMetadata{
+	round2 := roundMetadata{
 		round: 2,
 		// lock A_5
-		routingMap: map[pbft.NodeID][]pbft.NodeID{
+		routingMap: map[sender]receivers{
 			"A_0": {"A_5", "A_2", "A_4"},
 			"A_1": {"A_5", "A_0"},
 			"A_2": {"A_5", "A_3"},
@@ -166,37 +119,36 @@ func TestE2E_Partition_Liveness_case2(t *testing.T) {
 		},
 	}
 
-	round2 := roundMetadata{
+	round3 := roundMetadata{
 		round: 3,
-		// A_3 prop
-		// lock A_2 and A_0 on one proposal and A_1 will be faulty
-		routingMap: map[pbft.NodeID][]pbft.NodeID{
+		// lock A_3 and A_0 on one proposal and A_2 will be faulty
+		routingMap: map[sender]receivers{
 			"A_3": {"A_0", "A_2", "A_3", "A_4"},
 			"A_0": {"A_0", "A_3", "A_4"},
 			"A_2": {"A_0", "A_1", "A_3", "A_4"},
 		},
 	}
-	flowMap := map[uint64]roundMetadata{0: round0, 2: round1, 3: round2}
+	flowMap := map[uint64]roundMetadata{0: round0, 2: round2, 3: round3}
 
-	livenessGossipArbitrage := func(sender, receiver pbft.NodeID, msg *pbft.MessageReq) (sent bool) {
+	livenessGossipArbitrage := func(senderId, receiverId pbft.NodeID, msg *pbft.MessageReq) (sent bool) {
 		faultyNodeId := pbft.NodeID("A_2")
 		if msg.View.Round == 1 && msg.Type == pbft.MessageReq_RoundChange {
 			return true
 		}
 
 		if msg.View.Sequence > 2 || msg.View.Round > 3 {
-			// node A_1 (faulty) is unresponsive after round 1
-			if sender == faultyNodeId || receiver == faultyNodeId {
+			// node A_2 (faulty) is unresponsive after round 3
+			if senderId == faultyNodeId || receiverId == faultyNodeId {
 				return false
 			}
 			// all other nodes are connected for all the messages
 			return true
 		}
 
-		// Case where we are in round 1 and 2 different nodes will lock the proposal
-		// (A_1 ignores round change and commit messages)
+		// Case where we are in round 3 and 2 different nodes will lock the proposal
+		// (A_2 ignores round change and commit messages)
 		if msg.View.Round == 3 {
-			if sender == faultyNodeId &&
+			if senderId == faultyNodeId &&
 				(msg.Type == pbft.MessageReq_RoundChange || msg.Type == pbft.MessageReq_Commit) {
 				return false
 			}
@@ -208,7 +160,7 @@ func TestE2E_Partition_Liveness_case2(t *testing.T) {
 		}
 
 		if msgFlow.round == msg.View.Round {
-			receivers, ok := msgFlow.routingMap[sender]
+			receivers, ok := msgFlow.routingMap[sender(senderId)]
 			if !ok {
 				return false
 			}
@@ -220,14 +172,10 @@ func TestE2E_Partition_Liveness_case2(t *testing.T) {
 
 			foundReceiver := false
 			for _, v := range receivers {
-				if v == receiver {
+				if v == receiverId {
 					foundReceiver = true
 					break
 				}
-			}
-
-			if foundReceiver == true && msg.View.Round == 1 {
-				fmt.Printf("Sent %v to %v, msg: %v\n", sender, receiver, msg.Type)
 			}
 
 			return foundReceiver
@@ -235,7 +183,7 @@ func TestE2E_Partition_Liveness_case2(t *testing.T) {
 		return true
 	}
 
-	hook := newGenericGossipTransport(livenessGossipArbitrage)
+	hook := newGenericGossipTransport().withGossipHandler(livenessGossipArbitrage)
 
 	c := newPBFTCluster(t, "liveness_issue", "A", nodesCnt, hook)
 	c.Start()
@@ -245,7 +193,7 @@ func TestE2E_Partition_Liveness_case2(t *testing.T) {
 
 	// log to check what is the end state
 	for _, n := range c.nodes {
-		t.Logf("Node %v, isProposalLocked: %v, proposal data: %v\n", n.name, n.pbft.IsStateLocked(), n.pbft.Proposal().Data)
+		t.Logf("Node %v, isProposalLocked: %v, proposal data: %v\n", n.name, n.pbft.IsStateLocked(), n.pbft.GetProposal().Data)
 	}
 
 	assert.NoError(t, err)
