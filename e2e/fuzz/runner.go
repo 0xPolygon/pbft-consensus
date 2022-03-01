@@ -156,7 +156,7 @@ func validateCluster(c *e2e.Cluster) ([]string, bool) {
 		// count only connected running nodes
 		for _, n := range nodes {
 			if nodesMap[n].IsRunning() {
-				nodeConnections[n]++
+				nodeConnections[node]++
 			}
 		}
 	}
