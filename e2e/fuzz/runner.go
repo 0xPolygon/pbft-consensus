@@ -17,6 +17,7 @@ const (
 	applyTimeInterval          = 5 * time.Second
 	revertTimeInterval         = 3 * time.Second
 	validationTimeInterval     = 1 * time.Minute
+	waitForHeightTimeInterval  = 3 * time.Minute
 )
 
 type Runner struct {
@@ -112,7 +113,7 @@ func validateNodes(c *e2e.Cluster) {
 		currentHeight := c.GetMaxHeight(runningNodes)
 		expectedHeight := currentHeight + 10
 		log.Printf("Current height %v and waiting expected %v height.\n", currentHeight, expectedHeight)
-		err := c.WaitForHeight(expectedHeight, 3*time.Minute, runningNodes)
+		err := c.WaitForHeight(expectedHeight, waitForHeightTimeInterval, runningNodes)
 		if err != nil {
 			transportHook := c.GetTransportHook()
 			if transportHook != nil {
@@ -132,7 +133,6 @@ func validateNodes(c *e2e.Cluster) {
 // validateCluster checks if there is enough running nodes that can make consensus
 func validateCluster(c *e2e.Cluster) ([]string, bool) {
 	totalNodesCount := len(c.Nodes())
-	var runningNodes []string
 	var partitions map[string][]string
 	// running nodes in majority partition
 	hook := c.GetTransportHook()
@@ -141,11 +141,11 @@ func validateCluster(c *e2e.Cluster) ([]string, bool) {
 	}
 	// no partitions, so all running nodes are in the consensus
 	if len(partitions) == 0 {
+		var runningNodes []string
 		for _, n := range c.GetRunningNodes() {
 			runningNodes = append(runningNodes, n.GetName())
 		}
-
-		return runningNodes, true
+		return runningNodes, len(runningNodes) >= c.MinValidNodes()
 	}
 
 	// check if there is enough messages coming to particular node
@@ -160,15 +160,17 @@ func validateCluster(c *e2e.Cluster) ([]string, bool) {
 			}
 		}
 	}
+
 	// check whether there is enough connected nodes
+	var validSenders []string
 	for k, v := range nodeConnections {
-		if v >= c.MinValidNodes() {
-			runningNodes = append(runningNodes, k)
+		if nodesMap[k].IsRunning() && v >= c.MinValidNodes() {
+			validSenders = append(validSenders, k)
 		}
 	}
 
-	stoppedNodesCount := totalNodesCount - len(runningNodes)
-	return runningNodes, stoppedNodesCount <= pbft.MaxFaultyNodes(totalNodesCount)
+	stoppedNodesCount := totalNodesCount - len(validSenders)
+	return validSenders, stoppedNodesCount <= pbft.MaxFaultyNodes(totalNodesCount)
 }
 
 func getAvailableActions() []e2e.FunctionalAction {

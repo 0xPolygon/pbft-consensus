@@ -88,8 +88,8 @@ type flowMapTransport struct {
 	flowMap map[string][]string
 }
 
-func newFlowMapTransport() *flowMapTransport {
-	return &flowMapTransport{}
+func newFlowMapTransport(flowMap map[string][]string) *flowMapTransport {
+	return &flowMapTransport{flowMap: flowMap}
 }
 
 func (f *flowMapTransport) isConnected(from, to pbft.NodeID) bool {
@@ -124,8 +124,9 @@ func (f *flowMapTransport) GetPartitions() map[string][]string {
 	return f.flowMap
 }
 
-func (f *flowMapTransport) SetFlowMap(flowMap map[string][]string) {
+func (f *flowMapTransport) WithFlowMap(flowMap map[string][]string) *flowMapTransport {
 	f.flowMap = flowMap
+	return f
 }
 
 func newPartitionTransport(jitterMax time.Duration) *partitionTransport {

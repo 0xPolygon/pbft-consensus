@@ -8,6 +8,8 @@ import (
 	"github.com/0xPolygon/pbft-consensus"
 )
 
+const flowMapThreshold = 50
+
 type RevertFunc func()
 
 type FunctionalAction interface {
@@ -77,8 +79,6 @@ func (action *PartitionAction) Apply(c *Cluster) RevertFunc {
 	}
 }
 
-var flowMapThreshold = 50
-
 type FlowMapAction struct {
 }
 
@@ -118,8 +118,7 @@ func (f *FlowMapAction) Apply(c *Cluster) RevertFunc {
 		}
 	}
 
-	hook := newFlowMapTransport()
-	hook.SetFlowMap(flowMap)
+	hook := newFlowMapTransport(flowMap)
 	c.hook = hook
 
 	log.Printf("Generated flow map: %v\n", flowMap)
