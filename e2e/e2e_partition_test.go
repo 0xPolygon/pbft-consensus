@@ -129,63 +129,37 @@ func TestE2E_Partition_LivenessIssue_Case2_SixNodes_OneFaulty(t *testing.T) {
 		},
 	}
 	flowMap := map[uint64]roundMetadata{0: round0, 2: round2, 3: round3}
+	transport := newGenericGossipTransport()
+	faultyNodeId := pbft.NodeID("A_2")
 
-	livenessGossipArbitrage := func(senderId, receiverId pbft.NodeID, msg *pbft.MessageReq) (sent bool) {
-		faultyNodeId := pbft.NodeID("A_2")
+	// If livenessGossipHandler returns false, message should not be transported.
+	livenessGossipHandler := func(senderId, receiverId pbft.NodeID, msg *pbft.MessageReq) (sent bool) {
 		if msg.View.Round == 1 && msg.Type == pbft.MessageReq_RoundChange {
 			return true
 		}
 
-		if msg.View.Sequence > 2 || msg.View.Round > 3 {
-			// node A_2 (faulty) is unresponsive after round 3
-			if senderId == faultyNodeId || receiverId == faultyNodeId {
+		if msg.View.Round > 3 || msg.View.Sequence > 2 {
+			// Faulty node is unresponsive after round 3, and all the other nodes are gossiping all the messages.
+			return senderId != faultyNodeId && receiverId != faultyNodeId
+		} else {
+			if msg.View.Round <= 1 && msg.Type == pbft.MessageReq_Commit {
+				// Cut all the commit messages gossiping for round 0 and 1
 				return false
 			}
-			// all other nodes are connected for all the messages
-			return true
-		}
-
-		// Case where we are in round 3 and 2 different nodes will lock the proposal
-		// (A_2 ignores round change and commit messages)
-		if msg.View.Round == 3 {
-			if senderId == faultyNodeId &&
+			if msg.View.Round == 3 && senderId == faultyNodeId &&
 				(msg.Type == pbft.MessageReq_RoundChange || msg.Type == pbft.MessageReq_Commit) {
+				// Case where we are in round 3 and 2 different nodes will lock the proposal
+				// (consequence of faulty node doesn't gossip round change and commit messages).
 				return false
 			}
 		}
 
-		msgFlow, ok := flowMap[msg.View.Round]
-		if !ok {
-			return false
-		}
-
-		if msgFlow.round == msg.View.Round {
-			receivers, ok := msgFlow.routingMap[sender(senderId)]
-			if !ok {
-				return false
-			}
-
-			// do not send commit messages for rounds <=1
-			if msg.Type == pbft.MessageReq_Commit {
-				return false
-			}
-
-			foundReceiver := false
-			for _, v := range receivers {
-				if v == receiverId {
-					foundReceiver = true
-					break
-				}
-			}
-
-			return foundReceiver
-		}
-		return true
+		return transport.shouldGossipBasedOnMsgFlowMap(msg, senderId, receiverId)
 	}
 
-	hook := newGenericGossipTransport().withGossipHandler(livenessGossipArbitrage)
+	transport.withFlowMap(flowMap).withGossipHandler(livenessGossipHandler)
 
-	c := newPBFTCluster(t, "liveness_issue", "A", nodesCnt, hook)
+	c := newPBFTCluster(t, "liveness_issue", "A", nodesCnt, transport)
 	c.Start()
 	defer c.Stop()
 
