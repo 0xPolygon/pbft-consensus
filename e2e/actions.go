@@ -86,15 +86,18 @@ func (f *FlowMapAction) Apply(c *Cluster) RevertFunc {
 	// for each node in the cluster add >= (n-1)/3 other connected nodes
 	flowMap := make(map[string][]string)
 	for senderNodeId := range c.nodes {
-		if _, ok := flowMap[senderNodeId]; !ok {
-			flowMap[senderNodeId] = []string{}
+		recipients, ok := flowMap[senderNodeId]
+		if !ok {
+			recipients = []string{}
+			flowMap[senderNodeId] = recipients
 		}
 		done := false
 		// generate map for every node in the cluster
 		for recipientNodeId := range c.nodes {
 			minValidNodes := c.MinValidNodes()
-			if len(flowMap[senderNodeId]) <= minValidNodes && !done {
-				flowMap[senderNodeId] = append(flowMap[senderNodeId], recipientNodeId)
+			if len(recipients) <= minValidNodes && !done {
+				recipients = append(recipients, recipientNodeId)
+				flowMap[senderNodeId] = recipients
 				quorum := 0
 				for _, existingRecipientIds := range flowMap {
 					if len(existingRecipientIds) >= minValidNodes {
@@ -112,7 +115,8 @@ func (f *FlowMapAction) Apply(c *Cluster) RevertFunc {
 			} else {
 				// probabilistic add more nodes to the flow map
 				if ShouldApply(flowMapThreshold) {
-					flowMap[senderNodeId] = append(flowMap[senderNodeId], recipientNodeId)
+					recipients = append(recipients, recipientNodeId)
+					flowMap[senderNodeId] = recipients
 				}
 			}
 		}
