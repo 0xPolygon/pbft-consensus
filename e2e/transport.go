@@ -34,7 +34,6 @@ func (t *transport) Gossip(msg *pbft.MessageReq) error {
 				send = t.hook.Gossip(msg.From, to, msg)
 			}
 			if send {
-				// fmt.Printf("Sending message %v from Node %v to node %v\n", msg.Type, msg.From, to)
 				handler(msg)
 			}
 		}(to, handler)
