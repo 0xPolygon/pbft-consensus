@@ -80,11 +80,18 @@ func TestE2E_Partition_LivenessIssue_Case1_FiveNodes_OneFaulty(t *testing.T) {
 	c.Start()
 	defer c.Stop()
 
-	err := c.WaitForHeight(3, 5*time.Minute)
+	err := c.WaitForHeight(3, 5*time.Minute, []string{"A_0", "A_2", "A_3", "A_4"})
 
-	// log to check what is the end state
-	for _, n := range c.nodes {
-		t.Logf("Node %v, isProposalLocked: %v, proposal data: %v\n", n.name, n.pbft.IsLocked(), n.pbft.GetProposal().Data)
+	if err != nil {
+		// log to check what is the end state
+		for _, n := range c.nodes {
+			proposal := n.pbft.GetProposal()
+			if proposal != nil {
+				t.Logf("Node %v, isProposalLocked: %v, proposal data: %v\n", n.name, n.pbft.IsLocked(), proposal.Data)
+			} else {
+				t.Logf("Node %v, isProposalLocked: %v, no proposal set\n", n.name, n.pbft.IsLocked())
+			}
+		}
 	}
 
 	assert.NoError(t, err)
@@ -164,15 +171,27 @@ func TestE2E_Partition_LivenessIssue_Case2_SixNodes_OneFaulty(t *testing.T) {
 
 	transport.withFlowMap(flowMap).withGossipHandler(livenessGossipHandler)
 
-	c := newPBFTCluster(t, "liveness_issue", "A", nodesCnt, transport)
+	config := &ClusterConfig{
+		Name:   "liveness_issue",
+		Prefix: "A",
+		Count:  nodesCnt,
+	}
+	c := NewPBFTCluster(t, config, transport)
 	c.Start()
 	defer c.Stop()
 
-	err := c.WaitForHeight(3, 1*time.Minute)
+	err := c.WaitForHeight(3, 5*time.Minute, []string{"A_0", "A_1", "A_3", "A_4", "A_5"})
 
-	// log to check what is the end state
-	for _, n := range c.nodes {
-		t.Logf("Node %v, isProposalLocked: %v, proposal data: %v\n", n.name, n.pbft.IsStateLocked(), n.pbft.GetProposal().Data)
+	if err != nil {
+		// log to check what is the end state
+		for _, n := range c.nodes {
+			proposal := n.pbft.GetProposal()
+			if proposal != nil {
+				t.Logf("Node %v, isProposalLocked: %v, proposal data: %v\n", n.name, n.pbft.IsLocked(), proposal.Data)
+			} else {
+				t.Logf("Node %v, isProposalLocked: %v, no proposal set\n", n.name, n.pbft.IsLocked())
+			}
+		}
 	}
 
 	assert.NoError(t, err)
