@@ -8,7 +8,7 @@ import (
 	"github.com/0xPolygon/pbft-consensus"
 )
 
-const flowMapThreshold = 50
+const flowMapThreshold = 70
 
 type RevertFunc func()
 
