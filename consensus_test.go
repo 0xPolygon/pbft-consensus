@@ -73,7 +73,7 @@ func TestTransition_AcceptState_Proposer_Locked(t *testing.T) {
 	i := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
 	i.setState(AcceptState)
 
-	i.state.lock()
+	i.state.lock(0)
 	i.state.proposal = &Proposal{
 		Data: mockProposal,
 		Hash: digest,
@@ -226,8 +226,7 @@ func TestTransition_AcceptState_Validator_ProposerInvalid(t *testing.T) {
 func TestTransition_AcceptState_Validator_LockWrong(t *testing.T) {
 	// We are a validator and have a locked state in 'proposal1'.
 	// We receive an invalid proposal 'proposal2' with different data.
-
-	i := newMockPbft(t, []string{"A", "B", "C"}, "B")
+	i := newMockPbft(t, []string{"A", "B", "C", "D", "E", "F"}, "B")
 	i.state.view = ViewMsg(1, 0)
 	i.setState(AcceptState)
 
@@ -236,7 +235,8 @@ func TestTransition_AcceptState_Validator_LockWrong(t *testing.T) {
 		Data: mockProposal,
 		Hash: digest,
 	}
-	i.state.lock()
+
+	i.state.lock(0)
 
 	// emit the wrong locked proposal
 	i.emitMsg(&MessageReq{
@@ -269,7 +269,7 @@ func TestTransition_AcceptState_Validator_LockCorrect(t *testing.T) {
 		Data: proposal,
 		Hash: digest,
 	}
-	i.state.lock()
+	i.state.lock(0)
 
 	i.emitMsg(&MessageReq{
 		From:     "A",
@@ -594,7 +594,7 @@ func TestTransition_ValidateState_WrongMessageType(t *testing.T) {
 		View:     ViewMsg(1, 0),
 	}
 	heap.Push(&m.msgQueue.validateStateQueue, msg)
-	assert.PanicsWithError(t, "BUG: Unexpected message type: Preprepare in ValidateState", func() { m.runCycle(context.Background()) })
+	assert.PanicsWithError(t, "BUG: Unexpected message type: Preprepare in ValidateState from node A", func() { m.runCycle(context.Background()) })
 }
 
 // Test that past and future messages are discarded and state machine transfers from ValidateState to RoundChangeState.
@@ -983,7 +983,7 @@ func (m *mockPbft) expect(res expectResult) {
 		m.t.Fatalf("incorrect commit messages %d %d", size, res.commitMsgs)
 	}
 	if m.state.IsLocked() != res.locked {
-		m.t.Fatalf("incorrect locked %v %v", m.state.locked, res.locked)
+		m.t.Fatalf("incorrect locked actual: %v, expected: %v", m.state.IsLocked(), res.locked)
 	}
 	if size := len(m.respMsg); uint64(size) != res.outgoing {
 		m.t.Fatalf("incorrect outgoing messages %v %v", size, res.outgoing)

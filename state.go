@@ -31,8 +31,9 @@ type state struct {
 	// List of round change messages
 	roundMessages map[uint64]map[NodeID]*MessageReq
 
-	// Locked signals whether the proposal is locked
-	locked uint64
+	// Locked round signals whether the proposal is locked and in which round.
+	// If it is nil, it means that proposal isn't locked.
+	lockedRound *uint64
 
 	// timeout tracks the time left for this round
 	timeoutChan <-chan time.Time
@@ -55,7 +56,7 @@ func newState() *state {
 }
 
 func (s *state) IsLocked() bool {
-	return atomic.LoadUint64(&s.locked) == 1
+	return s.lockedRound != nil
 }
 
 func (s *state) GetSequence() uint64 {
@@ -134,14 +135,13 @@ func (s *state) CalcProposer() {
 	s.proposer = s.validators.CalcProposer(s.view.Round)
 }
 
-func (s *state) lock() {
-	atomic.StoreUint64(&s.locked, 1)
+func (s *state) lock(round uint64) {
+	s.lockedRound = &round
 }
 
 func (s *state) unlock() {
 	s.proposal = nil
-
-	atomic.StoreUint64(&s.locked, 0)
+	s.lockedRound = nil
 }
 
 // cleanRound deletes the specific round messages
