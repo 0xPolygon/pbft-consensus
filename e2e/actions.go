@@ -39,6 +39,7 @@ func (dn *DropNodeAction) Apply(c *Cluster) RevertFunc {
 	c.StopNode(nodeToStop.name)
 
 	return func() {
+		log.Printf("Reverting dropped node %v\n", nodeToStop)
 		nodeToStop.Start()
 	}
 }

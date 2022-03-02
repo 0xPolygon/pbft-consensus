@@ -11,7 +11,7 @@ import (
 
 func main() {
 	initialNodesCount := flag.Uint("nodes", 5, "Count of initially started nodes")
-	duration := flag.Duration("duration", 25*time.Minute, "Duration of fuzz daemon running")
+	duration := flag.Duration("duration", 2*time.Hour, "Duration of fuzz daemon running")
 	flag.Parse()
 	log.Printf("Starting PolyBFT fuzz runner...")
 	log.Printf("Node count: %v\n", *initialNodesCount)

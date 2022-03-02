@@ -17,7 +17,7 @@ const (
 	applyTimeInterval          = 5 * time.Second
 	revertTimeInterval         = 3 * time.Second
 	validationTimeInterval     = 1 * time.Minute
-	waitForHeightTimeInterval  = 3 * time.Minute
+	waitForHeightTimeInterval  = 5 * time.Minute
 )
 
 type Runner struct {
