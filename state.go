@@ -1,6 +1,7 @@
 package pbft
 
 import (
+	"bytes"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -43,11 +44,23 @@ type MessageReq struct {
 	// view is the view assigned to the message
 	View *View
 
-	// hash of the locked proposal
-	Digest string
+	// hash of the proposal
+	Hash []byte
 
-	// proposal is the arbitrary data proposal (only for preprepare messages)
+	// proposal is the arbitrary data proposal (relayed only for preprepare messages)
 	Proposal []byte
+}
+
+func (m *MessageReq) Validate() error {
+	// Hash field has to exist for state != RoundStateChange
+	if m.Type != MessageReq_RoundChange {
+		if m.Hash == nil {
+			return fmt.Errorf("hash is empty for type %s", m.Type.String())
+		}
+	}
+
+	// TODO
+	return nil
 }
 
 func (m *MessageReq) SetProposal(proposal []byte) {
@@ -133,6 +146,24 @@ type Proposal struct {
 
 	// Time is the time to create the proposal
 	Time time.Time
+
+	// Hash is the digest of the data to seal
+	Hash []byte
+}
+
+// Equal compares whether two proposals have the same hash
+func (p *Proposal) Equal(pp *Proposal) bool {
+	return bytes.Equal(p.Hash, pp.Hash)
+}
+
+// Copy makes a copy of the Proposal
+func (p *Proposal) Copy() *Proposal {
+	pp := new(Proposal)
+	*pp = *p
+
+	pp.Data = append([]byte{}, p.Data...)
+	pp.Hash = append([]byte{}, p.Hash...)
+	return pp
 }
 
 // currentState defines the current state object in PBFT
@@ -161,8 +192,9 @@ type currentState struct {
 	// List of round change messages
 	roundMessages map[uint64]map[NodeID]*MessageReq
 
-	// Locked signals whether the proposal is locked
-	locked bool
+	// Locked round signals whether the proposal is locked and in which round.
+	// If it is nil, it means that proposal isn't locked.
+	lockedRound *uint64
 
 	// Describes whether there has been an error during the computation
 	err error
@@ -174,6 +206,19 @@ func newState() *currentState {
 	c.resetRoundMsgs()
 
 	return c
+}
+
+func (c *currentState) IsLocked() bool {
+	return c.lockedRound != nil
+}
+
+func (c *currentState) lock(round uint64) {
+	c.lockedRound = &round
+}
+
+func (c *currentState) unlock() {
+	c.proposal = nil
+	c.lockedRound = nil
 }
 
 func (c *currentState) GetSequence() uint64 {
@@ -248,15 +293,6 @@ func (c *currentState) resetRoundMsgs() {
 // CalcProposer calculates the proposer and sets it to the state
 func (c *currentState) CalcProposer() {
 	c.proposer = c.validators.CalcProposer(c.view.Round)
-}
-
-func (c *currentState) lock() {
-	c.locked = true
-}
-
-func (c *currentState) unlock() {
-	c.proposal = nil
-	c.locked = false
 }
 
 // cleanRound deletes the specific round messages

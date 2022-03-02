@@ -88,7 +88,7 @@ func (c *Config) ApplyOps(opts ...ConfigOption) {
 }
 
 type SealedProposal struct {
-	Proposal       []byte
+	Proposal       *Proposal
 	CommittedSeals [][]byte
 	Proposer       NodeID
 	Number         uint64
@@ -99,7 +99,7 @@ type Backend interface {
 	BuildProposal() (*Proposal, error)
 
 	// Validate validates a raw proposal (used if non-proposer)
-	Validate(proposal []byte) error
+	Validate(*Proposal) error
 
 	// Insert inserts the sealed proposal
 	Insert(p *SealedProposal) error
@@ -110,14 +110,14 @@ type Backend interface {
 	// ValidatorSet returns the validator set for the current round
 	ValidatorSet() ValidatorSet
 
-	// Hash hashes the proposal bytes
-	Hash(p []byte) []byte
-
 	// Init is used to signal the backend that a new round is going to start.
 	Init()
 
 	// IsStuck returns whether the pbft is stucked
 	IsStuck(num uint64) (uint64, bool)
+
+	// ValidateCommit is used to validate that a given commit is valid
+	ValidateCommit(from NodeID, seal []byte) error
 }
 
 // Pbft represents the PBFT consensus mechanism object
@@ -182,6 +182,14 @@ func New(validator SignKey, transport Transport, opts ...ConfigOption) *Pbft {
 
 	p.logger.Printf("[INFO] validator key: addr=%s\n", p.validator.NodeID())
 	return p
+}
+
+func (p *Pbft) IsStateLocked() bool {
+	return p.state.IsLocked()
+}
+
+func (p *Pbft) GetProposal() *Proposal {
+	return p.state.proposal
 }
 
 func (p *Pbft) SetBackend(backend Backend) error {
@@ -283,7 +291,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 	// log the current state of this span
 	span.SetAttributes(
 		attribute.Bool("isproposer", isProposer),
-		attribute.Bool("locked", p.state.locked),
+		attribute.Bool("locked", p.state.IsLocked()),
 		attribute.String("proposer", string(p.state.proposer)),
 	)
 
@@ -292,7 +300,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 	if isProposer {
 		p.logger.Printf("[INFO] we are the proposer")
 
-		if !p.state.locked {
+		if !p.state.IsLocked() {
 			// since the state is not locked, we need to build a new proposal
 			p.state.proposal, err = p.backend.BuildProposal()
 			if err != nil {
@@ -309,14 +317,18 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 			case <-p.ctx.Done():
 				return
 			}
-
 		}
 
 		// send the preprepare message
 		p.sendPreprepareMsg()
 
-		// send the prepare message since we are ready to move the state
-		p.sendPrepareMsg()
+		if !p.state.IsLocked() {
+			// send the prepare message since we are ready to move the state
+			p.sendPrepareMsg()
+		} else {
+			// proposer node is already locked to the same proposal => fast-track and send commit message straight away
+			p.sendCommitMsg()
+		}
 
 		// move to validation state for new prepare messages
 		p.setState(ValidateState)
@@ -343,39 +355,90 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 			continue
 		}
 
+		// TODO: Validate that the fields required for Preprepare are set (Proposal and Hash)
 		if msg.From != p.state.proposer {
 			p.logger.Printf("[ERROR] msg received from wrong proposer: expected=%s, found=%s", p.state.proposer, msg.From)
 			continue
 		}
 
-		// retrieve the proposal
-		if err := p.backend.Validate(msg.Proposal); err != nil {
+		// retrieve the proposal, the backend MUST validate that the hash belongs to the proposal
+		proposal := &Proposal{
+			Data: msg.Proposal,
+			Hash: msg.Hash,
+		}
+		if err := p.backend.Validate(proposal); err != nil {
 			p.logger.Printf("[ERROR] failed to validate proposal. Error message: %v", err)
 			p.setState(RoundChangeState)
 			return
 		}
 
-		if p.state.locked {
-			hash1 := p.backend.Hash(msg.Proposal)
-			hash2 := p.backend.Hash(p.state.proposal.Data)
-
+		if p.state.IsLocked() {
 			// the state is locked, we need to receive the same proposal
-			if bytes.Equal(hash1, hash2) {
-				// fast-track and send a commit message and wait for validations
+			if p.state.proposal.Equal(proposal) {
+				// fast-track (send a commit message) and wait for validations
 				p.sendCommitMsg()
 				p.setState(ValidateState)
 			} else {
-				p.handleStateErr(errIncorrectLockedProposal)
+				// Relocking logic:
+				// - we have locked different proposal in a round older than the given PRE-PREPARE message belongs to
+				// - there are enough COMMIT messages for more recent round and given (PRE-PREPARE) proposal, so we should relock to the given proposal instead and vote for it.
+				if p.shouldRelock(msg) {
+					p.logger.Printf("[%s] Relocking to a propsal: %v", p.validator.NodeID(), proposal.Data)
+					p.state.proposal = proposal
+					p.state.lock(msg.View.Round)
+					p.sendCommitMsg()
+					p.setState(ValidateState)
+				} else {
+					p.handleStateErr(errIncorrectLockedProposal)
+				}
 			}
 		} else {
-			p.state.proposal = &Proposal{
-				Data: msg.Proposal,
-			}
-
+			p.state.proposal = proposal
 			p.sendPrepareMsg()
 			p.setState(ValidateState)
 		}
 	}
+}
+
+// shouldRelock checks whether there are at least 2*F (F denotes maximum number of faulty nodes)
+// commit messages for the current sequence and the current round in the validate state message queue.
+// It is invoked in a case a non-proposer node got locked on some previous rounds on different proposal than the given one.
+//
+// Returns true if there are at least 2*F commit messages in the queue (meaning that node should relock to the given proposal), otherwise false.
+func (p *Pbft) shouldRelock(preprepareMsg *MessageReq) bool {
+	// shouldRelock is invoked when transferred from RoundChangeState to AcceptState.
+	// Since it contains specific logic for commit messages counting, this checkup is introduced.
+	if !p.IsState(AcceptState) {
+		return false
+	}
+
+	if *p.state.lockedRound > preprepareMsg.View.Round {
+		// proposal must be locked in the some round which is older than the PRE-PREPARE message is from
+		return false
+	}
+
+	commitMsgsFound := 0
+	commitMsgsQueue := p.msgQueue.getQueue(msgToState(MessageReq_Commit))
+	if commitMsgsQueue == nil {
+		p.logger.Printf("[ERROR] Failed to resolve message queue for %s message type.", MessageReq_Commit)
+		return false
+	}
+	commitMsgsQueue.Iterator(func(currentMsg *MessageReq) {
+		// Logical condition below decomposes to the following.
+		// Count messages that have following properties:
+		// 1. message is from the current round (and sequence),
+		// 2. COMMIT message type,
+		// 3. message round is more recent than the one proposal got locked,
+		// 4. proposal hash of the COMMIT message is the same as the one from PRE-PREPARE message.
+		if cmpView(p.state.view, currentMsg.View) == 0 &&
+			currentMsg.Type == MessageReq_Commit &&
+			*p.state.lockedRound < currentMsg.View.Round &&
+			bytes.Equal(preprepareMsg.Hash, currentMsg.Hash) {
+			commitMsgsFound++
+		}
+	})
+	// 2*F Commit messages (+1 commit message will correspond to the current non-proposer node COMMIT message)
+	return commitMsgsFound >= p.state.NumValid()
 }
 
 // runValidateState implements the Validate state loop.
@@ -389,7 +452,10 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 	sendCommit := func(span trace.Span) {
 		// at this point either we have enough prepare messages
 		// or commit messages so we can lock the proposal
-		p.state.lock()
+		if !p.state.IsLocked() {
+			// invoke lock only at initial round when locking occured
+			p.state.lock(p.state.view.Round)
+		}
 
 		if !hasCommitted {
 			// send the commit message
@@ -418,11 +484,21 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 			return
 		}
 
+		// the message must have our local hash
+		if !bytes.Equal(msg.Hash, p.state.proposal.Hash) {
+			p.logger.Print(fmt.Sprintf("[WARN]: incorrect hash in %s message", msg.Type.String()))
+			continue
+		}
+
 		switch msg.Type {
 		case MessageReq_Prepare:
 			p.state.addPrepared(msg)
 
 		case MessageReq_Commit:
+			if err := p.backend.ValidateCommit(msg.From, msg.Seal); err != nil {
+				p.logger.Printf("[ERROR]: failed to validate commit: %v", err)
+				continue
+			}
 			p.state.addCommitted(msg)
 
 		default:
@@ -489,7 +565,10 @@ func (p *Pbft) runCommitState(ctx context.Context) {
 	defer span.End()
 
 	committedSeals := p.state.getCommittedSeals()
-	proposal := p.state.proposal.Data
+	proposal := p.state.proposal.Copy()
+
+	// TODO: [Liveness] Should unlock happen only when insertion fails (it is like that in IBFT, although it doesn't make much sense)?
+	// https://github.com/ConsenSys/quorum/blob/master/consensus/istanbul/ibft/core/core.go#L177
 
 	// at this point either if it works or not we need to unlock the state
 	// to allow for other proposals to be produced if it insertion fails
@@ -642,11 +721,18 @@ func (p *Pbft) gossip(msgType MsgType) {
 		Type: msgType,
 		From: p.validator.NodeID(),
 	}
+	if msgType != MessageReq_RoundChange {
+		// Except for round change message in which we are deciding on the proposer,
+		// the rest of the consensus message require the hash:
+		// 1. Preprepare: notify the validators of the proposal + hash
+		// 2. Prepare + Commit: safe check to only include messages from our round.
+		msg.Hash = p.state.proposal.Hash
+	}
 
 	// add View
 	msg.View = p.state.view.Copy()
 
-	// if we are sending a preprepare message we need to include the proposal
+	// if we are sending a preprepare or commit message we need to include the proposal
 	if msg.Type == MessageReq_Preprepare {
 		msg.SetProposal(p.state.proposal.Data)
 	}
@@ -654,9 +740,7 @@ func (p *Pbft) gossip(msgType MsgType) {
 	// if the message is commit, we need to add the committed seal
 	if msg.Type == MessageReq_Commit {
 		// seal the hash of the proposal
-		hash := p.backend.Hash(p.state.proposal.Data)
-
-		seal, err := p.validator.Sign(hash)
+		seal, err := p.validator.Sign(p.state.proposal.Hash)
 		if err != nil {
 			p.logger.Printf("[ERROR] failed to commit seal. Error message: %v", err)
 			return
@@ -748,6 +832,11 @@ func (p *Pbft) getNextMessage(span trace.Span, timeout time.Duration) (*MessageR
 
 // PushMessage pushes a new message to the message queue
 func (p *Pbft) PushMessage(msg *MessageReq) {
+	if err := msg.Validate(); err != nil {
+		p.logger.Printf("[ERROR]: failed to validate msg: %v", err)
+		return
+	}
+
 	p.msgQueue.pushMessage(msg)
 
 	select {
