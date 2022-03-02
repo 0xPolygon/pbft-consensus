@@ -312,13 +312,13 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 	p.backend.Init(&RoundInfo{
 		Proposer:   p.state.proposer,
 		IsProposer: isProposer,
-		Locked:     p.state.locked,
+		Locked:     p.state.IsLocked(),
 	})
 
 	// log the current state of this span
 	span.SetAttributes(
 		attribute.Bool("isproposer", isProposer),
-		attribute.Bool("locked", p.state.locked),
+		attribute.Bool("locked", p.state.IsLocked()),
 		attribute.String("proposer", string(p.state.proposer)),
 	)
 
@@ -327,7 +327,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 	if isProposer {
 		p.logger.Printf("[INFO] we are the proposer")
 
-		if !p.state.locked {
+		if !p.state.IsLocked() {
 			// since the state is not locked, we need to build a new proposal
 			p.state.proposal, err = p.backend.BuildProposal()
 			if err != nil {
@@ -344,14 +344,18 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 			case <-p.ctx.Done():
 				return
 			}
-
 		}
 
 		// send the preprepare message
 		p.sendPreprepareMsg()
 
-		// send the prepare message since we are ready to move the state
-		p.sendPrepareMsg()
+		if !p.state.IsLocked() {
+			// send the prepare message since we are ready to move the state
+			p.sendPrepareMsg()
+		} else {
+			// proposer node is already locked to the same proposal => fast-track and send commit message straight away
+			p.sendCommitMsg()
+		}
 
 		// move to validation state for new prepare messages
 		p.setState(ValidateState)
@@ -393,14 +397,25 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 			return
 		}
 
-		if p.state.locked {
+		if p.state.IsLocked() {
 			// the state is locked, we need to receive the same proposal
 			if p.state.proposal.Equal(proposal) {
-				// fast-track and send a commit message and wait for validations
+				// fast-track (send a commit message) and wait for validations
 				p.sendCommitMsg()
 				p.setState(ValidateState)
 			} else {
-				p.handleStateErr(errIncorrectLockedProposal)
+				// Relocking logic:
+				// - we have locked different proposal in a round older than the given PRE-PREPARE message belongs to
+				// - there are enough COMMIT messages for more recent round and given (PRE-PREPARE) proposal, so we should relock to the given proposal instead and vote for it.
+				if p.shouldRelock(msg) {
+					p.logger.Printf("[%s] Relocking to a propsal: %v", p.validator.NodeID(), proposal.Data)
+					p.state.proposal = proposal
+					p.state.lock(msg.View.Round)
+					p.sendCommitMsg()
+					p.setState(ValidateState)
+				} else {
+					p.handleStateErr(errIncorrectLockedProposal)
+				}
 			}
 		} else {
 			p.state.proposal = proposal
@@ -408,6 +423,47 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 			p.setState(ValidateState)
 		}
 	}
+}
+
+// shouldRelock checks whether there are at least 2*F (F denotes maximum number of faulty nodes)
+// commit messages for the current sequence and the current round in the validate state message queue.
+// It is invoked in a case a non-proposer node got locked on some previous rounds on different proposal than the given one.
+//
+// Returns true if there are at least 2*F commit messages in the queue (meaning that node should relock to the given proposal), otherwise false.
+func (p *Pbft) shouldRelock(preprepareMsg *MessageReq) bool {
+	// shouldRelock is invoked when transferred from RoundChangeState to AcceptState.
+	// Since it contains specific logic for commit messages counting, this checkup is introduced.
+	if !p.IsState(AcceptState) {
+		return false
+	}
+
+	if *p.state.lockedRound > preprepareMsg.View.Round {
+		// proposal must be locked in the some round which is older than the PRE-PREPARE message is from
+		return false
+	}
+
+	commitMsgsFound := 0
+	commitMsgsQueue := p.msgQueue.getQueue(msgToState(MessageReq_Commit))
+	if commitMsgsQueue == nil {
+		p.logger.Printf("[ERROR] Failed to resolve message queue for %s message type.", MessageReq_Commit)
+		return false
+	}
+	commitMsgsQueue.Iterator(func(currentMsg *MessageReq) {
+		// Logical condition below decomposes to the following.
+		// Count messages that have following properties:
+		// 1. message is from the current round (and sequence),
+		// 2. COMMIT message type,
+		// 3. message round is more recent than the one proposal got locked,
+		// 4. proposal hash of the COMMIT message is the same as the one from PRE-PREPARE message.
+		if cmpView(p.state.view, currentMsg.View) == 0 &&
+			currentMsg.Type == MessageReq_Commit &&
+			*p.state.lockedRound < currentMsg.View.Round &&
+			bytes.Equal(preprepareMsg.Hash, currentMsg.Hash) {
+			commitMsgsFound++
+		}
+	})
+	// 2*F Commit messages (+1 commit message will correspond to the current non-proposer node COMMIT message)
+	return commitMsgsFound >= p.state.NumValid()
 }
 
 // runValidateState implements the Validate state loop.
@@ -421,7 +477,10 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 	sendCommit := func(span trace.Span) {
 		// at this point either we have enough prepare messages
 		// or commit messages so we can lock the proposal
-		p.state.lock()
+		if !p.state.IsLocked() {
+			// invoke lock only at initial round when locking occured
+			p.state.lock(p.state.view.Round)
+		}
 
 		if !hasCommitted {
 			// send the commit message
@@ -530,6 +589,9 @@ func (p *Pbft) runCommitState(ctx context.Context) {
 
 	committedSeals := p.state.getCommittedSeals()
 	proposal := p.state.proposal.Copy()
+
+	// TODO: [Liveness] Should unlock happen only when insertion fails (it is like that in IBFT, although it doesn't make much sense)?
+	// https://github.com/ConsenSys/quorum/blob/master/consensus/istanbul/ibft/core/core.go#L177
 
 	// at this point either if it works or not we need to unlock the state
 	// to allow for other proposals to be produced if it insertion fails
@@ -691,7 +753,7 @@ func (p *Pbft) gossip(msgType MsgType) {
 	// add View
 	msg.View = p.state.view.Copy()
 
-	// if we are sending a preprepare message we need to include the proposal
+	// if we are sending a preprepare or commit message we need to include the proposal
 	if msg.Type == MessageReq_Preprepare {
 		msg.SetProposal(p.state.proposal.Data)
 	}
@@ -750,7 +812,7 @@ func (p *Pbft) setState(s PbftState) {
 
 // IsLocked returns if the current proposal is locked
 func (p *Pbft) IsLocked() bool {
-	return p.state.locked
+	return p.state.IsLocked()
 }
 
 // GetProposal returns current proposal in the pbft

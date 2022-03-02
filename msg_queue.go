@@ -177,6 +177,15 @@ func (m *msgQueueImpl) Pop() interface{} {
 	return item
 }
 
+// Iterator with custom handler which contains some arbitrary logic.
+func (m *msgQueueImpl) Iterator(iterateHandler func(*MessageReq)) {
+	for _, msg := range *m {
+		if iterateHandler != nil {
+			iterateHandler(msg.Copy())
+		}
+	}
+}
+
 // cmpView compares two proto views.
 //
 // If v.Sequence == y.Sequence && v.Round == y.Round => 0
