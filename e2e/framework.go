@@ -205,27 +205,24 @@ func (c *Cluster) WaitForHeight(num uint64, timeout time.Duration, nodes ...[]st
 	}
 }
 
-func (c *Cluster) GetClusterNodes() map[string]*node {
+func (c *Cluster) GetNodesMap() map[string]*node {
 	return c.nodes
 }
 
-func (c *Cluster) Nodes() []*node {
-	list := make([]*node, len(c.nodes))
-	i := 0
-	for _, n := range c.nodes {
-		list[i] = n
-		i++
-	}
-	return list
+func (c *Cluster) GetNodes() []*node {
+	return c.GetFilteredNodes(nil)
 }
 
-func (c *Cluster) GetFilteredNodes(filter func(*node) bool) (filteredNodes []*node) {
+// Returns nodes which satisfy provided filter delegate function.
+// If filter is not provided, all the nodes will be retreived.
+func (c *Cluster) GetFilteredNodes(filter func(*node) bool) []*node {
+	var filteredNodes []*node
 	for _, n := range c.nodes {
-		if filter(n) {
+		if filter == nil || filter(n) {
 			filteredNodes = append(filteredNodes, n)
 		}
 	}
-	return
+	return filteredNodes
 }
 
 func (c *Cluster) GetRunningNodes() []*node {
@@ -267,7 +264,8 @@ func (c *Cluster) Stop() {
 
 // MinValidNodes returns minimum valid nodes in order to have consensus
 func (c *Cluster) MinValidNodes() int {
-	return len(c.nodes) - pbft.MaxFaultyNodes(len(c.nodes))
+	totalNodesCount := len(c.nodes)
+	return totalNodesCount - pbft.MaxFaultyNodes(totalNodesCount)
 }
 
 func (c *Cluster) FailNode(name string) {

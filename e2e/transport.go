@@ -124,11 +124,6 @@ func (f *flowMapTransport) GetPartitions() map[string][]string {
 	return f.flowMap
 }
 
-func (f *flowMapTransport) WithFlowMap(flowMap map[string][]string) *flowMapTransport {
-	f.flowMap = flowMap
-	return f
-}
-
 func newPartitionTransport(jitterMax time.Duration) *partitionTransport {
 	return &partitionTransport{jitterMax: jitterMax}
 }

@@ -92,14 +92,15 @@ func (f *FlowMapAction) Apply(c *Cluster) RevertFunc {
 		done := false
 		// generate map for every node in the cluster
 		for _, j := range c.nodes {
-			if len(flowMap[n.GetName()]) <= c.MinValidNodes() && !done {
+			minValidNodes := c.MinValidNodes()
+			if len(flowMap[n.GetName()]) <= minValidNodes && !done {
 				flowMap[n.GetName()] = append(flowMap[n.GetName()], j.GetName())
 				quorum := 0
 				for i := range flowMap {
-					if len(flowMap[i]) >= c.MinValidNodes() {
+					if len(flowMap[i]) >= minValidNodes {
 						quorum++
 					}
-					if quorum >= c.MinValidNodes() {
+					if quorum >= minValidNodes {
 						// we have enough for consensus but with probability add mode connected nodes
 						if ShouldApply(flowMapThreshold) {
 							continue

@@ -109,7 +109,7 @@ func validateDuration(totalDuration time.Duration) error {
 
 // validateNodes checks if there is progress on the node height after the scenario run
 func validateNodes(c *e2e.Cluster) {
-	if runningNodes, ok := validateCluster(c); ok {
+	if runningNodes, expectedConsensus := validateCluster(c); expectedConsensus {
 		currentHeight := c.GetMaxHeight(runningNodes)
 		expectedHeight := currentHeight + 10
 		log.Printf("Current height %v and waiting expected %v height.\n", currentHeight, expectedHeight)
@@ -119,7 +119,7 @@ func validateNodes(c *e2e.Cluster) {
 			if transportHook != nil {
 				log.Printf("Cluster partitions: %v\n", transportHook.GetPartitions())
 			}
-			for _, n := range c.Nodes() {
+			for _, n := range c.GetNodes() {
 				log.Printf("Node: %v, running: %v, locked: %v, proposal: %v\n", n.GetName(), n.IsRunning(), n.IsLocked(), n.GetProposal())
 			}
 			panic("Desired height not reached.")
@@ -132,7 +132,8 @@ func validateNodes(c *e2e.Cluster) {
 
 // validateCluster checks if there is enough running nodes that can make consensus
 func validateCluster(c *e2e.Cluster) ([]string, bool) {
-	totalNodesCount := len(c.Nodes())
+	totalNodesCount := len(c.GetNodes())
+	maxFaultyNodes := pbft.MaxFaultyNodes(totalNodesCount)
 	var partitions map[string][]string
 	// running nodes in majority partition
 	hook := c.GetTransportHook()
@@ -145,12 +146,13 @@ func validateCluster(c *e2e.Cluster) ([]string, bool) {
 		for _, n := range c.GetRunningNodes() {
 			runningNodes = append(runningNodes, n.GetName())
 		}
-		return runningNodes, len(runningNodes) >= c.MinValidNodes()
+		stoppedNodesCount := totalNodesCount - len(runningNodes)
+		return runningNodes, stoppedNodesCount <= maxFaultyNodes
 	}
 
 	// check if there is enough messages coming to particular node
 	nodeConnections := make(map[string]int)
-	nodesMap := c.GetClusterNodes()
+	nodesMap := c.GetNodesMap()
 	for node := range partitions {
 		nodes := partitions[node]
 		// count only connected running nodes
@@ -163,14 +165,15 @@ func validateCluster(c *e2e.Cluster) ([]string, bool) {
 
 	// check whether there is enough connected nodes
 	var validSenders []string
+	minValidNodes := c.MinValidNodes()
 	for k, v := range nodeConnections {
-		if nodesMap[k].IsRunning() && v >= c.MinValidNodes() {
+		if nodesMap[k].IsRunning() && v >= minValidNodes {
 			validSenders = append(validSenders, k)
 		}
 	}
 
-	stoppedNodesCount := totalNodesCount - len(validSenders)
-	return validSenders, stoppedNodesCount <= pbft.MaxFaultyNodes(totalNodesCount)
+	invalidSenders := totalNodesCount - len(validSenders)
+	return validSenders, invalidSenders <= maxFaultyNodes
 }
 
 func getAvailableActions() []e2e.FunctionalAction {
