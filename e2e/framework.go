@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -66,10 +67,17 @@ type Cluster struct {
 	hook   transportHook
 }
 
-func NewPBFTCluster(t *testing.T, name, prefix string, count int, hook ...transportHook) *Cluster {
-	names := make([]string, count)
-	for i := 0; i < count; i++ {
-		names[i] = fmt.Sprintf("%s_%d", prefix, i)
+type ClusterConfig struct {
+	Count   int
+	Name    string
+	Prefix  string
+	LogsDir string
+}
+
+func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transportHook) *Cluster {
+	names := make([]string, config.Count)
+	for i := 0; i < config.Count; i++ {
+		names[i] = fmt.Sprintf("%s_%d", config.Prefix, i)
 	}
 
 	tt := &transport{}
@@ -77,15 +85,22 @@ func NewPBFTCluster(t *testing.T, name, prefix string, count int, hook ...transp
 		tt.addHook(hook[0])
 	}
 
+	logsDir, err := CreateLogsDir(t)
+	if err != nil {
+		log.Printf("[WARNING] Could not create logs directory. Reason: %v. Logging will be defaulted to standard output.", err)
+	} else {
+		config.LogsDir = logsDir
+	}
+
 	c := &Cluster{
 		t:      t,
 		nodes:  map[string]*node{},
-		tracer: initTracer("fuzzy_" + name),
+		tracer: initTracer("fuzzy_" + config.Name),
 		hook:   tt.hook,
 	}
 	for _, name := range names {
 		trace := c.tracer.Tracer(name)
-		n, _ := newPBFTNode(name, names, trace, tt)
+		n, _ := newPBFTNode(name, config.LogsDir, names, trace, tt)
 		n.c = c
 		c.nodes[name] = n
 	}
@@ -288,10 +303,17 @@ type node struct {
 	faulty bool
 }
 
-func newPBFTNode(name string, nodes []string, trace trace.Tracer, tt *transport) (*node, error) {
+func newPBFTNode(name, logsDir string, nodes []string, trace trace.Tracer, tt *transport) (*node, error) {
 	var loggerOutput io.Writer
+	var err error
 	if os.Getenv("SILENT") == "true" {
 		loggerOutput = ioutil.Discard
+	} else if logsDir != "" {
+		loggerOutput, err = os.OpenFile(filepath.Join(logsDir, name+".log"), os.O_RDWR|os.O_APPEND|os.O_CREATE, 0660)
+		if err != nil {
+			log.Printf("[WARNING] Failed to open file for node: %v. Reason: %v. Fallbacked to standard output.", name, err)
+			loggerOutput = os.Stdout
+		}
 	} else {
 		loggerOutput = os.Stdout
 	}

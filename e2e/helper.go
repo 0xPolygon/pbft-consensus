@@ -69,3 +69,21 @@ func isFuzzEnabled(t *testing.T) {
 		t.Skip("Fuzz tests are disabled.")
 	}
 }
+
+func CreateLogsDir(t *testing.T) (string, error) {
+	//logs directory will be generated at the root of the e2e project
+	var logsDir, logsDirName string
+	var err error
+
+	if t != nil {
+		logsDirName = t.Name()
+	} else {
+		logsDirName = "logs"
+	}
+
+	if os.Getenv("E2E_LOG_TO_FILES") == "true" {
+		logsDir, err = os.MkdirTemp("../", logsDirName+"-")
+	}
+
+	return logsDir, err
+}
