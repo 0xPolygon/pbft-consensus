@@ -33,22 +33,22 @@ func (m MsgType) String() string {
 
 type MessageReq struct {
 	// type is the type of the message
-	Type MsgType
+	Type MsgType `json:"type"`
 
 	// from is the address of the sender
-	From NodeID
+	From NodeID `json:"from"`
 
 	// seal is the committed seal for the proposal (only for commit messages)
-	Seal []byte
+	Seal []byte `json:"seal"`
 
 	// view is the view assigned to the message
-	View *View
+	View *View `json:"view"`
 
 	// hash of the proposal
-	Hash []byte
+	Hash []byte `json:"hash"`
 
 	// proposal is the arbitrary data proposal (only for preprepare messages)
-	Proposal []byte
+	Proposal []byte `json:"proposal"`
 }
 
 func (m *MessageReq) Validate() error {
@@ -84,10 +84,10 @@ func (m *MessageReq) Copy() *MessageReq {
 
 type View struct {
 	// round is the current round/height being finalized
-	Round uint64
+	Round uint64 `json:"round"`
 
 	// Sequence is a sequence number inside the round
-	Sequence uint64
+	Sequence uint64 `json:"sequence"`
 }
 
 func (v *View) Copy() *View {
