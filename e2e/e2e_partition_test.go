@@ -13,7 +13,13 @@ func TestE2E_Partition_OneMajority(t *testing.T) {
 	const nodesCnt = 5
 	hook := newPartitionTransport(300 * time.Millisecond)
 
-	c := NewPBFTCluster(t, "majority_partition", "prt", nodesCnt, hook)
+	config := &ClusterConfig{
+		Count:  nodesCnt,
+		Name:   "majority_partition",
+		Prefix: "prt",
+	}
+
+	c := NewPBFTCluster(t, config, hook)
 	c.Start()
 	defer c.Stop()
 
@@ -48,7 +54,13 @@ func TestE2E_Partition_MajorityCanValidate(t *testing.T) {
 	const nodesCnt = 7 // N=3F + 1, F = 2
 	hook := newPartitionTransport(300 * time.Millisecond)
 
-	c := NewPBFTCluster(t, "majority_partition", "prt", nodesCnt, hook)
+	config := &ClusterConfig{
+		Count:  nodesCnt,
+		Name:   "majority_partition",
+		Prefix: "prt",
+	}
+
+	c := NewPBFTCluster(t, config, hook)
 	limit := int(math.Floor(nodesCnt*2.0/3.0)) + 1 // 2F+1 nodes can Validate
 	for _, node := range c.Nodes() {
 		node.setFaultyNode(node.name >= "prt_"+strconv.Itoa(limit))
@@ -72,7 +84,13 @@ func TestE2E_Partition_MajorityCantValidate(t *testing.T) {
 	const nodesCnt = 7 // N=3F + 1, F = 2
 	hook := newPartitionTransport(300 * time.Millisecond)
 
-	c := NewPBFTCluster(t, "majority_partition", "prt", nodesCnt, hook)
+	config := &ClusterConfig{
+		Count:  nodesCnt,
+		Name:   "majority_partition",
+		Prefix: "prt",
+	}
+
+	c := NewPBFTCluster(t, config, hook)
 	limit := int(math.Floor(nodesCnt * 2.0 / 3.0)) // + 1 removed because 2F+1 nodes is majority
 	for _, node := range c.Nodes() {
 		node.setFaultyNode(node.name < "prt_"+strconv.Itoa(limit))
@@ -88,7 +106,13 @@ func TestE2E_Partition_BigMajorityCantValidate(t *testing.T) {
 	const nodesCnt = 100
 	hook := newPartitionTransport(300 * time.Millisecond)
 
-	c := NewPBFTCluster(t, "majority_partition", "prt", nodesCnt, hook)
+	config := &ClusterConfig{
+		Count:  nodesCnt,
+		Name:   "majority_partition",
+		Prefix: "prt",
+	}
+
+	c := NewPBFTCluster(t, config, hook)
 	limit := int(math.Floor(nodesCnt * 2.0 / 3.0)) // + 1 removed because 2F+1 nodes is majority
 	for _, node := range c.Nodes() {
 		node.setFaultyNode(node.name <= "prt_"+strconv.Itoa(limit))
