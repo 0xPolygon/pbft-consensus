@@ -21,9 +21,15 @@ type Runner struct {
 }
 
 func NewRunner(initialNodesCount uint) *Runner {
+	config := &e2e.ClusterConfig{
+		Count:  int(initialNodesCount),
+		Name:   "fuzz_cluster",
+		Prefix: "NODE",
+	}
+
 	return &Runner{
 		availableActions: getAvailableActions(),
-		cluster:          e2e.NewPBFTCluster(nil, "fuzz_cluster", "NODE", int(initialNodesCount)),
+		cluster:          e2e.NewPBFTCluster(nil, config),
 		wg:               sync.WaitGroup{},
 	}
 }

@@ -17,6 +17,8 @@ $ docker run --net=host -v "${PWD}/otel-jaeger-config.yaml":/otel-local-config.y
 
 ## Tests
 
+To log output of nodes into files, set environment variable E2E_LOG_TO_FILES to true.
+
 ### TestE2E_NoIssue
 
 Simple cluster with 5 machines.
