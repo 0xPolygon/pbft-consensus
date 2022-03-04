@@ -361,3 +361,15 @@ type ValidatorSet interface {
 	Includes(id NodeID) bool
 	Len() int
 }
+
+// StateHandler enables custom logic encapsulation related to internal triggers within PBFT state machine (namely message receiving and timeouts).
+type StateHandler interface {
+	HandleMessage(to NodeID, message *MessageReq)
+	HandleTimeout(to NodeID, timeout time.Duration)
+}
+
+type NoOpStateHandler struct {
+}
+
+func (s *NoOpStateHandler) HandleMessage(to NodeID, message *MessageReq)   {}
+func (s *NoOpStateHandler) HandleTimeout(to NodeID, timeout time.Duration) {}

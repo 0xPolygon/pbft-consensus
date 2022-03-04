@@ -31,6 +31,9 @@ type Config struct {
 
 	// RoundTimeout is a function that calculates timeout based on a round number
 	RoundTimeout RoundTimeout
+
+	// StateHandler is a reference to the struct which encapsulates handling messages and timeouts
+	StateHandler StateHandler
 }
 
 type ConfigOption func(*Config)
@@ -65,6 +68,12 @@ func WithRoundTimeout(roundTimeout RoundTimeout) ConfigOption {
 	}
 }
 
+func WithStateHandler(stateHandler StateHandler) ConfigOption {
+	return func(c *Config) {
+		c.StateHandler = stateHandler
+	}
+}
+
 const (
 	defaultTimeout     = 2 * time.Second
 	maxTimeout         = 300 * time.Second
@@ -78,6 +87,7 @@ func DefaultConfig() *Config {
 		Logger:          log.New(os.Stderr, "", log.LstdFlags),
 		Tracer:          trace.NewNoopTracerProvider().Tracer(""),
 		RoundTimeout:    exponentialTimeout,
+		StateHandler:    &NoOpStateHandler{},
 	}
 }
 
@@ -162,6 +172,9 @@ type Pbft struct {
 	// calculates timeout for a specific round
 	roundTimeout RoundTimeout
 
+	// StateHandler is a reference to the struct which encapsulates handling messages and timeouts
+	stateHandler StateHandler
+
 	forceTimeoutCh bool
 }
 
@@ -185,6 +198,7 @@ func New(validator SignKey, transport Transport, opts ...ConfigOption) *Pbft {
 		logger:       config.Logger,
 		tracer:       config.Tracer,
 		roundTimeout: config.RoundTimeout,
+		stateHandler: config.StateHandler,
 	}
 
 	p.logger.Printf("[INFO] validator key: addr=%s\n", p.validator.NodeID())
@@ -729,6 +743,11 @@ func (p *Pbft) forceTimeout() {
 	p.forceTimeoutCh = true
 }
 
+// GetTimeout calculates timeout for a given round
+func (p *Pbft) GetTimeout() time.Duration {
+	return p.roundTimeout(p.state.view.Round)
+}
+
 // getNextMessage reads a new message from the message queue
 func (p *Pbft) getNextMessage(span trace.Span, timeout time.Duration) (*MessageReq, bool) {
 	timeoutCh := time.After(timeout)
@@ -755,6 +774,7 @@ func (p *Pbft) getNextMessage(span trace.Span, timeout time.Duration) (*MessageR
 		select {
 		case <-timeoutCh:
 			span.AddEvent("Timeout")
+			p.stateHandler.HandleTimeout(p.validator.NodeID(), timeout)
 			return nil, true
 		case <-p.ctx.Done():
 			return nil, false
@@ -776,8 +796,11 @@ func (p *Pbft) PushMessage(msg *MessageReq) {
 	case p.updateCh <- struct{}{}:
 	default:
 	}
+
+	p.stateHandler.HandleMessage(p.validator.NodeID(), msg.Copy())
 }
 
+// --- package-level helper functions ---
 // exponentialTimeout calculates the timeout duration depending on the current round.
 // Round acts as an exponent when determining timeout (2^round).
 func exponentialTimeout(round uint64) time.Duration {

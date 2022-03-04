@@ -459,6 +459,7 @@ func (n *node) Start() {
 				height:          n.getNodeHeight() + 1,
 				validationFails: n.isFaulty(),
 			}
+			// TODO: Call Save of Round Messages. Use E2E_LOG_TO_FILES env variable.
 			if err := n.pbft.SetBackend(fsm); err != nil {
 				panic(err)
 			}
