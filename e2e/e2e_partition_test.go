@@ -1,57 +1,13 @@
 package e2e
 
 import (
-	"bufio"
 	"math"
-	"math/rand"
-	"os"
 	"strconv"
 	"testing"
 	"time"
 
-	"github.com/0xPolygon/pbft-consensus"
-	"github.com/0xPolygon/pbft-consensus/e2e/fuzz/types"
 	"github.com/stretchr/testify/assert"
 )
-
-func Test_SaveAndLoadReplayMessages(t *testing.T) {
-	messages := make([]*types.RoundMessage, 2)
-	var seal []byte
-	rand.Read(seal)
-
-	msgReq := &pbft.MessageReq{
-		Type: pbft.MessageReq_Preprepare,
-		From: pbft.NodeID("Bura#2"),
-		Seal: seal,
-		View: &pbft.View{
-			Round:    0,
-			Sequence: 1,
-		},
-		Proposal: []byte{0x2, 0x3},
-	}
-
-	messages[0] = types.NewRoundMessage(pbft.NodeID("Bura#1"), msgReq)
-	messages[1] = types.NewTimeoutMessage(pbft.NodeID("Bura#2"), 2*time.Second)
-
-	filePath := "./dummy.flow"
-	f, _ := os.Create(filePath)
-
-	w := bufio.NewWriter(f)
-	rawMessages, _ := types.ConvertToByteArrays(messages)
-	for i, rawArtifact := range rawMessages {
-		w.WriteString(string(rawArtifact))
-		if i != len(rawMessages)-1 {
-			w.WriteString("\r\n")
-		}
-	}
-	w.Flush()
-	f.Close()
-
-	loadedMessages, _ := types.Load(filePath)
-	for _, msg := range loadedMessages {
-		t.Logf("%+v\r\n", msg)
-	}
-}
 
 func TestE2E_Partition_OneMajority(t *testing.T) {
 	const nodesCnt = 5

@@ -68,6 +68,7 @@ type Cluster struct {
 	tracer          *sdktrace.TracerProvider
 	hook            transportHook
 	sealedProposals []*pbft.SealedProposal
+	stateHandler    pbft.StateHandler
 }
 
 type ClusterConfig struct {
@@ -93,7 +94,12 @@ func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transportHook) 
 		tt.addHook(hook[0])
 	}
 
-	logsDir, err := CreateLogsDir(t)
+	var directoryName string
+	if t != nil {
+		directoryName = t.Name()
+	}
+
+	logsDir, err := CreateLogsDir(directoryName)
 	if err != nil {
 		log.Printf("[WARNING] Could not create logs directory. Reason: %v. Logging will be defaulted to standard output.", err)
 	} else {
@@ -106,6 +112,7 @@ func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transportHook) 
 		tracer:          initTracer("fuzzy_" + config.Name),
 		hook:            tt.hook,
 		sealedProposals: []*pbft.SealedProposal{},
+		stateHandler:    config.StateHandler,
 	}
 	for _, name := range names {
 		trace := c.tracer.Tracer(name)
@@ -468,13 +475,17 @@ func (n *node) Start() {
 				height:          n.getNodeHeight() + 1,
 				validationFails: n.isFaulty(),
 			}
-			// TODO: Call Save of Round Messages. Use E2E_LOG_TO_FILES env variable.
+
 			if err := n.pbft.SetBackend(fsm); err != nil {
 				panic(err)
 			}
 
 			// start the execution
 			n.pbft.Run(ctx)
+			err := n.c.stateHandler.SaveState()
+			if err != nil {
+				log.Printf("[WARNING] Could not write state to file. Reason: %v", err)
+			}
 
 			switch n.pbft.GetState() {
 			case pbft.SyncState:

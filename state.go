@@ -366,6 +366,7 @@ type ValidatorSet interface {
 type StateHandler interface {
 	HandleMessage(to NodeID, message *MessageReq)
 	HandleTimeout(to NodeID, timeout time.Duration)
+	SaveState() error
 }
 
 type NoOpStateHandler struct {
@@ -373,3 +374,6 @@ type NoOpStateHandler struct {
 
 func (s *NoOpStateHandler) HandleMessage(to NodeID, message *MessageReq)   {}
 func (s *NoOpStateHandler) HandleTimeout(to NodeID, timeout time.Duration) {}
+func (s *NoOpStateHandler) SaveState() error {
+	return nil
+}

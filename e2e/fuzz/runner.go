@@ -8,7 +8,6 @@ import (
 
 	"github.com/0xPolygon/pbft-consensus"
 	"github.com/0xPolygon/pbft-consensus/e2e"
-	"github.com/0xPolygon/pbft-consensus/e2e/fuzz/types"
 )
 
 var (
@@ -21,12 +20,12 @@ type Runner struct {
 	availableActions []e2e.FunctionalAction
 }
 
-func NewRunner(initialNodesCount uint) *Runner {
+func NewRunner(initialNodesCount uint, stateHandler pbft.StateHandler) *Runner {
 	config := &e2e.ClusterConfig{
 		Count:        int(initialNodesCount),
 		Name:         "fuzz_cluster",
 		Prefix:       "NODE",
-		StateHandler: &types.RoundMessageHandler{},
+		StateHandler: stateHandler,
 	}
 
 	return &Runner{

@@ -70,20 +70,17 @@ func isFuzzEnabled(t *testing.T) {
 	}
 }
 
-// TODO: Pass string instead of *testing.T instance
-func CreateLogsDir(t *testing.T) (string, error) {
+func CreateLogsDir(directoryName string) (string, error) {
 	//logs directory will be generated at the root of the e2e project
-	var logsDir, logsDirName string
+	var logsDir string
 	var err error
 
-	if t != nil {
-		logsDirName = t.Name()
-	} else {
-		logsDirName = "logs"
+	if directoryName == "" {
+		directoryName = "logs"
 	}
 
 	if os.Getenv("E2E_LOG_TO_FILES") == "true" {
-		logsDir, err = os.MkdirTemp("../", logsDirName+"-")
+		logsDir, err = os.MkdirTemp("../", directoryName+"-")
 	}
 
 	return logsDir, err

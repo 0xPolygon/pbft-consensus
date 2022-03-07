@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/0xPolygon/pbft-consensus/e2e/fuzz"
+	"github.com/0xPolygon/pbft-consensus/e2e/fuzz/types"
 )
 
 func main() {
@@ -18,11 +19,13 @@ func main() {
 	log.Printf("Duration: %v\n", *duration)
 	rand.Seed(time.Now().Unix())
 
-	runner := fuzz.NewRunner(*initialNodesCount)
+	stateHandler := &types.RoundMessageHandler{}
+	runner := fuzz.NewRunner(*initialNodesCount, stateHandler)
 	err := runner.Run(*duration)
 	if err != nil {
 		log.Printf("Error while running PolyBFT fuzz runner: %s\n", err)
 	} else {
 		log.Println("PolyBFT fuzz runner is stopped.")
 	}
+	stateHandler.CloseFile()
 }

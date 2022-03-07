@@ -16,6 +16,13 @@ const FileName = "messages.flow"
 type RoundMessageHandler struct {
 	lock     sync.Mutex
 	messages []*RoundMessage
+	file     *os.File
+}
+
+func (h *RoundMessageHandler) CloseFile() {
+	if h.file != nil {
+		h.file.Close()
+	}
 }
 
 func (h *RoundMessageHandler) AddMessage(message *RoundMessage) {
@@ -24,25 +31,47 @@ func (h *RoundMessageHandler) AddMessage(message *RoundMessage) {
 	h.messages = append(h.messages, message)
 }
 
-// Save RoundMessages to the JSON file within the pre-defined directory.
-func (h *RoundMessageHandler) Save(directory string) error {
-	_, err := os.Stat(directory)
-	if err != nil {
-		return err
+func (h *RoundMessageHandler) SaveState() error {
+	h.lock.Lock()
+	defer h.lock.Unlock()
+
+	var err error
+	if h.file == nil {
+		relativePath := "../SavedState"
+		if _, err := os.Stat(relativePath); os.IsNotExist(err) {
+			err := os.Mkdir(relativePath, 0777)
+			if err != nil {
+				return err
+			}
+		}
+
+		path, err := filepath.Abs(relativePath)
+		if err != nil {
+			return err
+		}
+
+		file, err := os.OpenFile(filepath.Join(path, FileName), os.O_RDWR|os.O_APPEND|os.O_CREATE, 0660)
+		if err != nil {
+			return err
+		}
+		h.file = file
 	}
 
+	if h.messages != nil {
+		err = h.Save(h.file)
+	}
+
+	return err
+}
+
+// Save RoundMessages to the JSON file within the pre-defined directory.
+func (h *RoundMessageHandler) Save(fileWritter *os.File) error {
 	rawMessages, err := ConvertToByteArrays(h.messages)
 	if err != nil {
 		return err
 	}
 
-	file, err := os.OpenFile(filepath.Join(directory, FileName), os.O_RDWR|os.O_APPEND|os.O_CREATE, 0660)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	bufWriter := bufio.NewWriter(file)
+	bufWriter := bufio.NewWriter(fileWritter)
 	defer bufWriter.Flush()
 
 	for i, rawMessage := range rawMessages {
