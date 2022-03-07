@@ -71,13 +71,18 @@ type Cluster struct {
 }
 
 type ClusterConfig struct {
-	Count   int
-	Name    string
-	Prefix  string
-	LogsDir string
+	Count        int
+	Name         string
+	Prefix       string
+	LogsDir      string
+	StateHandler pbft.StateHandler
 }
 
 func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transportHook) *Cluster {
+	if config.StateHandler == nil {
+		config.StateHandler = &pbft.NoOpStateHandler{}
+	}
+
 	names := make([]string, config.Count)
 	for i := 0; i < config.Count; i++ {
 		names[i] = fmt.Sprintf("%s_%d", config.Prefix, i)
@@ -104,7 +109,7 @@ func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transportHook) 
 	}
 	for _, name := range names {
 		trace := c.tracer.Tracer(name)
-		n, _ := newPBFTNode(name, config.LogsDir, names, trace, tt)
+		n, _ := newPBFTNode(name, config.LogsDir, names, config.StateHandler, trace, tt)
 		n.c = c
 		c.nodes[name] = n
 	}
@@ -360,7 +365,7 @@ type node struct {
 	faulty uint64
 }
 
-func newPBFTNode(name, logsDir string, nodes []string, trace trace.Tracer, tt *transport) (*node, error) {
+func newPBFTNode(name, logsDir string, nodes []string, stateHandler pbft.StateHandler, trace trace.Tracer, tt *transport) (*node, error) {
 	var loggerOutput io.Writer
 	var err error
 	if os.Getenv("SILENT") == "true" {
@@ -375,8 +380,12 @@ func newPBFTNode(name, logsDir string, nodes []string, trace trace.Tracer, tt *t
 		loggerOutput = os.Stdout
 	}
 
-	kk := key(name)
-	con := pbft.New(kk, tt, pbft.WithTracer(trace), pbft.WithLogger(log.New(loggerOutput, "", log.LstdFlags)))
+	con := pbft.New(
+		key(name),
+		tt,
+		pbft.WithTracer(trace),
+		pbft.WithLogger(log.New(loggerOutput, "", log.LstdFlags)),
+		pbft.WithStateHandler(stateHandler))
 
 	tt.Register(pbft.NodeID(name), func(msg *pbft.MessageReq) {
 		// pipe messages from mock transport to pbft

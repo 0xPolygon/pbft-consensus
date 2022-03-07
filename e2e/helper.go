@@ -70,6 +70,7 @@ func isFuzzEnabled(t *testing.T) {
 	}
 }
 
+// TODO: Pass string instead of *testing.T instance
 func CreateLogsDir(t *testing.T) (string, error) {
 	//logs directory will be generated at the root of the e2e project
 	var logsDir, logsDirName string
