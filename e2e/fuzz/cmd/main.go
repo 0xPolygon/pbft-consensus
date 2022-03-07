@@ -19,7 +19,7 @@ func main() {
 	log.Printf("Duration: %v\n", *duration)
 	rand.Seed(time.Now().Unix())
 
-	stateHandler := &types.RoundMessageHandler{}
+	stateHandler := &types.ReplayMessagesHandler{}
 	runner := fuzz.NewRunner(*initialNodesCount, stateHandler)
 	err := runner.Run(*duration)
 	if err != nil {

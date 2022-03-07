@@ -13,25 +13,25 @@ import (
 
 const FileName = "messages.flow"
 
-type RoundMessageHandler struct {
+type ReplayMessagesHandler struct {
 	lock     sync.Mutex
-	messages []*RoundMessage
+	messages []*ReplayMessage
 	file     *os.File
 }
 
-func (h *RoundMessageHandler) CloseFile() {
+func (h *ReplayMessagesHandler) CloseFile() {
 	if h.file != nil {
 		h.file.Close()
 	}
 }
 
-func (h *RoundMessageHandler) AddMessage(message *RoundMessage) {
+func (h *ReplayMessagesHandler) AddMessage(message *ReplayMessage) {
 	h.lock.Lock()
 	defer h.lock.Unlock()
 	h.messages = append(h.messages, message)
 }
 
-func (h *RoundMessageHandler) SaveState() error {
+func (h *ReplayMessagesHandler) SaveState() error {
 	h.lock.Lock()
 	defer h.lock.Unlock()
 
@@ -64,8 +64,8 @@ func (h *RoundMessageHandler) SaveState() error {
 	return err
 }
 
-// Save RoundMessages to the JSON file within the pre-defined directory.
-func (h *RoundMessageHandler) Save(fileWritter *os.File) error {
+// Save ReplayMessages to the JSON file within the pre-defined directory.
+func (h *ReplayMessagesHandler) Save(fileWritter *os.File) error {
 	rawMessages, err := ConvertToByteArrays(h.messages)
 	if err != nil {
 		return err
@@ -92,9 +92,9 @@ func (h *RoundMessageHandler) Save(fileWritter *os.File) error {
 	return nil
 }
 
-// Load RoundMessages JSON representation from the file on filePath and deserialize it into the object model.
-func Load(filePath string) ([]*RoundMessage, error) {
-	messages := make([]*RoundMessage, 0)
+// Load ReplayMessages JSON representation from the file on filePath and deserialize it into the object model.
+func Load(filePath string) ([]*ReplayMessage, error) {
+	messages := make([]*ReplayMessage, 0)
 	_, err := os.Stat(filePath)
 	if err != nil {
 		return messages, err
@@ -113,7 +113,7 @@ func Load(filePath string) ([]*RoundMessage, error) {
 	scanner.Buffer(buffer, MaxCharactersPerLine)
 
 	for scanner.Scan() {
-		var message *RoundMessage
+		var message *ReplayMessage
 		if err := json.Unmarshal(scanner.Bytes(), &message); err != nil {
 			return messages, err
 		}
@@ -123,10 +123,10 @@ func Load(filePath string) ([]*RoundMessage, error) {
 	return messages, nil
 }
 
-func (h *RoundMessageHandler) HandleMessage(to pbft.NodeID, message *pbft.MessageReq) {
-	h.AddMessage(NewRoundMessage(to, message))
+func (h *ReplayMessagesHandler) HandleMessage(to pbft.NodeID, message *pbft.MessageReq) {
+	h.AddMessage(NewReplayMessageReq(to, message))
 }
 
-func (h *RoundMessageHandler) HandleTimeout(to pbft.NodeID, timeout time.Duration) {
-	h.AddMessage(NewTimeoutMessage(to, timeout))
+func (h *ReplayMessagesHandler) HandleTimeout(to pbft.NodeID, timeout time.Duration) {
+	h.AddMessage(NewReplayTimeoutMessage(to, timeout))
 }
