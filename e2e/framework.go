@@ -168,7 +168,7 @@ func (c *Cluster) GetMaxHeight(nodes ...[]string) uint64 {
 	queryNodes := c.resolveNodes(nodes...)
 	var max uint64
 	for _, node := range queryNodes {
-		h, _ := c.syncWithNetwork(node)
+		h := c.nodes[node].currentHeight()
 		if h > max {
 			max = h
 		}
@@ -270,7 +270,8 @@ func (c *Cluster) GetTransportHook() transportHook {
 }
 
 type node struct {
-	lock sync.Mutex
+	lock      sync.Mutex
+	startLock sync.Mutex
 
 	c *Cluster
 
@@ -379,10 +380,15 @@ func (n *node) Start() {
 	n.cancelFn = cancelFn
 
 	go func() {
+		n.startLock.Lock()
+		defer n.startLock.Unlock()
+
 	SYNC:
 		// 'sync up' with the network
 		_, history := n.c.syncWithNetwork(n.name)
+		n.lock.Lock() // getProposals() mutates the n.proposals
 		n.proposals = history
+		n.lock.Unlock()
 
 		for {
 			fsm := &fsm{
@@ -453,6 +459,7 @@ func (k key) Sign(b []byte) ([]byte, error) {
 // -- fsm --
 
 type fsm struct {
+	lock            sync.Mutex
 	n               *node
 	nodes           []string
 	lastProposer    pbft.NodeID
