@@ -459,7 +459,6 @@ func (k key) Sign(b []byte) ([]byte, error) {
 // -- fsm --
 
 type fsm struct {
-	lock            sync.Mutex
 	n               *node
 	nodes           []string
 	lastProposer    pbft.NodeID

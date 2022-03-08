@@ -90,7 +90,7 @@ func validateNodes(c *e2e.Cluster) {
 	if runningNodes, ok := validateCluster(c); ok {
 		currentHeight := c.GetMaxHeight(runningNodes)
 		expectedHeight := currentHeight + 10
-		log.Printf("Current height %v and waiting expected %v height.\n", currentHeight, expectedHeight)
+		log.Printf("Current height %v and waiting expected %v height for running nodes %v.\n", currentHeight, expectedHeight, runningNodes)
 		err := c.WaitForHeight(expectedHeight, 3*time.Minute, runningNodes)
 		if err != nil {
 			transportHook := c.GetTransportHook()
@@ -148,6 +148,6 @@ func validateCluster(c *e2e.Cluster) ([]string, bool) {
 func getAvailableActions() []e2e.FunctionalAction {
 	return []e2e.FunctionalAction{
 		&e2e.DropNodeAction{},
-		&e2e.PartitionAction{},
+		// &e2e.PartitionAction{},
 	}
 }
