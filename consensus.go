@@ -111,13 +111,20 @@ type Backend interface {
 	ValidatorSet() ValidatorSet
 
 	// Init is used to signal the backend that a new round is going to start.
-	Init()
+	Init(*RoundInfo)
 
 	// IsStuck returns whether the pbft is stucked
 	IsStuck(num uint64) (uint64, bool)
 
 	// ValidateCommit is used to validate that a given commit is valid
 	ValidateCommit(from NodeID, seal []byte) error
+}
+
+// RoundInfo is the information about the round
+type RoundInfo struct {
+	IsProposer bool
+	Proposer   NodeID
+	Locked     bool
 }
 
 // Pbft represents the PBFT consensus mechanism object
@@ -272,13 +279,17 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 		return
 	}
 
-	p.backend.Init()
-
 	// reset round messages
 	p.state.resetRoundMsgs()
 	p.state.CalcProposer()
 
 	isProposer := p.state.proposer == p.validator.NodeID()
+
+	p.backend.Init(&RoundInfo{
+		Proposer:   p.state.proposer,
+		IsProposer: isProposer,
+		Locked:     p.state.locked,
+	})
 
 	// log the current state of this span
 	span.SetAttributes(

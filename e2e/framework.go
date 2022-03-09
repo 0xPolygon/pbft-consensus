@@ -463,7 +463,7 @@ func hash(p []byte) []byte {
 	return h.Sum(nil)
 }
 
-func (f *fsm) Init() {
+func (f *fsm) Init(*pbft.RoundInfo) {
 }
 
 func (f *fsm) ValidateCommit(node pbft.NodeID, seal []byte) error {
