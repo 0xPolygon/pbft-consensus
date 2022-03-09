@@ -462,7 +462,7 @@ func (f *fsm) Hash(p []byte) []byte {
 	return h.Sum(nil)
 }
 
-func (f *fsm) Init() {
+func (f *fsm) Init(*pbft.RoundInfo) {
 }
 
 type valString struct {
