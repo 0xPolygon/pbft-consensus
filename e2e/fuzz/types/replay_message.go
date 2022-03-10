@@ -2,17 +2,17 @@ package types
 
 import (
 	"encoding/json"
-	"time"
 
 	"github.com/0xPolygon/pbft-consensus"
 )
 
+//Struct that represents a single json object in .flow file
 type ReplayMessage struct {
 	To      pbft.NodeID      `json:"to"`
-	Timeout time.Duration    `json:"value"`
 	Message *pbft.MessageReq `json:"message"`
 }
 
+//Creates a new message to be written to .flow file
 func NewReplayMessageReq(to pbft.NodeID, message *pbft.MessageReq) *ReplayMessage {
 	return &ReplayMessage{
 		To:      to,
@@ -20,13 +20,14 @@ func NewReplayMessageReq(to pbft.NodeID, message *pbft.MessageReq) *ReplayMessag
 	}
 }
 
-func NewReplayTimeoutMessage(to pbft.NodeID, timeout time.Duration) *ReplayMessage {
+//Creates a new timeout to be written to .flow file
+func NewReplayTimeoutMessage(to pbft.NodeID) *ReplayMessage {
 	return &ReplayMessage{
-		To:      to,
-		Timeout: timeout,
+		To: to,
 	}
 }
 
+//Indicates if replay message is a timeout
 func (rm *ReplayMessage) IsTimeoutMessage() bool {
 	return rm.Message == nil
 }

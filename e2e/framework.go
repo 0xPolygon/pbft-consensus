@@ -114,6 +114,12 @@ func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transportHook) 
 		sealedProposals: []*pbft.SealedProposal{},
 		stateHandler:    config.StateHandler,
 	}
+
+	err = c.stateHandler.SaveMetaData(&names)
+	if err != nil {
+		log.Printf("[WARNING] Could not write node meta data to replay messages file. Reason: %v", err)
+	}
+
 	for _, name := range names {
 		trace := c.tracer.Tracer(name)
 		n, _ := newPBFTNode(name, config.LogsDir, names, config.StateHandler, trace, tt)
@@ -447,6 +453,10 @@ func (n *node) setFaultyNode(b bool) {
 // 0 is for not being faulty
 func (n *node) isFaulty() bool {
 	return atomic.LoadUint64(&n.faulty) != 0
+}
+
+func (n *node) PushMessage(message *pbft.MessageReq) {
+	n.pbft.PushMessage(message)
 }
 
 func (n *node) Start() {

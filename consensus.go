@@ -175,7 +175,11 @@ type Pbft struct {
 	// StateHandler is a reference to the struct which encapsulates handling messages and timeouts
 	stateHandler StateHandler
 
+	//indicates if timeout should be forced on getting next message
 	forceTimeoutCh bool
+
+	//Channel used to wait for timeout
+	timeoutChannel <-chan time.Time
 }
 
 type SignKey interface {
@@ -748,9 +752,22 @@ func (p *Pbft) GetTimeout() time.Duration {
 	return p.roundTimeout(p.state.view.Round)
 }
 
+//Triggers timeout on getting next message
+func (p *Pbft) TriggerTimeout(timeout time.Duration) {
+	p.timeoutChannel = time.After(timeout)
+}
+
+func (p *Pbft) resetTimeoutChannel() {
+	p.timeoutChannel = nil
+}
+
 // getNextMessage reads a new message from the message queue
 func (p *Pbft) getNextMessage(span trace.Span, timeout time.Duration) (*MessageReq, bool) {
-	timeoutCh := time.After(timeout)
+	if p.timeoutChannel == nil { //if timeout is not nil, it means that TriggerTimeout was called from outside
+		p.TriggerTimeout(timeout)
+	}
+	defer p.resetTimeoutChannel()
+
 	for {
 		msg, discards := p.msgQueue.readMessageWithDiscards(p.getState(), p.state.view)
 		// send the discard messages
@@ -760,21 +777,22 @@ func (p *Pbft) getNextMessage(span trace.Span, timeout time.Duration) (*MessageR
 		if msg != nil {
 			// add the event to the span
 			spanAddEventMessage("message", span, msg)
-
 			return msg, true
 		}
 
 		if p.forceTimeoutCh {
 			p.forceTimeoutCh = false
+			span.AddEvent("Timeout")
+			p.stateHandler.HandleTimeout(p.validator.NodeID())
 			return nil, true
 		}
 
 		// wait until there is a new message or
 		// someone closes the stopCh (i.e. timeout for round change)
 		select {
-		case <-timeoutCh:
+		case <-p.timeoutChannel:
 			span.AddEvent("Timeout")
-			p.stateHandler.HandleTimeout(p.validator.NodeID(), timeout)
+			p.stateHandler.HandleTimeout(p.validator.NodeID())
 			return nil, true
 		case <-p.ctx.Done():
 			return nil, false
