@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -220,6 +221,11 @@ func (c *cluster) StopNode(name string) {
 func (c *cluster) Stop() {
 	for _, n := range c.nodes {
 		n.Stop()
+		for {
+			if !n.IsRunning() {
+				break
+			}
+		}
 	}
 	if err := c.tracer.Shutdown(context.Background()); err != nil {
 		panic("failed to shutdown TracerProvider")
@@ -331,15 +337,18 @@ func (n *node) setFaultyNode(v bool) {
 }
 
 func (n *node) Start() {
-	if n.cancelFn != nil {
+	if n.IsRunning() {
 		panic("already started")
 	}
 
 	// create the ctx and the cancelFn
 	ctx, cancelFn := context.WithCancel(context.Background())
 	n.cancelFn = cancelFn
-
+	atomic.StoreUint64(&n.stopped, 1)
 	go func() {
+		defer func() {
+			atomic.StoreUint64(&n.stopped, 0)
+		}()
 	SYNC:
 		// 'sync up' with the network
 		_, history := n.c.syncWithNetwork(n.name)
@@ -376,16 +385,18 @@ func (n *node) Start() {
 	}()
 }
 
-func (n *node) IsRunning() bool {
-	return n.cancelFn != nil
-}
-
 func (n *node) Stop() {
-	if n.cancelFn == nil {
+	if !n.IsRunning() {
 		panic("already stopped")
 	}
 	n.cancelFn()
-	n.cancelFn = nil
+	// block until node is running
+	for n.IsRunning() {
+	}
+}
+
+func (n *node) IsRunning() bool {
+	return atomic.LoadUint64(&n.stopped) != 0
 }
 
 func (n *node) Restart() {
