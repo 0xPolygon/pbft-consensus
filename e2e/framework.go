@@ -70,19 +70,6 @@ type cluster struct {
 	lastProposer    pbft.NodeID
 }
 
-// getCurrentIndex returns a last index up to which there are inserted proposals
-func (c *cluster) getCurrentIndex() uint64 {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-
-	idx := 0
-	if len(c.sealedProposals) > 0 {
-		idx = len(c.sealedProposals) - 1
-	}
-
-	return uint64(idx)
-}
-
 // getSyncIndex returns a index up to which the node is synced with the network
 func (c *cluster) getSyncIndex(node string) uint64 {
 	return c.nodes[node].getSyncIndex()
@@ -158,8 +145,9 @@ func (c *cluster) IsStuck(timeout time.Duration, nodes ...[]string) {
 	nodeHeight := map[string]uint64{}
 	isStuck := func() bool {
 		for _, n := range queryNodes {
+			c.lock.Lock()
 			height := c.getNodeHeight(c.nodes[n])
-
+			c.lock.Unlock()
 			if lastHeight, ok := nodeHeight[n]; ok {
 				if lastHeight != height {
 					return false
@@ -301,10 +289,6 @@ func (c *cluster) Stop() {
 	}
 }
 
-func (c *cluster) FailNode(name string) {
-	c.nodes[name].setFaultyNode(true)
-}
-
 type node struct {
 	// index of node synchronization with the cluster
 	localSyncIndex uint64
@@ -320,7 +304,7 @@ type node struct {
 	nodes []string
 
 	// indicate if the node is faulty
-	faulty bool
+	faulty uint64
 }
 
 func newPBFTNode(name string, nodes []string, trace trace.Tracer, tt *transport) (*node, error) {
@@ -373,8 +357,21 @@ func (n *node) Insert(pp *pbft.SealedProposal) error {
 	return nil
 }
 
-func (n *node) setFaultyNode(v bool) {
-	n.faulty = v
+// setFaultyNode sets flag indicating that the node should be faulty or not
+// 0 is for not being faulty
+func (n *node) setFaultyNode(b bool) {
+	if b {
+		atomic.StoreUint64(&n.faulty, 1)
+	} else {
+		atomic.StoreUint64(&n.faulty, 0)
+	}
+
+}
+
+// isFaulty checks if the node should be faulty or not depending on the stored value
+// 0 is for not being faulty
+func (n *node) isFaulty() bool {
+	return atomic.LoadUint64(&n.faulty) != 0
 }
 
 func (n *node) Start() {
@@ -401,7 +398,7 @@ func (n *node) Start() {
 
 				// important: in this iteration of the fsm we have increased our height
 				height:          n.c.getNodeHeight(n) + 1,
-				validationFails: n.faulty,
+				validationFails: n.isFaulty(),
 			}
 			if err := n.pbft.SetBackend(fsm); err != nil {
 				panic(err)
@@ -436,11 +433,6 @@ func (n *node) Stop() {
 
 func (n *node) IsRunning() bool {
 	return atomic.LoadUint64(&n.running) != 0
-}
-
-func (n *node) Restart() {
-	n.Stop()
-	n.Start()
 }
 
 type key string

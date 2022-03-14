@@ -61,7 +61,7 @@ func TestE2E_Partition_MajorityCanValidate(t *testing.T) {
 	// restart minority and wait to sync
 	for _, node := range c.Nodes() {
 		if node.name >= "prt_"+strconv.Itoa(limit) {
-			node.Restart()
+			node.setFaultyNode(false)
 		}
 	}
 	err = c.WaitForHeight(4, 1*time.Minute)
