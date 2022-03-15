@@ -67,7 +67,6 @@ type cluster struct {
 	tracer          *sdktrace.TracerProvider
 	hook            transportHook
 	sealedProposals []*pbft.SealedProposal
-	lastProposer    pbft.NodeID
 }
 
 // getSyncIndex returns a index up to which the node is synced with the network
@@ -89,7 +88,6 @@ func (c *cluster) insertFinalProposal(p *pbft.SealedProposal) uint64 {
 		}
 	}
 	c.sealedProposals = append(c.sealedProposals, p)
-	c.lastProposer = p.Proposer
 
 	return uint64(len(c.sealedProposals) - 1)
 }
@@ -110,7 +108,6 @@ func newPBFTCluster(t *testing.T, name, prefix string, count int, hook ...transp
 		nodes:           map[string]*node{},
 		tracer:          initTracer("fuzzy_" + name),
 		hook:            tt.hook,
-		lastProposer:    pbft.NodeID(""),
 		sealedProposals: []*pbft.SealedProposal{},
 	}
 	for _, name := range names {
@@ -239,10 +236,14 @@ func (c *cluster) syncWithNetwork(nodeID string) (uint64, uint64) {
 	return height, syncIndex
 }
 
-func (c *cluster) getLastProposer() pbft.NodeID {
+func (c *cluster) getProposer(index uint64) pbft.NodeID {
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	return c.lastProposer
+	proposer := pbft.NodeID("")
+	if len(c.sealedProposals) > 0 {
+		proposer = c.sealedProposals[index].Proposer
+	}
+	return proposer
 }
 
 func (c *cluster) currentHeight() uint64 {
@@ -394,7 +395,7 @@ func (n *node) Start() {
 			fsm := &fsm{
 				n:            n,
 				nodes:        n.nodes,
-				lastProposer: n.c.getLastProposer(),
+				lastProposer: n.c.getProposer(n.getSyncIndex()),
 
 				// important: in this iteration of the fsm we have increased our height
 				height:          n.c.getNodeHeight(n) + 1,
