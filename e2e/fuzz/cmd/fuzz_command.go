@@ -2,16 +2,16 @@ package main
 
 import (
 	"flag"
-	"log"
+	"fmt"
 	"math/rand"
 	"time"
 
 	"github.com/0xPolygon/pbft-consensus/e2e/fuzz"
-	"github.com/0xPolygon/pbft-consensus/e2e/fuzz/types"
+	"github.com/0xPolygon/pbft-consensus/e2e/fuzz/replay"
 	"github.com/mitchellh/cli"
 )
 
-//Struct containing data for running fuzz-run command
+//FuzzCommand is a struct containing data for running fuzz-run command
 type FuzzCommand struct {
 	UI cli.Ui
 
@@ -45,20 +45,24 @@ func (fc *FuzzCommand) Run(args []string) int {
 		return 1
 	}
 
-	log.Printf("Starting PolyBFT fuzz runner...")
-	log.Printf("Node count: %v\n", fc.numberOfNodes)
-	log.Printf("Duration: %v\n", fc.duration)
+	fc.UI.Info("Starting PolyBFT fuzz runner...")
+	fc.UI.Info(fmt.Sprintf("Node count: %v\n", fc.numberOfNodes))
+	fc.UI.Info(fmt.Sprintf("Duration: %v\n", fc.duration))
 	rand.Seed(time.Now().Unix())
 
-	stateHandler := &types.ReplayMessagesHandler{}
-	runner := fuzz.NewRunner(fc.numberOfNodes, stateHandler)
+	replayMessageHandler := &replay.ReplayMessagesNotifier{}
+	runner := fuzz.NewRunner(fc.numberOfNodes, replayMessageHandler)
 	err = runner.Run(fc.duration)
 	if err != nil {
-		log.Printf("Error while running PolyBFT fuzz runner: '%s'\n", err)
+		fc.UI.Error(fmt.Sprintf("Error while running PolyBFT fuzz runner: '%s'\n", err))
 	} else {
-		log.Println("PolyBFT fuzz runner is stopped.")
+		fc.UI.Info("PolyBFT fuzz runner is stopped.")
 	}
-	stateHandler.CloseFile()
+
+	if err = replayMessageHandler.CloseFile(); err != nil {
+		fc.UI.Error(fmt.Sprintf("Error while closing .flow file: '%s'\n", err))
+		return 1
+	}
 
 	return 0
 }

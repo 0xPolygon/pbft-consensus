@@ -17,7 +17,7 @@ func (t *transport) addHook(hook transportHook) {
 	t.hook = hook
 }
 
-type transportHandler func(*pbft.MessageReq)
+type transportHandler func(pbft.NodeID, *pbft.MessageReq)
 
 func (t *transport) Register(name pbft.NodeID, handler transportHandler) {
 	if t.nodes == nil {
@@ -34,7 +34,7 @@ func (t *transport) Gossip(msg *pbft.MessageReq) error {
 				send = t.hook.Gossip(msg.From, to, msg)
 			}
 			if send {
-				handler(msg)
+				handler(to, msg)
 			}
 		}(to, handler)
 	}

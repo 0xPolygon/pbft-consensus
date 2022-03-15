@@ -20,12 +20,12 @@ type Runner struct {
 	availableActions []e2e.FunctionalAction
 }
 
-func NewRunner(initialNodesCount uint, stateHandler pbft.StateHandler) *Runner {
+func NewRunner(initialNodesCount uint, replayMessageNotifier e2e.ReplayNotifier) *Runner {
 	config := &e2e.ClusterConfig{
-		Count:        int(initialNodesCount),
-		Name:         "fuzz_cluster",
-		Prefix:       "NODE",
-		StateHandler: stateHandler,
+		Count:                 int(initialNodesCount),
+		Name:                  "fuzz_cluster",
+		Prefix:                "NODE",
+		ReplayMessageNotifier: replayMessageNotifier,
 	}
 
 	return &Runner{

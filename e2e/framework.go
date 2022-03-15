@@ -62,28 +62,26 @@ func initTracer(name string) *sdktrace.TracerProvider {
 }
 
 type Cluster struct {
-	t               *testing.T
-	lock            sync.Mutex
-	nodes           map[string]*node
-	tracer          *sdktrace.TracerProvider
-	hook            transportHook
-	sealedProposals []*pbft.SealedProposal
-	stateHandler    pbft.StateHandler
+	t                     *testing.T
+	lock                  sync.Mutex
+	nodes                 map[string]*node
+	tracer                *sdktrace.TracerProvider
+	hook                  transportHook
+	sealedProposals       []*pbft.SealedProposal
+	replayMessageNotifier ReplayNotifier
 }
 
 type ClusterConfig struct {
-	Count        int
-	Name         string
-	Prefix       string
-	LogsDir      string
-	StateHandler pbft.StateHandler
+	Count                 int
+	Name                  string
+	Prefix                string
+	LogsDir               string
+	ReplayMessageNotifier ReplayNotifier
+	TransportHandler      transportHandler
+	RoundTimeout          pbft.RoundTimeout
 }
 
 func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transportHook) *Cluster {
-	if config.StateHandler == nil {
-		config.StateHandler = &pbft.NoOpStateHandler{}
-	}
-
 	names := make([]string, config.Count)
 	for i := 0; i < config.Count; i++ {
 		names[i] = fmt.Sprintf("%s_%d", config.Prefix, i)
@@ -99,6 +97,10 @@ func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transportHook) 
 		directoryName = t.Name()
 	}
 
+	if config.ReplayMessageNotifier == nil {
+		config.ReplayMessageNotifier = &NullReplayNotifier{}
+	}
+
 	logsDir, err := CreateLogsDir(directoryName)
 	if err != nil {
 		log.Printf("[WARNING] Could not create logs directory. Reason: %v. Logging will be defaulted to standard output.", err)
@@ -107,22 +109,22 @@ func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transportHook) 
 	}
 
 	c := &Cluster{
-		t:               t,
-		nodes:           map[string]*node{},
-		tracer:          initTracer("fuzzy_" + config.Name),
-		hook:            tt.hook,
-		sealedProposals: []*pbft.SealedProposal{},
-		stateHandler:    config.StateHandler,
+		t:                     t,
+		nodes:                 map[string]*node{},
+		tracer:                initTracer("fuzzy_" + config.Name),
+		hook:                  tt.hook,
+		sealedProposals:       []*pbft.SealedProposal{},
+		replayMessageNotifier: config.ReplayMessageNotifier,
 	}
 
-	err = c.stateHandler.SaveMetaData(&names)
+	err = c.replayMessageNotifier.SaveMetaData(&names)
 	if err != nil {
 		log.Printf("[WARNING] Could not write node meta data to replay messages file. Reason: %v", err)
 	}
 
 	for _, name := range names {
 		trace := c.tracer.Tracer(name)
-		n, _ := newPBFTNode(name, config.LogsDir, names, config.StateHandler, trace, tt)
+		n, _ := newPBFTNode(name, names, config, trace, tt)
 		n.c = c
 		c.nodes[name] = n
 	}
@@ -378,13 +380,13 @@ type node struct {
 	faulty uint64
 }
 
-func newPBFTNode(name, logsDir string, nodes []string, stateHandler pbft.StateHandler, trace trace.Tracer, tt *transport) (*node, error) {
+func newPBFTNode(name string, nodes []string, clusterConfig *ClusterConfig, trace trace.Tracer, tt *transport) (*node, error) {
 	var loggerOutput io.Writer
 	var err error
 	if os.Getenv("SILENT") == "true" {
 		loggerOutput = ioutil.Discard
-	} else if logsDir != "" {
-		loggerOutput, err = os.OpenFile(filepath.Join(logsDir, name+".log"), os.O_RDWR|os.O_APPEND|os.O_CREATE, 0660)
+	} else if clusterConfig.LogsDir != "" {
+		loggerOutput, err = os.OpenFile(filepath.Join(clusterConfig.LogsDir, name+".log"), os.O_RDWR|os.O_APPEND|os.O_CREATE, 0660)
 		if err != nil {
 			log.Printf("[WARNING] Failed to open file for node: %v. Reason: %v. Fallbacked to standard output.", name, err)
 			loggerOutput = os.Stdout
@@ -398,12 +400,20 @@ func newPBFTNode(name, logsDir string, nodes []string, stateHandler pbft.StateHa
 		tt,
 		pbft.WithTracer(trace),
 		pbft.WithLogger(log.New(loggerOutput, "", log.LstdFlags)),
-		pbft.WithStateHandler(stateHandler))
+		pbft.WithNotifier(clusterConfig.ReplayMessageNotifier),
+		pbft.WithRoundTimeout(clusterConfig.RoundTimeout),
+	)
 
-	tt.Register(pbft.NodeID(name), func(msg *pbft.MessageReq) {
-		// pipe messages from mock transport to pbft
-		con.PushMessage(msg)
-	})
+	if clusterConfig.TransportHandler != nil {
+		//for replay messages when we do not want to gossip messages
+		tt.Register(pbft.NodeID(name), clusterConfig.TransportHandler)
+	} else {
+		tt.Register(pbft.NodeID(name), func(to pbft.NodeID, msg *pbft.MessageReq) {
+			// pipe messages from mock transport to pbft
+			con.PushMessage(msg)
+			clusterConfig.ReplayMessageNotifier.HandleMessage(to, msg)
+		})
+	}
 
 	n := &node{
 		nodes:   nodes,
@@ -492,7 +502,7 @@ func (n *node) Start() {
 
 			// start the execution
 			n.pbft.Run(ctx)
-			err := n.c.stateHandler.SaveState()
+			err := n.c.replayMessageNotifier.SaveState()
 			if err != nil {
 				log.Printf("[WARNING] Could not write state to file. Reason: %v", err)
 			}
@@ -659,3 +669,33 @@ func (v *valString) Includes(id pbft.NodeID) bool {
 func (v *valString) Len() int {
 	return len(v.nodes)
 }
+
+// ReplayNotifier is an interface that expands the StateNotifier with additional methods for saving and loading replay messages
+type ReplayNotifier interface {
+	pbft.StateNotifier
+	SaveMetaData(nodeNames *[]string) error
+	SaveState() error
+	HandleMessage(to pbft.NodeID, message *pbft.MessageReq)
+}
+
+// NullReplayNotifier is a null object implementation of ReplayNotifier interface
+type NullReplayNotifier struct {
+}
+
+// HandleTimeout implements StateNotifier interface
+func (n *NullReplayNotifier) HandleTimeout(to pbft.NodeID, msgType pbft.MsgType, view *pbft.View) {
+}
+
+// ReadNextMessage is an implementation of StateNotifier interface
+func (n *NullReplayNotifier) ReadNextMessage(p *pbft.Pbft) (*pbft.MessageReq, []*pbft.MessageReq) {
+	return p.ReadMessageWithDiscards()
+}
+
+// SaveMetaData is an implementation of ReplayNotifier interface
+func (n *NullReplayNotifier) SaveMetaData(nodeNames *[]string) error { return nil }
+
+// SaveState is an implementation of ReplayNotifier interface
+func (n *NullReplayNotifier) SaveState() error { return nil }
+
+// HandleMessage is an implementation of ReplayNotifier interface
+func (n *NullReplayNotifier) HandleMessage(to pbft.NodeID, message *pbft.MessageReq) {}

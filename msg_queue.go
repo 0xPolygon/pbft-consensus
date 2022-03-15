@@ -19,6 +19,14 @@ type msgQueue struct {
 	queueLock sync.Mutex
 }
 
+// isEmpty checks if all queues in msgQueue are empty
+func (m *msgQueue) isEmpty() bool {
+	m.queueLock.Lock()
+	defer m.queueLock.Unlock()
+
+	return m.roundChangeStateQueue.Len() == 0 && m.acceptStateQueue.Len() == 0 && m.validateStateQueue.Len() == 0
+}
+
 // pushMessage adds a new message to a message queue
 func (m *msgQueue) pushMessage(message *MessageReq) {
 	m.queueLock.Lock()
@@ -112,6 +120,18 @@ func msgToState(msg MsgType) PbftState {
 	} else if msg == MessageReq_Prepare || msg == MessageReq_Commit {
 		// prepare and commit
 		return ValidateState
+	}
+
+	panic("BUG: not expected")
+}
+
+func stateToMsg(pbftState PbftState) MsgType {
+	if pbftState == RoundChangeState {
+		return MessageReq_RoundChange
+	} else if pbftState == AcceptState {
+		return MessageReq_Preprepare
+	} else if pbftState == ValidateState {
+		return MessageReq_Prepare
 	}
 
 	panic("BUG: not expected")

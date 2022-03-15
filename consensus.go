@@ -32,8 +32,8 @@ type Config struct {
 	// RoundTimeout is a function that calculates timeout based on a round number
 	RoundTimeout RoundTimeout
 
-	// StateHandler is a reference to the struct which encapsulates handling messages and timeouts
-	StateHandler StateHandler
+	// Notifier is a reference to the struct which encapsulates handling messages and timeouts
+	Notifier StateNotifier
 }
 
 type ConfigOption func(*Config)
@@ -64,13 +64,17 @@ func WithTracer(t trace.Tracer) ConfigOption {
 
 func WithRoundTimeout(roundTimeout RoundTimeout) ConfigOption {
 	return func(c *Config) {
-		c.RoundTimeout = roundTimeout
+		if roundTimeout != nil {
+			c.RoundTimeout = roundTimeout
+		}
 	}
 }
 
-func WithStateHandler(stateHandler StateHandler) ConfigOption {
+func WithNotifier(notifier StateNotifier) ConfigOption {
 	return func(c *Config) {
-		c.StateHandler = stateHandler
+		if notifier != nil {
+			c.Notifier = notifier
+		}
 	}
 }
 
@@ -87,7 +91,7 @@ func DefaultConfig() *Config {
 		Logger:          log.New(os.Stderr, "", log.LstdFlags),
 		Tracer:          trace.NewNoopTracerProvider().Tracer(""),
 		RoundTimeout:    exponentialTimeout,
-		StateHandler:    &NoOpStateHandler{},
+		Notifier:        &NullStateNotifier{},
 	}
 }
 
@@ -169,17 +173,13 @@ type Pbft struct {
 	// tracer is a reference to the OpenTelemetry tracer
 	tracer trace.Tracer
 
-	// calculates timeout for a specific round
+	// roundTimeout calculates timeout for a specific round
 	roundTimeout RoundTimeout
 
-	// StateHandler is a reference to the struct which encapsulates handling messages and timeouts
-	stateHandler StateHandler
-
+	// notifier is a reference to the struct which encapsulates handling messages and timeouts
+	notifier StateNotifier
 	//indicates if timeout should be forced on getting next message
 	forceTimeoutCh bool
-
-	//Channel used to wait for timeout
-	timeoutChannel <-chan time.Time
 }
 
 type SignKey interface {
@@ -202,7 +202,7 @@ func New(validator SignKey, transport Transport, opts ...ConfigOption) *Pbft {
 		logger:       config.Logger,
 		tracer:       config.Tracer,
 		roundTimeout: config.RoundTimeout,
-		stateHandler: config.StateHandler,
+		notifier:     config.Notifier,
 	}
 
 	p.logger.Printf("[INFO] validator key: addr=%s\n", p.validator.NodeID())
@@ -752,24 +752,11 @@ func (p *Pbft) GetTimeout() time.Duration {
 	return p.roundTimeout(p.state.view.Round)
 }
 
-//Triggers timeout on getting next message
-func (p *Pbft) TriggerTimeout(timeout time.Duration) {
-	p.timeoutChannel = time.After(timeout)
-}
-
-func (p *Pbft) resetTimeoutChannel() {
-	p.timeoutChannel = nil
-}
-
 // getNextMessage reads a new message from the message queue
 func (p *Pbft) getNextMessage(span trace.Span, timeout time.Duration) (*MessageReq, bool) {
-	if p.timeoutChannel == nil { //if timeout is not nil, it means that TriggerTimeout was called from outside
-		p.TriggerTimeout(timeout)
-	}
-	defer p.resetTimeoutChannel()
-
+	timeoutCh := time.After(timeout)
 	for {
-		msg, discards := p.msgQueue.readMessageWithDiscards(p.getState(), p.state.view)
+		msg, discards := p.notifier.ReadNextMessage(p)
 		// send the discard messages
 		for _, msg := range discards {
 			spanAddEventMessage("dropMessage", span, msg)
@@ -783,22 +770,33 @@ func (p *Pbft) getNextMessage(span trace.Span, timeout time.Duration) (*MessageR
 		if p.forceTimeoutCh {
 			p.forceTimeoutCh = false
 			span.AddEvent("Timeout")
-			p.stateHandler.HandleTimeout(p.validator.NodeID())
+			p.notifier.HandleTimeout(p.validator.NodeID(), stateToMsg(p.getState()), &View{
+				Round:    p.state.view.Round,
+				Sequence: p.state.view.Sequence,
+			})
 			return nil, true
 		}
 
 		// wait until there is a new message or
 		// someone closes the stopCh (i.e. timeout for round change)
 		select {
-		case <-p.timeoutChannel:
+		case <-timeoutCh:
 			span.AddEvent("Timeout")
-			p.stateHandler.HandleTimeout(p.validator.NodeID())
+			p.notifier.HandleTimeout(p.validator.NodeID(), stateToMsg(p.getState()), &View{
+				Round:    p.state.view.Round,
+				Sequence: p.state.view.Sequence,
+			})
 			return nil, true
 		case <-p.ctx.Done():
 			return nil, false
 		case <-p.updateCh:
 		}
 	}
+}
+
+// HasMessages checks if state machine has any messages in message queue
+func (p *Pbft) HasMessages() bool {
+	return p.msgQueue.isEmpty()
 }
 
 // PushMessage pushes a new message to the message queue
@@ -814,8 +812,11 @@ func (p *Pbft) PushMessage(msg *MessageReq) {
 	case p.updateCh <- struct{}{}:
 	default:
 	}
+}
 
-	p.stateHandler.HandleMessage(p.validator.NodeID(), msg.Copy())
+// Reads next message with discards from message queue based on current state, sequence and round
+func (p *Pbft) ReadMessageWithDiscards() (*MessageReq, []*MessageReq) {
+	return p.msgQueue.readMessageWithDiscards(p.getState(), p.state.view)
 }
 
 // --- package-level helper functions ---

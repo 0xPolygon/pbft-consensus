@@ -362,22 +362,22 @@ type ValidatorSet interface {
 	Len() int
 }
 
-// StateHandler enables custom logic encapsulation related to internal triggers within PBFT state machine (namely message receiving and timeouts).
-type StateHandler interface {
-	HandleMessage(to NodeID, message *MessageReq)
-	HandleTimeout(to NodeID)
-	SaveState() error
-	SaveMetaData(nodeNames *[]string) error
+// StateNotifier enables custom logic encapsulation related to internal triggers within PBFT state machine (namely receiving timeouts).
+type StateNotifier interface {
+	// HandleTimeout notifies that a timeout occured while getting next message
+	HandleTimeout(to NodeID, msgType MsgType, view *View)
+	// ReadNextMessage reads the next message from message queue of the state machine
+	ReadNextMessage(p *Pbft) (*MessageReq, []*MessageReq)
 }
 
-type NoOpStateHandler struct {
+// NullStateNotifier is a null object implementation of StateNotifier interface
+type NullStateNotifier struct {
 }
 
-func (s *NoOpStateHandler) HandleMessage(to NodeID, message *MessageReq) {}
-func (s *NoOpStateHandler) HandleTimeout(to NodeID)                      {}
-func (s *NoOpStateHandler) SaveState() error {
-	return nil
-}
-func (s *NoOpStateHandler) SaveMetaData(nodeNames *[]string) error {
-	return nil
+// HandleTimeout implements StateNotifier interface
+func (n *NullStateNotifier) HandleTimeout(to NodeID, msgType MsgType, view *View) {}
+
+// ReadNextMessage is an implementation of StateNotifier interface
+func (n *NullStateNotifier) ReadNextMessage(p *Pbft) (*MessageReq, []*MessageReq) {
+	return p.ReadMessageWithDiscards()
 }
