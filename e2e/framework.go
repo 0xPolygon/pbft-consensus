@@ -75,7 +75,7 @@ func (c *cluster) getSyncIndex(node string) uint64 {
 }
 
 // insertFinalProposal inserts final proposal from the node to the cluster and returns index up to which the node is synced
-func (c *cluster) insertFinalProposal(p *pbft.SealedProposal) uint64 {
+func (c *cluster) insertFinalProposal(p *pbft.SealedProposal) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
@@ -86,12 +86,9 @@ func (c *cluster) insertFinalProposal(p *pbft.SealedProposal) uint64 {
 		if !c.sealedProposals[insertIndex].Proposal.Equal(p.Proposal) {
 			panic("Proposals are not equal")
 		}
-		return uint64(len(c.sealedProposals) - 1)
 	} else {
 		c.sealedProposals = append(c.sealedProposals, p)
-		return uint64(len(c.sealedProposals) - 1)
 	}
-
 }
 
 func newPBFTCluster(t *testing.T, name, prefix string, count int, hook ...transportHook) *cluster {
@@ -355,8 +352,7 @@ func (n *node) isStuck(num uint64) (uint64, bool) {
 }
 
 func (n *node) Insert(pp *pbft.SealedProposal) error {
-	index := n.c.insertFinalProposal(pp)
-	n.setSyncIndex(index)
+	n.c.insertFinalProposal(pp)
 	return nil
 }
 
@@ -416,6 +412,7 @@ func (n *node) Start() {
 				goto SYNC
 			case pbft.DoneState:
 				// everything worked, move to the next iteration
+				n.setSyncIndex(fsm.height - 2)
 			default:
 				// stopped
 				return
@@ -436,6 +433,11 @@ func (n *node) Stop() {
 
 func (n *node) IsRunning() bool {
 	return atomic.LoadUint64(&n.running) != 0
+}
+
+func (n *node) Restart() {
+	n.Stop()
+	n.Start()
 }
 
 type key string
