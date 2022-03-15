@@ -78,18 +78,20 @@ func (c *cluster) getSyncIndex(node string) uint64 {
 func (c *cluster) insertFinalProposal(p *pbft.SealedProposal) uint64 {
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	if len(c.sealedProposals) > 0 {
-		v := c.sealedProposals[len(c.sealedProposals)-1]
-		if v.Number == p.Number {
-			if !v.Proposal.Equal(p.Proposal) {
-				panic("Proposals are not equal")
-			}
-			return uint64(len(c.sealedProposals) - 1)
-		}
-	}
-	c.sealedProposals = append(c.sealedProposals, p)
 
-	return uint64(len(c.sealedProposals) - 1)
+	lastIndex := len(c.sealedProposals) - 1
+	insertIndex := p.Number - 2
+	if insertIndex == uint64(lastIndex) {
+		// already exists
+		if !c.sealedProposals[insertIndex].Proposal.Equal(p.Proposal) {
+			panic("Proposals are not equal")
+		}
+		return uint64(len(c.sealedProposals) - 1)
+	} else {
+		c.sealedProposals = append(c.sealedProposals, p)
+		return uint64(len(c.sealedProposals) - 1)
+	}
+
 }
 
 func newPBFTCluster(t *testing.T, name, prefix string, count int, hook ...transportHook) *cluster {
