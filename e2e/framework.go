@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -238,7 +239,7 @@ type node struct {
 	name     string
 	pbft     *pbft.Pbft
 	cancelFn context.CancelFunc
-	stopped  uint64
+	running  uint64
 
 	// validator nodes
 	nodes []string
@@ -270,7 +271,7 @@ func newPBFTNode(name string, nodes []string, trace trace.Tracer, tt *transport)
 		proposals: []*pbft.SealedProposal{},
 		name:      name,
 		pbft:      con,
-		stopped:   0,
+		running:   0,
 	}
 	return n, nil
 }
@@ -331,15 +332,18 @@ func (n *node) setFaultyNode(v bool) {
 }
 
 func (n *node) Start() {
-	if n.cancelFn != nil {
+	if n.IsRunning() {
 		panic("already started")
 	}
 
 	// create the ctx and the cancelFn
 	ctx, cancelFn := context.WithCancel(context.Background())
 	n.cancelFn = cancelFn
-
+	atomic.StoreUint64(&n.running, 1)
 	go func() {
+		defer func() {
+			atomic.StoreUint64(&n.running, 0)
+		}()
 	SYNC:
 		// 'sync up' with the network
 		_, history := n.c.syncWithNetwork(n.name)
@@ -376,16 +380,18 @@ func (n *node) Start() {
 	}()
 }
 
-func (n *node) IsRunning() bool {
-	return n.cancelFn != nil
-}
-
 func (n *node) Stop() {
-	if n.cancelFn == nil {
+	if !n.IsRunning() {
 		panic("already stopped")
 	}
 	n.cancelFn()
-	n.cancelFn = nil
+	// block until node is running
+	for n.IsRunning() {
+	}
+}
+
+func (n *node) IsRunning() bool {
+	return atomic.LoadUint64(&n.running) != 0
 }
 
 func (n *node) Restart() {
