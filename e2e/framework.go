@@ -70,7 +70,7 @@ type cluster struct {
 }
 
 // getSyncIndex returns a index up to which the node is synced with the network
-func (c *cluster) getSyncIndex(node string) uint64 {
+func (c *cluster) getSyncIndex(node string) int64 {
 	return c.nodes[node].getSyncIndex()
 }
 
@@ -80,13 +80,14 @@ func (c *cluster) insertFinalProposal(p *pbft.SealedProposal) {
 	defer c.lock.Unlock()
 
 	lastIndex := len(c.sealedProposals) - 1
-	insertIndex := p.Number - 2
+	insertIndex := p.Number - 1
 	if insertIndex == uint64(lastIndex) {
 		// already exists
 		if !c.sealedProposals[insertIndex].Proposal.Equal(p.Proposal) {
 			panic("Proposals are not equal")
 		}
 	} else {
+		fmt.Printf("Proposer: %v Insert height %v\n", p.Proposer, p.Number)
 		c.sealedProposals = append(c.sealedProposals, p)
 	}
 }
@@ -141,9 +142,7 @@ func (c *cluster) IsStuck(timeout time.Duration, nodes ...[]string) {
 	nodeHeight := map[string]uint64{}
 	isStuck := func() bool {
 		for _, n := range queryNodes {
-			c.lock.Lock()
-			height := c.getNodeHeight(c.nodes[n])
-			c.lock.Unlock()
+			height := c.nodes[n].getNodeHeight()
 			if lastHeight, ok := nodeHeight[n]; ok {
 				if lastHeight != height {
 					return false
@@ -180,7 +179,7 @@ func (c *cluster) WaitForHeight(num uint64, timeout time.Duration, nodes ...[]st
 		defer c.lock.Unlock()
 
 		for _, name := range queryNodes {
-			if c.getNodeHeight(c.nodes[name]) < num {
+			if c.nodes[name].getNodeHeight() < num {
 				return false
 			}
 		}
@@ -200,21 +199,16 @@ func (c *cluster) WaitForHeight(num uint64, timeout time.Duration, nodes ...[]st
 	}
 }
 
-func (c *cluster) getNodeHeight(n *node) uint64 {
-	index := n.getSyncIndex()
-	height := uint64(1) // initial height is always 1 since 0 is the genesis
-	if len(c.sealedProposals) != 0 {
-		height = c.sealedProposals[index].Number
-	}
-	return height
+func (n *node) getNodeHeight() uint64 {
+	return uint64(n.getSyncIndex()) + 1
 }
 
-func (c *cluster) syncWithNetwork(nodeID string) (uint64, uint64) {
+func (c *cluster) syncWithNetwork(nodeID string) (uint64, int64) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
 	var height uint64
-	var syncIndex uint64
+	var syncIndex int64 = -1
 	for _, n := range c.nodes {
 		if n.name == nodeID {
 			continue
@@ -226,7 +220,7 @@ func (c *cluster) syncWithNetwork(nodeID string) (uint64, uint64) {
 				continue
 			}
 		}
-		localHeight := c.getNodeHeight(n)
+		localHeight := n.getNodeHeight()
 		if localHeight > height {
 			height = localHeight
 			syncIndex = n.getSyncIndex()
@@ -235,25 +229,25 @@ func (c *cluster) syncWithNetwork(nodeID string) (uint64, uint64) {
 	return height, syncIndex
 }
 
-func (c *cluster) getProposer(index uint64) pbft.NodeID {
+func (c *cluster) getProposer(index int64) pbft.NodeID {
 	c.lock.Lock()
 	defer c.lock.Unlock()
+
 	proposer := pbft.NodeID("")
-	if len(c.sealedProposals) > 0 {
+	if index > -1 && int64(len(c.sealedProposals)-1) >= index {
 		proposer = c.sealedProposals[index].Proposer
 	}
+
 	return proposer
 }
 
-func (c *cluster) currentHeight() uint64 {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-
-	number := uint64(1) // initial height is always 1 since 0 is the genesis
-	if len(c.sealedProposals) != 0 {
-		number = c.sealedProposals[len(c.sealedProposals)-1].Number
+func (n *node) currentHeight() uint64 {
+	height := uint64(0) // initial height is always 1 since 0 is the genesis
+	index := n.getSyncIndex()
+	if index >= 0 {
+		height = uint64(index) + 1
 	}
-	return number
+	return height
 }
 
 func (c *cluster) Nodes() []*node {
@@ -291,7 +285,7 @@ func (c *cluster) Stop() {
 
 type node struct {
 	// index of node synchronization with the cluster
-	localSyncIndex uint64
+	localSyncIndex int64
 
 	c *cluster
 
@@ -324,21 +318,21 @@ func newPBFTNode(name string, nodes []string, trace trace.Tracer, tt *transport)
 	})
 
 	n := &node{
-		nodes:     nodes,
-		name:      name,
-		pbft:      con,
-		syncIndex: 0,
-		running:   0,
+		nodes:          nodes,
+		name:           name,
+		pbft:           con,
+		running:        0,
+		localSyncIndex: -1,
 	}
 	return n, nil
 }
 
-func (n *node) getSyncIndex() uint64 {
-	return atomic.LoadUint64(&n.localSyncIndex)
+func (n *node) getSyncIndex() int64 {
+	return atomic.LoadInt64(&n.localSyncIndex)
 }
 
-func (n *node) setSyncIndex(idx uint64) {
-	atomic.StoreUint64(&n.localSyncIndex, idx)
+func (n *node) setSyncIndex(idx int64) {
+	atomic.StoreInt64(&n.localSyncIndex, idx)
 }
 
 func (n *node) isStuck(num uint64) (uint64, bool) {
@@ -364,7 +358,6 @@ func (n *node) setFaultyNode(b bool) {
 	} else {
 		atomic.StoreUint64(&n.faulty, 0)
 	}
-
 }
 
 // isFaulty checks if the node should be faulty or not depending on the stored value
@@ -396,7 +389,7 @@ func (n *node) Start() {
 				lastProposer: n.c.getProposer(n.getSyncIndex()),
 
 				// important: in this iteration of the fsm we have increased our height
-				height:          n.c.getNodeHeight(n) + 1,
+				height:          n.getNodeHeight() + 1,
 				validationFails: n.isFaulty(),
 			}
 			if err := n.pbft.SetBackend(fsm); err != nil {
@@ -412,7 +405,8 @@ func (n *node) Start() {
 				goto SYNC
 			case pbft.DoneState:
 				// everything worked, move to the next iteration
-				n.setSyncIndex(fsm.height - 2)
+				currentIndex := n.getSyncIndex()
+				n.setSyncIndex(currentIndex + 1)
 			default:
 				// stopped
 				return
