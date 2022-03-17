@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/0xPolygon/pbft-consensus/e2e/fuzz/replay"
 	"github.com/mitchellh/cli"
 )
 
@@ -40,7 +41,7 @@ func getCommands() map[string]cli.CommandFactory {
 			}, nil
 		},
 		"replay-messages": func() (cli.Command, error) {
-			return &ReplayMessageCommand{
+			return &replay.ReplayMessageCommand{
 				UI: ui,
 			}, nil
 		},

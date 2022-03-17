@@ -98,7 +98,7 @@ func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transportHook) 
 	}
 
 	if config.ReplayMessageNotifier == nil {
-		config.ReplayMessageNotifier = &NullReplayNotifier{}
+		config.ReplayMessageNotifier = &DefaultReplayNotifier{}
 	}
 
 	logsDir, err := CreateLogsDir(directoryName)
@@ -678,24 +678,24 @@ type ReplayNotifier interface {
 	HandleMessage(to pbft.NodeID, message *pbft.MessageReq)
 }
 
-// NullReplayNotifier is a null object implementation of ReplayNotifier interface
-type NullReplayNotifier struct {
+// DefaultReplayNotifier is a null object implementation of ReplayNotifier interface
+type DefaultReplayNotifier struct {
 }
 
 // HandleTimeout implements StateNotifier interface
-func (n *NullReplayNotifier) HandleTimeout(to pbft.NodeID, msgType pbft.MsgType, view *pbft.View) {
+func (n *DefaultReplayNotifier) HandleTimeout(to pbft.NodeID, msgType pbft.MsgType, view *pbft.View) {
 }
 
 // ReadNextMessage is an implementation of StateNotifier interface
-func (n *NullReplayNotifier) ReadNextMessage(p *pbft.Pbft) (*pbft.MessageReq, []*pbft.MessageReq) {
+func (n *DefaultReplayNotifier) ReadNextMessage(p *pbft.Pbft) (*pbft.MessageReq, []*pbft.MessageReq) {
 	return p.ReadMessageWithDiscards()
 }
 
 // SaveMetaData is an implementation of ReplayNotifier interface
-func (n *NullReplayNotifier) SaveMetaData(nodeNames *[]string) error { return nil }
+func (n *DefaultReplayNotifier) SaveMetaData(nodeNames *[]string) error { return nil }
 
 // SaveState is an implementation of ReplayNotifier interface
-func (n *NullReplayNotifier) SaveState() error { return nil }
+func (n *DefaultReplayNotifier) SaveState() error { return nil }
 
 // HandleMessage is an implementation of ReplayNotifier interface
-func (n *NullReplayNotifier) HandleMessage(to pbft.NodeID, message *pbft.MessageReq) {}
+func (n *DefaultReplayNotifier) HandleMessage(to pbft.NodeID, message *pbft.MessageReq) {}

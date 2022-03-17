@@ -211,7 +211,6 @@ func TestTransition_AcceptState_Validator_ProposerInvalid(t *testing.T) {
 		Proposal: mockProposal,
 		View:     ViewMsg(1, 0),
 	})
-	i.forceTimeout()
 
 	i.runCycle(context.Background())
 
@@ -373,9 +372,21 @@ func TestTransition_RoundChangeState_CatchupRound(t *testing.T) {
 func TestTransition_RoundChangeState_Timeout(t *testing.T) {
 	m := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
 
-	m.forceTimeout()
 	m.setState(RoundChangeState)
-	m.Close()
+
+	// Jump out from a state machine loop straight away after round 2
+	waitSignal := make(chan struct{})
+	go func() {
+		close(waitSignal)
+		for {
+			if m.state.view.Round == 2 {
+				m.cancelFn()
+				return
+			}
+		}
+	}()
+
+	<-waitSignal
 
 	// increases to round 1 at the beginning of the round and sends
 	// one RoundChange message.

@@ -72,43 +72,6 @@ func (h *ReplayMessagesNotifier) SaveState() error {
 	return err
 }
 
-// Load loads ReplayMessages JSON representation from the file on filePath and deserialize it into the object model.
-func Load(filePath string) ([]*ReplayMessage, []string, error) {
-	messages := make([]*ReplayMessage, 0)
-	nodeNames := make([]string, 0)
-
-	_, err := os.Stat(filePath)
-	if err != nil {
-		return messages, nodeNames, err
-	}
-
-	flowsFile, err := os.Open(filePath)
-	if err != nil {
-		return messages, nodeNames, err
-	}
-	defer flowsFile.Close()
-
-	scanner := bufio.NewScanner(flowsFile)
-
-	buffer := []byte{}
-	scanner.Buffer(buffer, MaxCharactersPerLine)
-
-	scanner.Scan() // first line carries the node names needed to create appropriate number of nodes for replay
-	if err := json.Unmarshal(scanner.Bytes(), &nodeNames); err != nil {
-		return messages, nodeNames, err
-	}
-
-	for scanner.Scan() {
-		var message *ReplayMessage
-		if err := json.Unmarshal(scanner.Bytes(), &message); err != nil {
-			return messages, nodeNames, err
-		}
-		messages = append(messages, message)
-	}
-
-	return messages, nodeNames, nil
-}
-
 // HandleMessage caches processed message to be saved later in .flow file
 func (h *ReplayMessagesNotifier) HandleMessage(to pbft.NodeID, message *pbft.MessageReq) {
 	h.addMessage(NewReplayMessageReq(to, message))

@@ -370,14 +370,14 @@ type StateNotifier interface {
 	ReadNextMessage(p *Pbft) (*MessageReq, []*MessageReq)
 }
 
-// NullStateNotifier is a null object implementation of StateNotifier interface
-type NullStateNotifier struct {
+// DefaultStateNotifier is a null object implementation of StateNotifier interface
+type DefaultStateNotifier struct {
 }
 
 // HandleTimeout implements StateNotifier interface
-func (n *NullStateNotifier) HandleTimeout(to NodeID, msgType MsgType, view *View) {}
+func (d *DefaultStateNotifier) HandleTimeout(to NodeID, msgType MsgType, view *View) {}
 
 // ReadNextMessage is an implementation of StateNotifier interface
-func (n *NullStateNotifier) ReadNextMessage(p *Pbft) (*MessageReq, []*MessageReq) {
+func (d *DefaultStateNotifier) ReadNextMessage(p *Pbft) (*MessageReq, []*MessageReq) {
 	return p.ReadMessageWithDiscards()
 }

@@ -91,7 +91,7 @@ func DefaultConfig() *Config {
 		Logger:          log.New(os.Stderr, "", log.LstdFlags),
 		Tracer:          trace.NewNoopTracerProvider().Tracer(""),
 		RoundTimeout:    exponentialTimeout,
-		Notifier:        &NullStateNotifier{},
+		Notifier:        &DefaultStateNotifier{},
 	}
 }
 
@@ -178,8 +178,6 @@ type Pbft struct {
 
 	// notifier is a reference to the struct which encapsulates handling messages and timeouts
 	notifier StateNotifier
-	//indicates if timeout should be forced on getting next message
-	forceTimeoutCh bool
 }
 
 type SignKey interface {
@@ -742,11 +740,6 @@ func (p *Pbft) setState(s PbftState) {
 	p.state.setState(s)
 }
 
-// forceTimeout sets the forceTimeoutCh flag to true
-func (p *Pbft) forceTimeout() {
-	p.forceTimeoutCh = true
-}
-
 // GetTimeout calculates timeout for a given round
 func (p *Pbft) GetTimeout() time.Duration {
 	return p.roundTimeout(p.state.view.Round)
@@ -765,16 +758,6 @@ func (p *Pbft) getNextMessage(span trace.Span, timeout time.Duration) (*MessageR
 			// add the event to the span
 			spanAddEventMessage("message", span, msg)
 			return msg, true
-		}
-
-		if p.forceTimeoutCh {
-			p.forceTimeoutCh = false
-			span.AddEvent("Timeout")
-			p.notifier.HandleTimeout(p.validator.NodeID(), stateToMsg(p.getState()), &View{
-				Round:    p.state.view.Round,
-				Sequence: p.state.view.Sequence,
-			})
-			return nil, true
 		}
 
 		// wait until there is a new message or
