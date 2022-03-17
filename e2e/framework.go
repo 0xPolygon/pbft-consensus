@@ -244,6 +244,14 @@ func (c *Cluster) WaitForHeight(num uint64, timeout time.Duration, nodes ...[]st
 	}
 }
 
+func (c *Cluster) GetNodesMap() map[string]*node {
+	return c.nodes
+}
+
+func (c *Cluster) GetNodes() []*node {
+	return c.GetFilteredNodes(nil)
+}
+
 // getNodeHeight returns node height depending on node index
 // difference between height and syncIndex is 1
 // first inserted proposal is on index 0 with height 1
@@ -308,9 +316,12 @@ func (c *Cluster) Nodes() []*node {
 	return list
 }
 
-func (c *Cluster) GetFilteredNodes(filter func(*node) bool) (filteredNodes []*node) {
+// Returns nodes which satisfy provided filter delegate function.
+// If filter is not provided, all the nodes will be retreived.
+func (c *Cluster) GetFilteredNodes(filter func(*node) bool) []*node {
+	var filteredNodes []*node
 	for _, n := range c.nodes {
-		if filter(n) {
+		if filter == nil || filter(n) {
 			filteredNodes = append(filteredNodes, n)
 		}
 	}
@@ -354,12 +365,14 @@ func (c *Cluster) Stop() {
 	}
 }
 
-func (c *Cluster) FailNode(name string) {
-	c.nodes[name].setFaultyNode(true)
-}
-
 func (c *Cluster) GetTransportHook() transportHook {
 	return c.hook
+}
+
+// MinValidNodes returns minimum valid nodes in order to have consensus
+func (c *Cluster) MinValidNodes() int {
+	totalNodesCount := len(c.nodes)
+	return totalNodesCount - pbft.MaxFaultyNodes(totalNodesCount)
 }
 
 type node struct {
@@ -533,6 +546,14 @@ func (n *node) Stop() {
 	}
 }
 
+func (n *node) GetProposal() *pbft.Proposal {
+	return n.pbft.GetProposal()
+}
+
+func (n *node) IsLocked() bool {
+	return n.pbft.IsLocked()
+}
+
 func (n *node) IsRunning() bool {
 	return atomic.LoadUint64(&n.running) != 0
 }
@@ -585,10 +606,6 @@ func (f *fsm) BuildProposal() (*pbft.Proposal, error) {
 	}
 	proposal.Hash = hash(proposal.Data)
 	return proposal, nil
-}
-
-func (f *fsm) setValidationFails(v bool) {
-	f.validationFails = v
 }
 
 func (f *fsm) Validate(proposal *pbft.Proposal) error {

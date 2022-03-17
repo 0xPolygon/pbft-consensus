@@ -167,5 +167,5 @@ func (h *ReplayMessagesNotifier) saveMessages(fileWritter *os.File) error {
 }
 
 func isTimeoutMessage(message *pbft.MessageReq) bool {
-	return message.Digest == "" && message.Proposal == nil && message.Seal == nil && message.From == ""
+	return message.Hash == nil && message.Proposal == nil && message.Seal == nil && message.From == ""
 }
