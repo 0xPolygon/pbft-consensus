@@ -69,29 +69,6 @@ type cluster struct {
 	sealedProposals []*pbft.SealedProposal
 }
 
-// getSyncIndex returns a index up to which the node is synced with the network
-func (c *cluster) getSyncIndex(node string) int64 {
-	return c.nodes[node].getSyncIndex()
-}
-
-// insertFinalProposal inserts final proposal from the node to the cluster and returns index up to which the node is synced
-func (c *cluster) insertFinalProposal(p *pbft.SealedProposal) {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-
-	lastIndex := len(c.sealedProposals) - 1
-	insertIndex := p.Number - 1
-	if insertIndex == uint64(lastIndex) {
-		// already exists
-		if !c.sealedProposals[insertIndex].Proposal.Equal(p.Proposal) {
-			panic("Proposals are not equal")
-		}
-	} else {
-		fmt.Printf("Proposer: %v Insert height %v\n", p.Proposer, p.Number)
-		c.sealedProposals = append(c.sealedProposals, p)
-	}
-}
-
 func newPBFTCluster(t *testing.T, name, prefix string, count int, hook ...transportHook) *cluster {
 	names := make([]string, count)
 	for i := 0; i < count; i++ {
@@ -117,6 +94,28 @@ func newPBFTCluster(t *testing.T, name, prefix string, count int, hook ...transp
 		c.nodes[name] = n
 	}
 	return c
+}
+
+// getSyncIndex returns an index up to which the node is synced with the network
+func (c *cluster) getSyncIndex(node string) int64 {
+	return c.nodes[node].getSyncIndex()
+}
+
+// insertFinalProposal inserts final proposal from the node to the cluster
+func (c *cluster) insertFinalProposal(p *pbft.SealedProposal) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	lastIndex := len(c.sealedProposals) - 1
+	insertIndex := p.Number - 1
+	if insertIndex == uint64(lastIndex) {
+		// already exists
+		if !c.sealedProposals[insertIndex].Proposal.Equal(p.Proposal) {
+			panic("Proposals are not equal")
+		}
+	} else {
+		c.sealedProposals = append(c.sealedProposals, p)
+	}
 }
 
 func (c *cluster) resolveNodes(nodes ...[]string) []string {
@@ -171,7 +170,6 @@ func (c *cluster) WaitForHeight(num uint64, timeout time.Duration, nodes ...[]st
 	// we need to check every node in the ensemble?
 	// yes, this should test if everyone can agree on the final set.
 	// note, if we include drops, we need to do sync otherwise this will never work
-
 	queryNodes := c.resolveNodes(nodes...)
 
 	enough := func() bool {
@@ -199,6 +197,9 @@ func (c *cluster) WaitForHeight(num uint64, timeout time.Duration, nodes ...[]st
 	}
 }
 
+// getNodeHeight returns node height depending on node index
+// difference between height and syncIndex is 1
+// first inserted proposal is on index 0 with height 1
 func (n *node) getNodeHeight() uint64 {
 	return uint64(n.getSyncIndex()) + 1
 }
@@ -208,14 +209,14 @@ func (c *cluster) syncWithNetwork(nodeID string) (uint64, int64) {
 	defer c.lock.Unlock()
 
 	var height uint64
-	var syncIndex int64 = -1
+	var syncIndex = int64(-1) // initial sync index is -1
 	for _, n := range c.nodes {
 		if n.name == nodeID {
 			continue
 		}
 		if c.hook != nil {
 			// we need to see if this transport does allow those two nodes to be connected
-			// Otherwise, that node should not be elegible to sync
+			// Otherwise, that node should not be eligible to sync
 			if !c.hook.Connects(pbft.NodeID(nodeID), pbft.NodeID(n.name)) {
 				continue
 			}
@@ -223,7 +224,7 @@ func (c *cluster) syncWithNetwork(nodeID string) (uint64, int64) {
 		localHeight := n.getNodeHeight()
 		if localHeight > height {
 			height = localHeight
-			syncIndex = n.getSyncIndex()
+			syncIndex = int64(localHeight) - 1 // we know that syncIndex is less than height by 1
 		}
 	}
 	return height, syncIndex
@@ -234,7 +235,7 @@ func (c *cluster) getProposer(index int64) pbft.NodeID {
 	defer c.lock.Unlock()
 
 	proposer := pbft.NodeID("")
-	if index > -1 && int64(len(c.sealedProposals)-1) >= index {
+	if index >= 0 && int64(len(c.sealedProposals)-1) >= index {
 		proposer = c.sealedProposals[index].Proposer
 	}
 
@@ -242,7 +243,7 @@ func (c *cluster) getProposer(index int64) pbft.NodeID {
 }
 
 func (n *node) currentHeight() uint64 {
-	height := uint64(0) // initial height is always 1 since 0 is the genesis
+	height := uint64(0) // initial height is always 0
 	index := n.getSyncIndex()
 	if index >= 0 {
 		height = uint64(index) + 1
@@ -318,10 +319,11 @@ func newPBFTNode(name string, nodes []string, trace trace.Tracer, tt *transport)
 	})
 
 	n := &node{
-		nodes:          nodes,
-		name:           name,
-		pbft:           con,
-		running:        0,
+		nodes:   nodes,
+		name:    name,
+		pbft:    con,
+		running: 0,
+		// set to init index -1 so that zero value is not the same as first index
 		localSyncIndex: -1,
 	}
 	return n, nil
@@ -405,8 +407,8 @@ func (n *node) Start() {
 				goto SYNC
 			case pbft.DoneState:
 				// everything worked, move to the next iteration
-				currentIndex := n.getSyncIndex()
-				n.setSyncIndex(currentIndex + 1)
+				currentSyncIndex := n.getSyncIndex()
+				n.setSyncIndex(currentSyncIndex + 1)
 			default:
 				// stopped
 				return
