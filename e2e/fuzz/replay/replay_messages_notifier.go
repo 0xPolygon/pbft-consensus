@@ -12,21 +12,23 @@ import (
 	"github.com/0xPolygon/pbft-consensus"
 )
 
-const FileName = "messages"
-const MaxCharactersPerLine = 2048 * 1024 // Increase Scanner buffer size to 2MB per line
+const (
+	FileName             = "messages_"
+	MaxCharactersPerLine = 2048 * 1024 // Increase Scanner buffer size to 2MB per line
+)
 
 // ReplayMessagesNotifier is a struct that implements ReplayNotifier interface
 type ReplayMessagesNotifier struct {
 	lock              sync.Mutex
 	messages          []*ReplayMessage
 	file              *os.File
-	queueDrainChannel chan struct{}
+	msgProcessingDone chan struct{}
 }
 
 // NewReplayMessagesNotifier creates a new instance of ReplayMessageNotifier
 func NewReplayMessagesNotifier(channelBuffer int) *ReplayMessagesNotifier {
 	return &ReplayMessagesNotifier{
-		queueDrainChannel: make(chan struct{}, channelBuffer),
+		msgProcessingDone: make(chan struct{}, channelBuffer),
 	}
 }
 
@@ -87,9 +89,9 @@ func (h *ReplayMessagesNotifier) ReadNextMessage(p *pbft.Pbft) (*pbft.MessageReq
 	msg, discards := p.ReadMessageWithDiscards()
 
 	if msg == nil {
-		if !p.HasMessages() && h.queueDrainChannel != nil {
+		if !p.HasMessages() && h.msgProcessingDone != nil {
 			//when the next message is null, and queues are empty, we know we drained the message queue of the given node
-			h.queueDrainChannel <- struct{}{}
+			h.msgProcessingDone <- struct{}{}
 		}
 	} else if isTimeoutMessage(msg) {
 		return nil, nil
@@ -124,7 +126,7 @@ func (h *ReplayMessagesNotifier) createFile() error {
 	return nil
 }
 
-//CloseFile closes file created by the ReplayMessagesHandler if it is open
+// CloseFile closes file created by the ReplayMessagesHandler if it is open
 func (h *ReplayMessagesNotifier) CloseFile() error {
 	if h.file != nil {
 		return h.file.Close()
@@ -140,13 +142,13 @@ func (h *ReplayMessagesNotifier) addMessage(message *ReplayMessage) {
 }
 
 // saveMessages saves ReplayMessages to the JSON file within the pre-defined directory.
-func (h *ReplayMessagesNotifier) saveMessages(fileWritter *os.File) error {
+func (h *ReplayMessagesNotifier) saveMessages(fileWriter *os.File) error {
 	rawMessages, err := ConvertToByteArrays(h.messages)
 	if err != nil {
 		return err
 	}
 
-	bufWriter := bufio.NewWriterSize(fileWritter, MaxCharactersPerLine)
+	bufWriter := bufio.NewWriterSize(fileWriter, MaxCharactersPerLine)
 	defer bufWriter.Flush()
 
 	for _, rawMessage := range rawMessages {

@@ -311,7 +311,7 @@ func (c *Cluster) GetFilteredNodes(filter func(*node) bool) []*node {
 			filteredNodes = append(filteredNodes, n)
 		}
 	}
-	return
+	return filteredNodes
 }
 
 func (c *Cluster) GetRunningNodes() []*node {
@@ -530,14 +530,6 @@ func (n *node) Stop() {
 	// block until node is running
 	for n.IsRunning() {
 	}
-}
-
-func (n *node) GetProposal() *pbft.Proposal {
-	return n.pbft.GetProposal()
-}
-
-func (n *node) IsLocked() bool {
-	return n.pbft.IsLocked()
 }
 
 func (n *node) IsRunning() bool {

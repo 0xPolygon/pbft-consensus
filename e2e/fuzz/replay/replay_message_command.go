@@ -16,7 +16,11 @@ import (
 	"github.com/mitchellh/cli"
 )
 
-//ReplayMessageCommand is a struct containing data for running replay-message command
+const (
+	MessagesBatchSize = 1000
+)
+
+// ReplayMessageCommand is a struct containing data for running replay-message command
 type ReplayMessageCommand struct {
 	UI cli.Ui
 
@@ -76,7 +80,7 @@ func (rmc *ReplayMessageCommand) Run(args []string) int {
 			messages = append(messages, message)
 			i++
 
-			if i%1000 == 0 {
+			if i%MessagesBatchSize == 0 {
 				messagesChannel <- messages
 				messages = nil
 			}
@@ -104,7 +108,7 @@ func (rmc *ReplayMessageCommand) Run(args []string) int {
 	nodes := cluster.GetNodesMap()
 
 	isDone := false
-L:
+LOOP:
 	for !isDone {
 		select {
 		case messages := <-messagesChannel:
@@ -120,7 +124,7 @@ L:
 			}
 		case <-doneChannel:
 			isDone = true
-			break L
+			break LOOP
 		}
 	}
 
@@ -132,7 +136,7 @@ L:
 	for i := 0; i < nodesCount; i++ {
 		go func() {
 			defer wg.Done()
-			<-replayMessagesNotifier.queueDrainChannel
+			<-replayMessagesNotifier.msgProcessingDone
 		}()
 	}
 
