@@ -88,6 +88,10 @@ func newPartitionTransport(jitterMax time.Duration) *partitionTransport {
 }
 
 func (p *partitionTransport) isConnected(from, to pbft.NodeID) bool {
+	if p.subsets == nil {
+		return true
+	}
+
 	subset, ok := p.subsets[string(from)]
 	if !ok {
 		// if not set, they are connected
@@ -115,7 +119,7 @@ func (p *partitionTransport) Reset() {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	p.subsets = map[string][]string{}
+	p.subsets = nil
 }
 
 func (p *partitionTransport) GetPartitions() map[string][]string {
