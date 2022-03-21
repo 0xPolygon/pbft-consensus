@@ -355,12 +355,6 @@ func (c *Cluster) GetTransportHook() transportHook {
 	return c.hook
 }
 
-// MinValidNodes returns minimum valid nodes in order to have consensus
-func (c *Cluster) MinValidNodes() int {
-	totalNodesCount := len(c.nodes)
-	return totalNodesCount - pbft.MaxFaultyNodes(totalNodesCount)
-}
-
 type node struct {
 	// index of node synchronization with the cluster
 	localSyncIndex int64

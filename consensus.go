@@ -744,11 +744,6 @@ func (p *Pbft) setState(s PbftState) {
 	p.state.setState(s)
 }
 
-// GetTimeout calculates timeout for a given round
-func (p *Pbft) GetTimeout() time.Duration {
-	return p.roundTimeout(p.state.view.Round)
-}
-
 // getNextMessage reads a new message from the message queue
 func (p *Pbft) getNextMessage(span trace.Span, timeout time.Duration) (*MessageReq, bool) {
 	timeoutCh := time.After(timeout)
