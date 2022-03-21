@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"fmt"
 	"math/rand"
 	"os"
 	"strconv"
@@ -76,7 +77,7 @@ func CreateLogsDir(directoryName string) (string, error) {
 	var err error
 
 	if directoryName == "" {
-		directoryName = "logs"
+		directoryName = fmt.Sprintf("logs_%v", time.Now())
 	}
 
 	if os.Getenv("E2E_LOG_TO_FILES") == "true" {

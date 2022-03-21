@@ -115,7 +115,7 @@ L:
 				} else if message.To != message.Message.From || message.Message.Type == pbft.MessageReq_Preprepare {
 					// since timeouts have .From property always empty, and To always non empty, they will be pushed to message queue
 					// for regular messages we will only push those where sender and receiver differ or if its a PrePrepare message
-					node.PushMessage(message.Message)
+					node.PushMessageInternal(message.Message)
 				}
 			}
 		case <-doneChannel:
@@ -132,7 +132,7 @@ L:
 	for i := 0; i < nodesCount; i++ {
 		go func() {
 			defer wg.Done()
-			<-replayMessagesNotifier.Channel
+			<-replayMessagesNotifier.queueDrainChannel
 		}()
 	}
 

@@ -1,3 +1,5 @@
 e2e/fuzz/SavedState
 **/launch.json
 **/*.flow
+**/*.log
+**/*.txt

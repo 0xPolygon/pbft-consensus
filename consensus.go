@@ -180,6 +180,10 @@ type Pbft struct {
 	notifier StateNotifier
 }
 
+func (p *Pbft) Log(log string) {
+	p.logger.Println(log)
+}
+
 type SignKey interface {
 	NodeID() NodeID
 	Sign(b []byte) ([]byte, error)
@@ -779,7 +783,11 @@ func (p *Pbft) getNextMessage(span trace.Span, timeout time.Duration) (*MessageR
 
 // HasMessages checks if state machine has any messages in message queue
 func (p *Pbft) HasMessages() bool {
-	return p.msgQueue.isEmpty()
+	return !p.msgQueue.isEmpty()
+}
+
+func (p *Pbft) PushMessageInternal(msg *MessageReq) {
+	p.msgQueue.pushMessage(msg)
 }
 
 // PushMessage pushes a new message to the message queue

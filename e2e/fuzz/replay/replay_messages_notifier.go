@@ -3,37 +3,37 @@ package replay
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"sync"
 	"time"
 
 	"github.com/0xPolygon/pbft-consensus"
 )
 
-const FileName = "messages_"
+const FileName = "messages"
 const MaxCharactersPerLine = 2048 * 1024 // Increase Scanner buffer size to 2MB per line
 
 // ReplayMessagesNotifier is a struct that implements ReplayNotifier interface
 type ReplayMessagesNotifier struct {
-	lock     sync.Mutex
-	messages []*ReplayMessage
-	file     *os.File
-	Channel  chan struct{}
+	lock              sync.Mutex
+	messages          []*ReplayMessage
+	file              *os.File
+	queueDrainChannel chan struct{}
 }
 
 // NewReplayMessagesNotifier creates a new instance of ReplayMessageNotifier
 func NewReplayMessagesNotifier(channelBuffer int) *ReplayMessagesNotifier {
 	return &ReplayMessagesNotifier{
-		Channel: make(chan struct{}, channelBuffer),
+		queueDrainChannel: make(chan struct{}, channelBuffer),
 	}
 }
 
 // SaveMetaData saves node meta data to .flow file
 func (h *ReplayMessagesNotifier) SaveMetaData(nodeNames *[]string) error {
 	var err error
-	if err = h.CreateFile(); err != nil {
+	if err = h.createFile(); err != nil {
 		return err
 	}
 
@@ -61,7 +61,7 @@ func (h *ReplayMessagesNotifier) SaveState() error {
 	defer h.lock.Unlock()
 
 	var err error
-	if err = h.CreateFile(); err != nil {
+	if err = h.createFile(); err != nil {
 		return err
 	}
 
@@ -87,9 +87,9 @@ func (h *ReplayMessagesNotifier) ReadNextMessage(p *pbft.Pbft) (*pbft.MessageReq
 	msg, discards := p.ReadMessageWithDiscards()
 
 	if msg == nil {
-		if !p.HasMessages() && h.Channel != nil {
+		if !p.HasMessages() && h.queueDrainChannel != nil {
 			//when the next message is null, and queues are empty, we know we drained the message queue of the given node
-			h.Channel <- struct{}{}
+			h.queueDrainChannel <- struct{}{}
 		}
 	} else if isTimeoutMessage(msg) {
 		return nil, nil
@@ -98,8 +98,8 @@ func (h *ReplayMessagesNotifier) ReadNextMessage(p *pbft.Pbft) (*pbft.MessageReq
 	return msg, discards
 }
 
-// CreateFile creates a .flow file to save messages and timeouts on the predifined location
-func (h *ReplayMessagesNotifier) CreateFile() error {
+// createFile creates a .flow file to save messages and timeouts on the predifined location
+func (h *ReplayMessagesNotifier) createFile() error {
 	if h.file == nil {
 		relativePath := "../SavedState"
 		if _, err := os.Stat(relativePath); os.IsNotExist(err) {
@@ -114,7 +114,7 @@ func (h *ReplayMessagesNotifier) CreateFile() error {
 			return err
 		}
 
-		file, err := os.OpenFile(filepath.Join(path, FileName+strconv.FormatInt(time.Now().Unix(), 10)+".flow"), os.O_RDWR|os.O_APPEND|os.O_CREATE, 0660)
+		file, err := os.OpenFile(filepath.Join(path, fmt.Sprintf("%v_%v.flow", FileName, time.Now())), os.O_RDWR|os.O_APPEND|os.O_CREATE, 0660)
 		if err != nil {
 			return err
 		}
@@ -129,7 +129,6 @@ func (h *ReplayMessagesNotifier) CloseFile() error {
 	if h.file != nil {
 		return h.file.Close()
 	}
-
 	return nil
 }
 

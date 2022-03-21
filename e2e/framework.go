@@ -131,11 +131,6 @@ func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transportHook) 
 	return c
 }
 
-// getSyncIndex returns an index up to which the node is synced with the network
-func (c *Cluster) getSyncIndex(node string) int64 {
-	return c.nodes[node].getSyncIndex()
-}
-
 // insertFinalProposal inserts final proposal from the node to the cluster
 func (c *Cluster) insertFinalProposal(p *pbft.SealedProposal) {
 	c.lock.Lock()
@@ -205,7 +200,7 @@ func (c *Cluster) GetMaxHeight(nodes ...[]string) uint64 {
 	queryNodes := c.resolveNodes(nodes...)
 	var max uint64
 	for _, node := range queryNodes {
-		h, _ := c.syncWithNetwork(node)
+		h := c.nodes[node].getNodeHeight()
 		if h > max {
 			max = h
 		}
@@ -295,15 +290,6 @@ func (c *Cluster) getProposer(index int64) pbft.NodeID {
 	}
 
 	return proposer
-}
-
-func (n *node) currentHeight() uint64 {
-	height := uint64(0) // initial height is always 0
-	index := n.getSyncIndex()
-	if index >= 0 {
-		height = uint64(index) + 1
-	}
-	return height
 }
 
 func (c *Cluster) Nodes() []*node {
@@ -450,7 +436,7 @@ func (n *node) setSyncIndex(idx int64) {
 func (n *node) isStuck(num uint64) (uint64, bool) {
 	// get max height in the network
 	height, _ := n.c.syncWithNetwork(n.name)
-
+	n.pbft.Log(fmt.Sprintf("Checking if node is stuck. Num: %v. Height: %v", num, height))
 	if height > num {
 		return height, true
 	}
@@ -478,8 +464,8 @@ func (n *node) isFaulty() bool {
 	return atomic.LoadUint64(&n.faulty) != 0
 }
 
-func (n *node) PushMessage(message *pbft.MessageReq) {
-	n.pbft.PushMessage(message)
+func (n *node) PushMessageInternal(message *pbft.MessageReq) {
+	n.pbft.PushMessageInternal(message)
 }
 
 func (n *node) Start() {
@@ -662,7 +648,9 @@ func (v *valString) CalcProposer(round uint64) pbft.NodeID {
 	}
 
 	pick := seed % uint64(v.Len())
-	return (v.nodes)[pick]
+	node := (v.nodes)[pick]
+	fmt.Printf("Calculated new proposer: %v based on round: %v, last proposer: %v, seed: %v, pick: %v.\n", node, round, v.lastProposer, seed, pick)
+	return node
 }
 
 func (v *valString) Index(addr pbft.NodeID) int {
