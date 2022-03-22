@@ -77,7 +77,7 @@ func CreateLogsDir(directoryName string) (string, error) {
 	var err error
 
 	if directoryName == "" {
-		directoryName = fmt.Sprintf("logs_%v", time.Now())
+		directoryName = fmt.Sprintf("logs_%v", time.Now().Format(time.RFC3339))
 	}
 
 	if os.Getenv("E2E_LOG_TO_FILES") == "true" {

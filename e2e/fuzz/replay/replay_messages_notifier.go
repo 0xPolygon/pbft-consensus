@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	FileName             = "messages_"
+	FileName             = "messages"
 	MaxCharactersPerLine = 2048 * 1024 // Increase Scanner buffer size to 2MB per line
 )
 
@@ -116,7 +116,7 @@ func (h *ReplayMessagesNotifier) createFile() error {
 			return err
 		}
 
-		file, err := os.OpenFile(filepath.Join(path, fmt.Sprintf("%v_%v.flow", FileName, time.Now())), os.O_RDWR|os.O_APPEND|os.O_CREATE, 0660)
+		file, err := os.OpenFile(filepath.Join(path, fmt.Sprintf("%v_%v.flow", FileName, time.Now().Format(time.RFC3339))), os.O_RDWR|os.O_APPEND|os.O_CREATE, 0660)
 		if err != nil {
 			return err
 		}
