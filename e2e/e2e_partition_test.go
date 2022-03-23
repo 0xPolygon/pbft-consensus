@@ -42,7 +42,7 @@ func TestE2E_Partition_OneMajority(t *testing.T) {
 	hook.Reset()
 
 	allNodes := make([]string, len(c.nodes))
-	for i, node := range c.Nodes() {
+	for i, node := range c.GetNodes() {
 		allNodes[i] = node.name
 	}
 	// all nodes should be able to sync
@@ -62,7 +62,7 @@ func TestE2E_Partition_MajorityCanValidate(t *testing.T) {
 
 	c := NewPBFTCluster(t, config, hook)
 	limit := int(math.Floor(nodesCnt*2.0/3.0)) + 1 // 2F+1 nodes can Validate
-	for _, node := range c.Nodes() {
+	for _, node := range c.GetNodes() {
 		node.setFaultyNode(node.name >= "prt_"+strconv.Itoa(limit))
 	}
 	c.Start()
@@ -71,7 +71,7 @@ func TestE2E_Partition_MajorityCanValidate(t *testing.T) {
 	err := c.WaitForHeight(4, 1*time.Minute, names)
 	assert.NoError(t, err)
 	// restart minority and wait to sync
-	for _, node := range c.Nodes() {
+	for _, node := range c.GetNodes() {
 		if node.name >= "prt_"+strconv.Itoa(limit) {
 			node.Restart()
 		}
@@ -92,7 +92,7 @@ func TestE2E_Partition_MajorityCantValidate(t *testing.T) {
 
 	c := NewPBFTCluster(t, config, hook)
 	limit := int(math.Floor(nodesCnt * 2.0 / 3.0)) // + 1 removed because 2F+1 nodes is majority
-	for _, node := range c.Nodes() {
+	for _, node := range c.GetNodes() {
 		node.setFaultyNode(node.name < "prt_"+strconv.Itoa(limit))
 	}
 	c.Start()
@@ -114,7 +114,7 @@ func TestE2E_Partition_BigMajorityCantValidate(t *testing.T) {
 
 	c := NewPBFTCluster(t, config, hook)
 	limit := int(math.Floor(nodesCnt * 2.0 / 3.0)) // + 1 removed because 2F+1 nodes is majority
-	for _, node := range c.Nodes() {
+	for _, node := range c.GetNodes() {
 		node.setFaultyNode(node.name <= "prt_"+strconv.Itoa(limit))
 	}
 	c.Start()

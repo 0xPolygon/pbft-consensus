@@ -224,6 +224,26 @@ func (c *Cluster) WaitForHeight(num uint64, timeout time.Duration, nodes ...[]st
 	}
 }
 
+func (c *Cluster) GetNodesMap() map[string]*node {
+	return c.nodes
+}
+
+func (c *Cluster) GetNodes() []*node {
+	return c.GetFilteredNodes(nil)
+}
+
+// Returns nodes which satisfy provided filter delegate function.
+// If filter is not provided, all the nodes will be retreived.
+func (c *Cluster) GetFilteredNodes(filter func(*node) bool) []*node {
+	var filteredNodes []*node
+	for _, n := range c.nodes {
+		if filter == nil || filter(n) {
+			filteredNodes = append(filteredNodes, n)
+		}
+	}
+	return filteredNodes
+}
+
 // getNodeHeight returns node height depending on node index
 // difference between height and syncIndex is 1
 // first inserted proposal is on index 0 with height 1
@@ -278,25 +298,6 @@ func (n *node) currentHeight() uint64 {
 	return height
 }
 
-func (c *Cluster) Nodes() []*node {
-	list := make([]*node, len(c.nodes))
-	i := 0
-	for _, n := range c.nodes {
-		list[i] = n
-		i++
-	}
-	return list
-}
-
-func (c *Cluster) GetFilteredNodes(filter func(*node) bool) (filteredNodes []*node) {
-	for _, n := range c.nodes {
-		if filter(n) {
-			filteredNodes = append(filteredNodes, n)
-		}
-	}
-	return
-}
-
 func (c *Cluster) GetRunningNodes() []*node {
 	return c.GetFilteredNodes(func(n *node) bool {
 		return n.IsRunning()
@@ -334,11 +335,19 @@ func (c *Cluster) Stop() {
 	}
 }
 
+// MinValidNodes returns minimum valid nodes in order to have consensus
+func (c *Cluster) MinValidNodes() int {
+	totalNodesCount := len(c.nodes)
+	return totalNodesCount - pbft.MaxFaultyNodes(totalNodesCount)
+}
+
 func (c *Cluster) FailNode(name string) {
 	c.nodes[name].setFaultyNode(true)
 }
 
 func (c *Cluster) GetTransportHook() transportHook {
+	c.lock.Lock()
+	defer c.lock.Unlock()
 	return c.hook
 }
 
@@ -480,6 +489,14 @@ func (n *node) Start() {
 			}
 		}
 	}()
+}
+
+func (n *node) GetProposal() *pbft.Proposal {
+	return n.pbft.GetProposal()
+}
+
+func (n *node) IsLocked() bool {
+	return n.pbft.IsLocked()
 }
 
 func (n *node) Stop() {

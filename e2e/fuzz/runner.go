@@ -1,7 +1,9 @@
 package fuzz
 
 import (
+	"fmt"
 	"log"
+	"math"
 	"math/rand"
 	"sync"
 	"time"
@@ -10,8 +12,12 @@ import (
 	"github.com/0xPolygon/pbft-consensus/e2e"
 )
 
-var (
+const (
 	revertProbabilityThreshold = 20
+	applyTimeInterval          = 5 * time.Second
+	revertTimeInterval         = 3 * time.Second
+	validationTimeInterval     = 1 * time.Minute
+	waitForHeightTimeInterval  = 3 * time.Minute
 )
 
 type Runner struct {
@@ -34,15 +40,20 @@ func NewRunner(initialNodesCount uint) *Runner {
 	}
 }
 
-func (r *Runner) Run(d time.Duration) error {
+func (r *Runner) Run(totalDuration time.Duration) error {
+	err := validateDuration(totalDuration)
+	if err != nil {
+		return err
+	}
+
 	r.cluster.Start()
 	defer r.cluster.Stop()
-	done := time.After(d)
 
-	// TODO: Randomize time interval?
-	applyTicker := time.NewTicker(5 * time.Second)
-	revertTicker := time.NewTicker(3 * time.Second)
-	validationTicker := time.NewTicker(1 * time.Minute)
+	done := time.After(totalDuration)
+
+	applyTicker := time.NewTicker(applyTimeInterval)
+	revertTicker := time.NewTicker(revertTimeInterval)
+	validationTicker := time.NewTicker(validationTimeInterval)
 	defer applyTicker.Stop()
 	defer revertTicker.Stop()
 	defer validationTicker.Stop()
@@ -91,20 +102,31 @@ func (r *Runner) Run(d time.Duration) error {
 	return nil
 }
 
+// validateDuration is a sanity check validation which assures that total duration value is larger than all of the predefined time intervals within the runner.
+func validateDuration(totalDuration time.Duration) error {
+	largestIntervalInMillis := math.Max(float64(applyTimeInterval.Milliseconds()), float64(revertTimeInterval.Milliseconds()))
+	largestIntervalInMillis = math.Max(largestIntervalInMillis, float64(validationTimeInterval.Milliseconds()))
+	if float64(totalDuration.Milliseconds()) < largestIntervalInMillis {
+		largestIntervalInSeconds := largestIntervalInMillis / 1000
+		return fmt.Errorf("total duration is less than predefined time interval %vs. Set -duration to at least %vs", largestIntervalInSeconds, largestIntervalInSeconds)
+	}
+	return nil
+}
+
 // validateNodes checks if there is progress on the node height after the scenario run
 func validateNodes(c *e2e.Cluster) {
 	if runningNodes, ok := validateCluster(c); ok {
 		currentHeight := c.GetMaxHeight(runningNodes)
 		expectedHeight := currentHeight + 10
-		log.Printf("Current height %v and waiting expected %v height.\n", currentHeight, expectedHeight)
-		err := c.WaitForHeight(expectedHeight, 3*time.Minute, runningNodes)
+		log.Printf("Running nodes %v, current height %v and waiting expected %v height.\n", runningNodes, currentHeight, expectedHeight)
+		err := c.WaitForHeight(expectedHeight, waitForHeightTimeInterval, runningNodes)
 		if err != nil {
 			transportHook := c.GetTransportHook()
 			if transportHook != nil {
 				log.Printf("Cluster partitions: %v\n", transportHook.GetPartitions())
 			}
-			for _, n := range c.Nodes() {
-				log.Printf("Node: %v, running: %v\n", n.GetName(), n.IsRunning())
+			for _, n := range c.GetNodes() {
+				log.Printf("Node: %v, running: %v, locked: %v, proposal: %v\n", n.GetName(), n.IsRunning(), n.IsLocked(), n.GetProposal())
 			}
 			panic("Desired height not reached.")
 		}
@@ -116,7 +138,7 @@ func validateNodes(c *e2e.Cluster) {
 
 // validateCluster checks if there is enough running nodes that can make consensus
 func validateCluster(c *e2e.Cluster) ([]string, bool) {
-	totalNodesCount := len(c.Nodes())
+	totalNodesCount := len(c.GetNodes())
 	var runningNodes []string
 	var partitions map[string][]string
 	// running nodes in majority partition
@@ -155,5 +177,6 @@ func getAvailableActions() []e2e.FunctionalAction {
 	return []e2e.FunctionalAction{
 		&e2e.DropNodeAction{},
 		&e2e.PartitionAction{},
+		&e2e.FlowMapAction{},
 	}
 }

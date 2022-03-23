@@ -83,6 +83,47 @@ type partitionTransport struct {
 	subsets   map[string][]string
 }
 
+type flowMapTransport struct {
+	lock    sync.Mutex
+	flowMap map[string][]string
+}
+
+func newFlowMapTransport(flowMap map[string][]string) *flowMapTransport {
+	return &flowMapTransport{flowMap: flowMap}
+}
+
+func (f *flowMapTransport) isConnected(from, to pbft.NodeID) bool {
+	if nodes, ok := f.flowMap[string(from)]; ok {
+		return Contains(nodes, string(to))
+	} else {
+		return false
+	}
+}
+
+func (f *flowMapTransport) Gossip(from, to pbft.NodeID, msg *pbft.MessageReq) bool {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+	return f.isConnected(from, to)
+}
+
+func (f *flowMapTransport) Connects(from, to pbft.NodeID) bool {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
+	return f.isConnected(from, to)
+}
+
+func (f *flowMapTransport) Reset() {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
+	f.flowMap = nil
+}
+
+func (f *flowMapTransport) GetPartitions() map[string][]string {
+	return f.flowMap
+}
+
 func newPartitionTransport(jitterMax time.Duration) *partitionTransport {
 	return &partitionTransport{jitterMax: jitterMax}
 }
