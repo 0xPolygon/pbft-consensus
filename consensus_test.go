@@ -18,8 +18,11 @@ import (
 )
 
 var (
-	mockProposal  = []byte{0x1, 0x2, 0x3}
+	mockProposal = []byte{0x1, 0x2, 0x3}
+	digest       = []byte{0x1}
+
 	mockProposal1 = []byte{0x1, 0x2, 0x3, 0x4}
+	digest1       = []byte{0x2}
 )
 
 func TestTransition_AcceptState_ToSyncState(t *testing.T) {
@@ -70,6 +73,7 @@ func TestTransition_AcceptState_Proposer_Locked(t *testing.T) {
 	i.state.locked = true
 	i.state.proposal = &Proposal{
 		Data: mockProposal,
+		Hash: digest,
 	}
 
 	i.runCycle(context.Background())
@@ -228,6 +232,7 @@ func TestTransition_AcceptState_Validator_LockWrong(t *testing.T) {
 	// locked proposal
 	i.state.proposal = &Proposal{
 		Data: mockProposal,
+		Hash: digest,
 	}
 	i.state.lock()
 
@@ -236,6 +241,7 @@ func TestTransition_AcceptState_Validator_LockWrong(t *testing.T) {
 		From:     "A",
 		Type:     MessageReq_Preprepare,
 		Proposal: mockProposal1,
+		Hash:     digest1,
 		View:     ViewMsg(1, 0),
 	})
 
@@ -257,7 +263,10 @@ func TestTransition_AcceptState_Validator_LockCorrect(t *testing.T) {
 	// locked proposal
 	proposal := mockProposal
 
-	i.state.proposal = &Proposal{Data: proposal}
+	i.state.proposal = &Proposal{
+		Data: proposal,
+		Hash: digest,
+	}
 	i.state.locked = true
 
 	i.emitMsg(&MessageReq{
@@ -279,7 +288,7 @@ func TestTransition_AcceptState_Validator_LockCorrect(t *testing.T) {
 
 // Test that when validating proposal fails, state machine switches to RoundChangeState.
 func TestTransition_AcceptState_Validate_ProposalFail(t *testing.T) {
-	validateProposalFunc := func(proposal []byte) error {
+	validateProposalFunc := func(p *Proposal) error {
 		return errors.New("failed to validate a proposal")
 	}
 
@@ -289,11 +298,6 @@ func TestTransition_AcceptState_Validate_ProposalFail(t *testing.T) {
 	m := newMockPbft(t, validatorIds, "C", backend)
 	m.state.view = ViewMsg(1, 0)
 	m.setState(AcceptState)
-
-	m.setProposal(&Proposal{
-		Data: mockProposal,
-		Time: time.Now(),
-	})
 
 	// Prepare messages
 	m.emitMsg(&MessageReq{
@@ -504,10 +508,6 @@ func TestTransition_ValidateState_MoveToCommitState(t *testing.T) {
 	// we receive enough prepare messages to lock and commit the proposal
 	m := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
 	m.setState(ValidateState)
-	m.setProposal(&Proposal{
-		Data: mockProposal,
-		Time: time.Now().Add(1 * time.Second),
-	})
 
 	// Prepare messages
 	m.emitMsg(&MessageReq{
@@ -576,6 +576,7 @@ func TestTransition_ValidateState_WrongMessageType(t *testing.T) {
 		From:     "A",
 		Type:     MessageReq_Preprepare,
 		Proposal: mockProposal,
+		Hash:     digest,
 		View:     ViewMsg(1, 0),
 	}
 	heap.Push(&m.msgQueue.validateStateQueue, msg)
@@ -586,10 +587,6 @@ func TestTransition_ValidateState_WrongMessageType(t *testing.T) {
 func TestTransition_ValidateState_DiscardMessage(t *testing.T) {
 	m := newMockPbft(t, []string{"A", "B"}, "A")
 	m.setState(ValidateState)
-	m.setProposal(&Proposal{
-		Data: mockProposal,
-		Time: time.Now().Add(1 * time.Second),
-	})
 	m.state.view = ViewMsg(1, 2)
 
 	// Send message from the past (it should be discarded)
@@ -775,18 +772,14 @@ type mockPbft struct {
 }
 
 func (m *mockPbft) emitMsg(msg *MessageReq) {
-	// convert the address from the address pool
-	// from := m.pool.get(string(msg.From)).Address()
-	// msg.From = from
-
+	if msg.Hash == nil {
+		// Use default safe value
+		msg.Hash = digest
+	}
 	m.Pbft.PushMessage(msg)
 }
 
 func (m *mockPbft) addMessage(msg *MessageReq) {
-	// convert the address from the address pool
-	// from := m.pool.get(string(msg.From)).Address()
-	// msg.From = from
-
 	m.state.addMessage(msg)
 }
 
@@ -843,6 +836,7 @@ func newMockPbft(t *testing.T, accounts []string, account string, backendArg ...
 	m.state.proposal = &Proposal{
 		Data: mockProposal,
 		Time: time.Now(),
+		Hash: digest,
 	}
 
 	ctx, cancelFn := context.WithCancel(context.Background())
@@ -870,7 +864,14 @@ func (m *mockPbft) Close() {
 	m.cancelFn()
 }
 
+// setProposal sets the proposal that will get returned if the pbft consensus
+// calls the backend 'BuildProposal' function.
 func (m *mockPbft) setProposal(p *Proposal) {
+	if p.Hash == nil {
+		h := sha1.New()
+		h.Write(p.Data)
+		p.Hash = h.Sum(nil)
+	}
 	m.proposal = p
 }
 
@@ -922,8 +923,9 @@ func (m *mockPbft) expect(res expectResult) {
 }
 
 type buildProposalDelegate func() (*Proposal, error)
-type validateDelegate func([]byte) error
+type validateDelegate func(*Proposal) error
 type isStuckDelegate func(uint64) (uint64, bool)
+
 type mockBackend struct {
 	mock            *mockPbft
 	validators      *valString
@@ -947,6 +949,10 @@ func (m *mockBackend) HookIsStuckHandler(isStuck isStuckDelegate) *mockBackend {
 	return m
 }
 
+func (m *mockBackend) ValidateCommit(from NodeID, seal []byte) error {
+	return nil
+}
+
 func (m *mockBackend) Hash(p []byte) []byte {
 	h := sha1.New()
 	h.Write(p)
@@ -968,7 +974,7 @@ func (m *mockBackend) Height() uint64 {
 	return m.mock.sequence
 }
 
-func (m *mockBackend) Validate(proposal []byte) error {
+func (m *mockBackend) Validate(proposal *Proposal) error {
 	if m.validateFn != nil {
 		return m.validateFn(proposal)
 	}
@@ -994,5 +1000,5 @@ func (m *mockBackend) ValidatorSet() ValidatorSet {
 	return m.validators
 }
 
-func (m *mockBackend) Init() {
+func (m *mockBackend) Init(*RoundInfo) {
 }

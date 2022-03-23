@@ -8,7 +8,9 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -60,10 +62,19 @@ func initTracer(name string) *sdktrace.TracerProvider {
 }
 
 type Cluster struct {
-	t      *testing.T
-	nodes  map[string]*node
-	tracer *sdktrace.TracerProvider
-	hook   transportHook
+	t               *testing.T
+	lock            sync.Mutex
+	nodes           map[string]*node
+	tracer          *sdktrace.TracerProvider
+	hook            transportHook
+	sealedProposals []*pbft.SealedProposal
+}
+
+type ClusterConfig struct {
+	Count   int
+	Name    string
+	Prefix  string
+	LogsDir string
 }
 
 func NewPBFTCluster(t *testing.T, name, prefix string, count int, hook ...transportHook) *Cluster {
@@ -77,43 +88,49 @@ func NewPBFTCluster(t *testing.T, name, prefix string, count int, hook ...transp
 		tt.addHook(hook[0])
 	}
 
+	logsDir, err := CreateLogsDir(t)
+	if err != nil {
+		log.Printf("[WARNING] Could not create logs directory. Reason: %v. Logging will be defaulted to standard output.", err)
+	} else {
+		config.LogsDir = logsDir
+	}
+
 	c := &Cluster{
-		t:      t,
-		nodes:  map[string]*node{},
-		tracer: initTracer("fuzzy_" + name),
-		hook:   tt.hook,
+		t:               t,
+		nodes:           map[string]*node{},
+		tracer:          initTracer("fuzzy_" + config.Name),
+		hook:            tt.hook,
+		sealedProposals: []*pbft.SealedProposal{},
 	}
 	for _, name := range names {
 		trace := c.tracer.Tracer(name)
-		n, _ := newPBFTNode(name, names, trace, tt)
+		n, _ := newPBFTNode(name, config.LogsDir, names, trace, tt)
 		n.c = c
 		c.nodes[name] = n
 	}
 	return c
 }
 
-func (c *Cluster) syncWithNetwork(ourselves string) (uint64, []*pbft.SealedProposal) {
-	var height uint64
-	var proposals []*pbft.SealedProposal
+// getSyncIndex returns an index up to which the node is synced with the network
+func (c *Cluster) getSyncIndex(node string) int64 {
+	return c.nodes[node].getSyncIndex()
+}
 
-	for _, n := range c.nodes {
-		if n.name == ourselves {
-			continue
+// insertFinalProposal inserts final proposal from the node to the cluster
+func (c *Cluster) insertFinalProposal(p *pbft.SealedProposal) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	lastIndex := len(c.sealedProposals) - 1
+	insertIndex := p.Number - 1
+	if insertIndex == uint64(lastIndex) {
+		// already exists
+		if !c.sealedProposals[insertIndex].Proposal.Equal(p.Proposal) {
+			panic("Proposals are not equal")
 		}
-		if c.hook != nil {
-			// we need to see if this transport does allow those two nodes to be connected
-			// Otherwise, that node should not be elegible to sync
-			if !c.hook.Connects(pbft.NodeID(ourselves), pbft.NodeID(n.name)) {
-				continue
-			}
-		}
-		localHeight, data := n.getProposals()
-		if localHeight > height {
-			height = localHeight
-			proposals = data
-		}
+	} else {
+		c.sealedProposals = append(c.sealedProposals, p)
 	}
-	return height, proposals
 }
 
 func (c *Cluster) resolveNodes(nodes ...[]string) []string {
@@ -139,7 +156,7 @@ func (c *Cluster) IsStuck(timeout time.Duration, nodes ...[]string) {
 	nodeHeight := map[string]uint64{}
 	isStuck := func() bool {
 		for _, n := range queryNodes {
-			height := c.nodes[n].currentHeight()
+			height := c.nodes[n].getNodeHeight()
 			if lastHeight, ok := nodeHeight[n]; ok {
 				if lastHeight != height {
 					return false
@@ -180,12 +197,14 @@ func (c *Cluster) WaitForHeight(num uint64, timeout time.Duration, nodes ...[]st
 	// we need to check every node in the ensemble?
 	// yes, this should test if everyone can agree on the final set.
 	// note, if we include drops, we need to do sync otherwise this will never work
-
 	queryNodes := c.resolveNodes(nodes...)
 
 	enough := func() bool {
+		c.lock.Lock()
+		defer c.lock.Unlock()
+
 		for _, name := range queryNodes {
-			if c.nodes[name].currentHeight() < num {
+			if c.nodes[name].getNodeHeight() < num {
 				return false
 			}
 		}
@@ -213,10 +232,76 @@ func (c *Cluster) GetNodes() []*node {
 	return c.GetFilteredNodes(nil)
 }
 
+
 // Returns nodes which satisfy provided filter delegate function.
 // If filter is not provided, all the nodes will be retreived.
 func (c *Cluster) GetFilteredNodes(filter func(*node) bool) []*node {
 	var filteredNodes []*node
+	for _, n := range c.nodes {
+		if filter == nil || filter(n) {
+			filteredNodes = append(filteredNodes, n)
+		}
+	}
+	return filteredNodes
+}
+
+// getNodeHeight returns node height depending on node index
+// difference between height and syncIndex is 1
+// first inserted proposal is on index 0 with height 1
+func (n *node) getNodeHeight() uint64 {
+	return uint64(n.getSyncIndex()) + 1
+}
+
+func (c *Cluster) syncWithNetwork(nodeID string) (uint64, int64) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	var height uint64
+	var syncIndex = int64(-1) // initial sync index is -1
+	for _, n := range c.nodes {
+		if n.name == nodeID {
+			continue
+		}
+		if c.hook != nil {
+			// we need to see if this transport does allow those two nodes to be connected
+			// Otherwise, that node should not be eligible to sync
+			if !c.hook.Connects(pbft.NodeID(nodeID), pbft.NodeID(n.name)) {
+				continue
+			}
+		}
+		localHeight := n.getNodeHeight()
+		if localHeight > height {
+			height = localHeight
+			syncIndex = int64(localHeight) - 1 // we know that syncIndex is less than height by 1
+		}
+	}
+	return height, syncIndex
+}
+
+func (c *Cluster) getProposer(index int64) pbft.NodeID {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	proposer := pbft.NodeID("")
+	if index >= 0 && int64(len(c.sealedProposals)-1) >= index {
+		proposer = c.sealedProposals[index].Proposer
+	}
+
+	return proposer
+}
+
+func (n *node) currentHeight() uint64 {
+	height := uint64(0) // initial height is always 0
+	index := n.getSyncIndex()
+	if index >= 0 {
+		height = uint64(index) + 1
+	}
+	return height
+}
+
+func (c *Cluster) Nodes() []*node {
+	list := make([]*node, len(c.nodes))
+	i := 0
 	for _, n := range c.nodes {
 		if filter == nil || filter(n) {
 			filteredNodes = append(filteredNodes, n)
@@ -277,28 +362,34 @@ func (c *Cluster) GetTransportHook() transportHook {
 }
 
 type node struct {
-	lock sync.Mutex
+	// index of node synchronization with the cluster
+	localSyncIndex int64
 
 	c *Cluster
 
 	name     string
 	pbft     *pbft.Pbft
 	cancelFn context.CancelFunc
-	stopped  uint64
+	running  uint64
 
 	// validator nodes
 	nodes []string
 
-	// list of proposals
-	proposals []*pbft.SealedProposal
 	// indicate if the node is faulty
-	faulty bool
+	faulty uint64
 }
 
-func newPBFTNode(name string, nodes []string, trace trace.Tracer, tt *transport) (*node, error) {
+func newPBFTNode(name, logsDir string, nodes []string, trace trace.Tracer, tt *transport) (*node, error) {
 	var loggerOutput io.Writer
+	var err error
 	if os.Getenv("SILENT") == "true" {
 		loggerOutput = ioutil.Discard
+	} else if logsDir != "" {
+		loggerOutput, err = os.OpenFile(filepath.Join(logsDir, name+".log"), os.O_RDWR|os.O_APPEND|os.O_CREATE, 0660)
+		if err != nil {
+			log.Printf("[WARNING] Failed to open file for node: %v. Reason: %v. Fallbacked to standard output.", name, err)
+			loggerOutput = os.Stdout
+		}
 	} else {
 		loggerOutput = os.Stdout
 	}
@@ -312,17 +403,26 @@ func newPBFTNode(name string, nodes []string, trace trace.Tracer, tt *transport)
 	})
 
 	n := &node{
-		nodes:     nodes,
-		proposals: []*pbft.SealedProposal{},
-		name:      name,
-		pbft:      con,
-		stopped:   0,
+		nodes:   nodes,
+		name:    name,
+		pbft:    con,
+		running: 0,
+		// set to init index -1 so that zero value is not the same as first index
+		localSyncIndex: -1,
 	}
 	return n, nil
 }
 
+func (n *node) getSyncIndex() int64 {
+	return atomic.LoadInt64(&n.localSyncIndex)
+}
+
+func (n *node) setSyncIndex(idx int64) {
+	atomic.StoreInt64(&n.localSyncIndex, idx)
+}
+
 func (n *node) isStuck(num uint64) (uint64, bool) {
-	// get max heigh in the network
+	// get max height in the network
 	height, _ := n.c.syncWithNetwork(n.name)
 
 	if height > num {
@@ -331,75 +431,52 @@ func (n *node) isStuck(num uint64) (uint64, bool) {
 	return 0, false
 }
 
-func (n *node) lastProposer() pbft.NodeID {
-	lastProposer := pbft.NodeID("")
-	if len(n.proposals) != 0 {
-		lastProposer = n.proposals[len(n.proposals)-1].Proposer
-	}
-	return lastProposer
-}
-
-func (n *node) getProposals() (uint64, []*pbft.SealedProposal) {
-	n.lock.Lock()
-	defer n.lock.Unlock()
-
-	res := []*pbft.SealedProposal{}
-	res = append(res, n.proposals...)
-
-	number := uint64(0)
-	if len(res) != 0 {
-		number = uint64(res[len(res)-1].Number)
-	}
-	return number, res
-}
-
-func (n *node) currentHeight() uint64 {
-	n.lock.Lock()
-	defer n.lock.Unlock()
-
-	number := uint64(1) // initial height is always 1 since 0 is the genesis
-	if len(n.proposals) != 0 {
-		number = n.proposals[len(n.proposals)-1].Number
-	}
-	return number
-}
-
 func (n *node) Insert(pp *pbft.SealedProposal) error {
-	n.lock.Lock()
-	defer n.lock.Unlock()
-
-	n.proposals = append(n.proposals, pp)
+	n.c.insertFinalProposal(pp)
 	return nil
 }
 
-func (n *node) setFaultyNode(v bool) {
-	n.faulty = v
+// setFaultyNode sets flag indicating that the node should be faulty or not
+// 0 is for not being faulty
+func (n *node) setFaultyNode(b bool) {
+	if b {
+		atomic.StoreUint64(&n.faulty, 1)
+	} else {
+		atomic.StoreUint64(&n.faulty, 0)
+	}
+}
+
+// isFaulty checks if the node should be faulty or not depending on the stored value
+// 0 is for not being faulty
+func (n *node) isFaulty() bool {
+	return atomic.LoadUint64(&n.faulty) != 0
 }
 
 func (n *node) Start() {
-	if n.cancelFn != nil {
+	if n.IsRunning() {
 		panic(fmt.Errorf("node '%s' is already started", n))
 	}
 
 	// create the ctx and the cancelFn
 	ctx, cancelFn := context.WithCancel(context.Background())
 	n.cancelFn = cancelFn
-
+	atomic.StoreUint64(&n.running, 1)
 	go func() {
+		defer func() {
+			atomic.StoreUint64(&n.running, 0)
+		}()
 	SYNC:
-		// 'sync up' with the network
-		_, history := n.c.syncWithNetwork(n.name)
-		n.proposals = history
-
+		_, syncIndex := n.c.syncWithNetwork(n.name)
+		n.setSyncIndex(syncIndex)
 		for {
 			fsm := &fsm{
 				n:            n,
 				nodes:        n.nodes,
-				lastProposer: n.lastProposer(),
+				lastProposer: n.c.getProposer(n.getSyncIndex()),
 
 				// important: in this iteration of the fsm we have increased our height
-				height:          n.currentHeight() + 1,
-				validationFails: n.faulty,
+				height:          n.getNodeHeight() + 1,
+				validationFails: n.isFaulty(),
 			}
 			if err := n.pbft.SetBackend(fsm); err != nil {
 				panic(err)
@@ -414,6 +491,8 @@ func (n *node) Start() {
 				goto SYNC
 			case pbft.DoneState:
 				// everything worked, move to the next iteration
+				currentSyncIndex := n.getSyncIndex()
+				n.setSyncIndex(currentSyncIndex + 1)
 			default:
 				// stopped
 				return
@@ -430,16 +509,18 @@ func (n *node) IsLocked() bool {
 	return n.pbft.IsLocked()
 }
 
-func (n *node) IsRunning() bool {
-	return n.cancelFn != nil
-}
-
 func (n *node) Stop() {
-	if n.cancelFn == nil {
+	if !n.IsRunning() {
 		panic(fmt.Errorf("node %s is already stopped", n.name))
 	}
 	n.cancelFn()
-	n.cancelFn = nil
+	// block until node is running
+	for n.IsRunning() {
+	}
+}
+
+func (n *node) IsRunning() bool {
+	return atomic.LoadUint64(&n.running) != 0
 }
 
 func (n *node) Restart() {
@@ -488,6 +569,7 @@ func (f *fsm) BuildProposal() (*pbft.Proposal, error) {
 		Data: []byte{byte(f.Height())},
 		Time: time.Now().Add(1 * time.Second),
 	}
+	proposal.Hash = hash(proposal.Data)
 	return proposal, nil
 }
 
@@ -495,7 +577,7 @@ func (f *fsm) setValidationFails(v bool) {
 	f.validationFails = v
 }
 
-func (f *fsm) Validate(proposal []byte) error {
+func (f *fsm) Validate(proposal *pbft.Proposal) error {
 	if f.validationFails {
 		return fmt.Errorf("validation error")
 	}
@@ -518,13 +600,17 @@ func (f *fsm) ValidatorSet() pbft.ValidatorSet {
 	return &vv
 }
 
-func (f *fsm) Hash(p []byte) []byte {
+func hash(p []byte) []byte {
 	h := sha1.New()
 	h.Write(p)
 	return h.Sum(nil)
 }
 
-func (f *fsm) Init() {
+func (f *fsm) Init(*pbft.RoundInfo) {
+}
+
+func (f *fsm) ValidateCommit(node pbft.NodeID, seal []byte) error {
+	return nil
 }
 
 type valString struct {
