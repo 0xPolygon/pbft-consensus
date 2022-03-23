@@ -117,7 +117,7 @@ func (f *flowMapTransport) Reset() {
 	f.lock.Lock()
 	defer f.lock.Unlock()
 
-	f.flowMap = map[string][]string{}
+	f.flowMap = nil
 }
 
 func (f *flowMapTransport) GetPartitions() map[string][]string {
@@ -161,10 +161,6 @@ func (p *partitionTransport) Reset() {
 	defer p.lock.Unlock()
 
 	p.subsets = nil
-}
-
-func (p *partitionTransport) GetPartitions() map[string][]string {
-	return p.subsets
 }
 
 func (p *partitionTransport) GetPartitions() map[string][]string {

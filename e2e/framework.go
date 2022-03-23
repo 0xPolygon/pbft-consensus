@@ -77,10 +77,10 @@ type ClusterConfig struct {
 	LogsDir string
 }
 
-func NewPBFTCluster(t *testing.T, name, prefix string, count int, hook ...transportHook) *Cluster {
-	names := make([]string, count)
-	for i := 0; i < count; i++ {
-		names[i] = fmt.Sprintf("%s_%d", prefix, i)
+func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transportHook) *Cluster {
+	names := make([]string, config.Count)
+	for i := 0; i < config.Count; i++ {
+		names[i] = fmt.Sprintf("%s_%d", config.Prefix, i)
 	}
 
 	tt := &transport{}
@@ -232,7 +232,6 @@ func (c *Cluster) GetNodes() []*node {
 	return c.GetFilteredNodes(nil)
 }
 
-
 // Returns nodes which satisfy provided filter delegate function.
 // If filter is not provided, all the nodes will be retreived.
 func (c *Cluster) GetFilteredNodes(filter func(*node) bool) []*node {
@@ -299,17 +298,6 @@ func (n *node) currentHeight() uint64 {
 	return height
 }
 
-func (c *Cluster) Nodes() []*node {
-	list := make([]*node, len(c.nodes))
-	i := 0
-	for _, n := range c.nodes {
-		if filter == nil || filter(n) {
-			filteredNodes = append(filteredNodes, n)
-		}
-	}
-	return filteredNodes
-}
-
 func (c *Cluster) GetRunningNodes() []*node {
 	return c.GetFilteredNodes(func(n *node) bool {
 		return n.IsRunning()
@@ -358,6 +346,8 @@ func (c *Cluster) FailNode(name string) {
 }
 
 func (c *Cluster) GetTransportHook() transportHook {
+	c.lock.Lock()
+	defer c.lock.Unlock()
 	return c.hook
 }
 

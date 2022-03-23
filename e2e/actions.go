@@ -51,6 +51,8 @@ func (action *PartitionAction) CanApply(_ *Cluster) bool {
 }
 
 func (action *PartitionAction) Apply(c *Cluster) RevertFunc {
+	c.lock.Lock()
+	defer c.lock.Unlock()
 	hook := newPartitionTransport(500 * time.Millisecond)
 	// create 2 partition with random number of nodes
 	// minority with no more than max faulty nodes and majority with the rest of the nodes
@@ -75,6 +77,8 @@ func (action *PartitionAction) Apply(c *Cluster) RevertFunc {
 
 	return func() {
 		log.Println("Reverting partitions.")
+		c.lock.Lock()
+		defer c.lock.Unlock()
 		c.hook.Reset()
 	}
 }
@@ -84,6 +88,8 @@ type FlowMapAction struct {
 
 func (f *FlowMapAction) Apply(c *Cluster) RevertFunc {
 	// for each node in the cluster add >= (n-1)/3 other connected nodes
+	c.lock.Lock()
+	defer c.lock.Unlock()
 	flowMap := make(map[string][]string)
 	for senderNodeId := range c.nodes {
 		recipients, ok := flowMap[senderNodeId]
@@ -129,6 +135,8 @@ func (f *FlowMapAction) Apply(c *Cluster) RevertFunc {
 
 	return func() {
 		log.Println("Reverting flow map.")
+		c.lock.Lock()
+		defer c.lock.Unlock()
 		hook.Reset()
 	}
 }

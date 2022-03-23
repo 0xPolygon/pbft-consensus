@@ -27,9 +27,15 @@ type Runner struct {
 }
 
 func NewRunner(initialNodesCount uint) *Runner {
+	config := &e2e.ClusterConfig{
+		Count:  int(initialNodesCount),
+		Name:   "fuzz_cluster",
+		Prefix: "NODE",
+	}
+
 	return &Runner{
 		availableActions: getAvailableActions(),
-		cluster:          e2e.NewPBFTCluster(nil, "fuzz_cluster", "NODE", int(initialNodesCount)),
+		cluster:          e2e.NewPBFTCluster(nil, config),
 		wg:               sync.WaitGroup{},
 	}
 }
@@ -109,10 +115,10 @@ func validateDuration(totalDuration time.Duration) error {
 
 // validateNodes checks if there is progress on the node height after the scenario run
 func validateNodes(c *e2e.Cluster) {
-	if runningNodes, expectedConsensus := validateCluster(c); expectedConsensus {
+	if runningNodes, ok := validateCluster(c); ok {
 		currentHeight := c.GetMaxHeight(runningNodes)
 		expectedHeight := currentHeight + 10
-		log.Printf("Current height %v and waiting expected %v height.\n", currentHeight, expectedHeight)
+		log.Printf("Running nodes %v, current height %v and waiting expected %v height.\n", runningNodes, currentHeight, expectedHeight)
 		err := c.WaitForHeight(expectedHeight, waitForHeightTimeInterval, runningNodes)
 		if err != nil {
 			transportHook := c.GetTransportHook()
@@ -133,47 +139,38 @@ func validateNodes(c *e2e.Cluster) {
 // validateCluster checks if there is enough running nodes that can make consensus
 func validateCluster(c *e2e.Cluster) ([]string, bool) {
 	totalNodesCount := len(c.GetNodes())
-	maxFaultyNodes := pbft.MaxFaultyNodes(totalNodesCount)
+	var runningNodes []string
 	var partitions map[string][]string
 	// running nodes in majority partition
 	hook := c.GetTransportHook()
 	if hook != nil {
 		partitions = hook.GetPartitions()
 	}
-	// no partitions, so all running nodes are in the consensus
-	if len(partitions) == 0 {
-		var runningNodes []string
-		for _, n := range c.GetRunningNodes() {
-			runningNodes = append(runningNodes, n.GetName())
-		}
-		stoppedNodesCount := totalNodesCount - len(runningNodes)
-		return runningNodes, stoppedNodesCount <= maxFaultyNodes
-	}
 
-	// check if there is enough messages coming to particular node
-	nodeConnections := make(map[string]int)
-	nodesMap := c.GetNodesMap()
-	for node := range partitions {
-		nodes := partitions[node]
-		// count only connected running nodes
-		for _, n := range nodes {
-			if nodesMap[n].IsRunning() {
-				nodeConnections[node]++
+	var majorityPartition []string
+	if len(partitions) == 0 {
+		// there are no partitions
+		for _, n := range c.GetRunningNodes() {
+			majorityPartition = append(majorityPartition, n.GetName())
+		}
+	} else {
+		// get partition with the majority of nodes
+		// all subsets are the same
+		for _, p := range partitions {
+			if len(p) > len(majorityPartition) {
+				majorityPartition = p
 			}
 		}
 	}
 
-	// check whether there is enough connected nodes
-	var validSenders []string
-	minValidNodes := c.MinValidNodes()
-	for k, v := range nodeConnections {
-		if nodesMap[k].IsRunning() && v >= minValidNodes {
-			validSenders = append(validSenders, k)
+	// loop through running nodes and check if they are in majority partition
+	for _, n := range c.GetRunningNodes() {
+		if e2e.Contains(majorityPartition, n.GetName()) {
+			runningNodes = append(runningNodes, n.GetName())
 		}
 	}
-
-	invalidSenders := totalNodesCount - len(validSenders)
-	return validSenders, invalidSenders <= maxFaultyNodes
+	stoppedNodesCount := totalNodesCount - len(runningNodes)
+	return runningNodes, stoppedNodesCount <= pbft.MaxFaultyNodes(totalNodesCount)
 }
 
 func getAvailableActions() []e2e.FunctionalAction {
