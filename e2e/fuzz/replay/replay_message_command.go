@@ -69,18 +69,22 @@ func (rmc *ReplayMessageCommand) Run(args []string) int {
 	doneChannel := make(chan struct{})
 
 	go func(s *bufio.Scanner) {
-		i := 0
 		messages := make([]*ReplayMessage, 0)
+		var sequence, previousSequence uint64
+		sequence, previousSequence = 1, 1
 		for scanner.Scan() {
 			var message *ReplayMessage
 			if err := json.Unmarshal(scanner.Bytes(), &message); err != nil {
 				rmc.UI.Error(fmt.Sprintf("Error happened on unmarshalling a message in .flow file. Reason: %v", err))
 				return
 			}
-			messages = append(messages, message)
-			i++
 
-			if i%MessagesBatchSize == 0 {
+			sequence = message.Message.View.Sequence
+
+			if sequence == previousSequence {
+				messages = append(messages, message)
+			} else {
+				previousSequence = sequence
 				messagesChannel <- messages
 				messages = nil
 			}
