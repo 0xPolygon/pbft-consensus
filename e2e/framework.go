@@ -102,19 +102,24 @@ func (c *cluster) getSyncIndex(node string) int64 {
 }
 
 // insertFinalProposal inserts final proposal from the node to the cluster
-func (c *cluster) insertFinalProposal(p *pbft.SealedProposal) {
+func (c *cluster) insertFinalProposal(sealProp *pbft.SealedProposal) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
 	lastIndex := len(c.sealedProposals) - 1
-	insertIndex := p.Number - 1
-	if insertIndex == uint64(lastIndex) {
+	insertIndex := sealProp.Number - 1
+	if len(c.sealedProposals) > 0 && insertIndex <= uint64(lastIndex) {
 		// already exists
-		if !c.sealedProposals[insertIndex].Proposal.Equal(p.Proposal) {
-			panic("Proposals are not equal")
+		if !c.sealedProposals[insertIndex].Proposal.Equal(sealProp.Proposal) {
+			panic("Existing proposal on a given position is not not equal to the one being inserted to the same position")
 		}
 	} else {
-		c.sealedProposals = append(c.sealedProposals, p)
+		for _, currentSealProp := range c.sealedProposals {
+			if currentSealProp.Proposal.Equal(sealProp.Proposal) {
+				panic("Proposal already exists")
+			}
+		}
+		c.sealedProposals = append(c.sealedProposals, sealProp)
 	}
 }
 
