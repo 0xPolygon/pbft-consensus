@@ -16,10 +16,6 @@ import (
 	"github.com/mitchellh/cli"
 )
 
-const (
-	MessagesBatchSize = 1000
-)
-
 // ReplayMessageCommand is a struct containing data for running replay-message command
 type ReplayMessageCommand struct {
 	UI cli.Ui
@@ -70,25 +66,29 @@ func (rmc *ReplayMessageCommand) Run(args []string) int {
 
 	go func(s *bufio.Scanner) {
 		messages := make([]*ReplayMessage, 0)
-		var sequence, previousSequence uint64
-		sequence, previousSequence = 1, 1
-		for scanner.Scan() {
+		i := 0
+		for s.Scan() {
 			var message *ReplayMessage
-			if err := json.Unmarshal(scanner.Bytes(), &message); err != nil {
+			if err := json.Unmarshal(s.Bytes(), &message); err != nil {
 				rmc.UI.Error(fmt.Sprintf("Error happened on unmarshalling a message in .flow file. Reason: %v", err))
 				return
 			}
 
-			sequence = message.Message.View.Sequence
+			messages = append(messages, message)
+			i++
 
-			if sequence == previousSequence {
-				messages = append(messages, message)
-			} else {
-				previousSequence = sequence
+			if i%200 == 0 {
 				messagesChannel <- messages
 				messages = nil
 			}
 		}
+
+		if len(messages) > 0 {
+			//its the leftover of messages
+			messagesChannel <- messages
+			messages = nil
+		}
+
 		doneChannel <- struct{}{}
 	}(scanner)
 
@@ -120,10 +120,13 @@ LOOP:
 				node, exists := nodes[string(message.To)]
 				if !exists {
 					rmc.UI.Warn(fmt.Sprintf("Could not find node: %v to push message from .flow file", message.To))
-				} else if message.To != message.Message.From || message.Message.Type == pbft.MessageReq_Preprepare {
+				} else {
 					// since timeouts have .From property always empty, and To always non empty, they will be pushed to message queue
 					// for regular messages we will only push those where sender and receiver differ or if its a PrePrepare message
 					node.PushMessageInternal(message.Message)
+					if replayMessagesNotifier.lastSequence < message.Message.View.Sequence {
+						replayMessagesNotifier.lastSequence = message.Message.View.Sequence
+					}
 				}
 			}
 		case <-doneChannel:
@@ -135,14 +138,23 @@ LOOP:
 	file.Close()
 
 	var wg sync.WaitGroup
-	wg.Add(nodesCount)
+	wg.Add(1)
 
-	for i := 0; i < nodesCount; i++ {
-		go func() {
-			defer wg.Done()
-			<-replayMessagesNotifier.msgProcessingDone
-		}()
-	}
+	nodesDone := make(map[string]bool, nodesCount)
+	go func() {
+		for {
+			select {
+			case nodeDone := <-replayMessagesNotifier.msgProcessingDone:
+				nodesDone[nodeDone] = true
+				if len(nodesDone) == nodesCount {
+					wg.Done()
+					return
+				}
+			default:
+				continue
+			}
+		}
+	}()
 
 	cluster.Start()
 	wg.Wait()
@@ -167,7 +179,7 @@ func (rmc *ReplayMessageCommand) NewFlagSet() *flag.FlagSet {
 
 // roundTimeout is an implementation of roundTimeout in pbft
 func roundTimeout(round uint64) time.Duration {
-	return time.Millisecond
+	return 5 * time.Millisecond
 }
 
 // openFile opens the file on provided location

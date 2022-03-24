@@ -720,6 +720,12 @@ func (p *Pbft) gossip(msgType MsgType) {
 	}
 }
 
+// GetValidatorId returns validator NodeID
+func (p *Pbft) GetValidatorId() NodeID {
+	return p.validator.NodeID()
+}
+
+// GetState returns the current PBFT state
 func (p *Pbft) GetState() PbftState {
 	return p.getState()
 }
@@ -774,11 +780,6 @@ func (p *Pbft) getNextMessage(span trace.Span, timeout time.Duration) (*MessageR
 		case <-p.updateCh:
 		}
 	}
-}
-
-// HasMessages checks if state machine has any messages in message queue
-func (p *Pbft) HasMessages() bool {
-	return !p.msgQueue.isEmpty()
 }
 
 func (p *Pbft) PushMessageInternal(msg *MessageReq) {

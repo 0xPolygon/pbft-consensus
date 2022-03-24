@@ -22,13 +22,14 @@ type ReplayMessagesNotifier struct {
 	lock              sync.Mutex
 	messages          []*ReplayMessage
 	file              *os.File
-	msgProcessingDone chan struct{}
+	msgProcessingDone chan string
+	lastSequence      uint64
 }
 
 // NewReplayMessagesNotifier creates a new instance of ReplayMessageNotifier
 func NewReplayMessagesNotifier(channelBuffer int) *ReplayMessagesNotifier {
 	return &ReplayMessagesNotifier{
-		msgProcessingDone: make(chan struct{}, channelBuffer),
+		msgProcessingDone: make(chan string),
 	}
 }
 
@@ -88,16 +89,27 @@ func (h *ReplayMessagesNotifier) HandleTimeout(to pbft.NodeID, msgType pbft.MsgT
 func (h *ReplayMessagesNotifier) ReadNextMessage(p *pbft.Pbft) (*pbft.MessageReq, []*pbft.MessageReq) {
 	msg, discards := p.ReadMessageWithDiscards()
 
-	if msg == nil {
-		if !p.HasMessages() && h.msgProcessingDone != nil {
-			//when the next message is null, and queues are empty, we know we drained the message queue of the given node
-			h.msgProcessingDone <- struct{}{}
+	if msg != nil {
+		if isTimeoutMessage(msg) {
+			return nil, nil
+		} else if h.msgProcessingDone != nil {
+			validatorId := p.GetValidatorId()
+			//when nodes reach sequence that is higher than the sequence in file,
+			//or if it is in constant round change we know we either reached the end of execution or nodes are stuck and there is a problem
+			if msg.View.Sequence > h.lastSequence ||
+				isSequenceInContinuousRoundChange(msg, validatorId) {
+				h.msgProcessingDone <- string(validatorId)
+			}
 		}
-	} else if isTimeoutMessage(msg) {
-		return nil, nil
 	}
 
 	return msg, discards
+}
+
+// isSequenceInContinuousRoundChange checks if node is stuck in continuous round change
+// means either all messages are read and processed from file and nodes can not reach a consensus for next proposal, or there is some problem
+func isSequenceInContinuousRoundChange(msg *pbft.MessageReq, validatorId pbft.NodeID) bool {
+	return msg.Type == pbft.MessageReq_RoundChange && msg.View.Round >= 50
 }
 
 // createFile creates a .flow file to save messages and timeouts on the predifined location

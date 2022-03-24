@@ -19,14 +19,6 @@ type msgQueue struct {
 	queueLock sync.Mutex
 }
 
-// isEmpty checks if all queues in msgQueue are empty
-func (m *msgQueue) isEmpty() bool {
-	m.queueLock.Lock()
-	defer m.queueLock.Unlock()
-
-	return m.roundChangeStateQueue.Len() == 0 && m.acceptStateQueue.Len() == 0 && m.validateStateQueue.Len() == 0
-}
-
 // pushMessage adds a new message to a message queue
 func (m *msgQueue) pushMessage(message *MessageReq) {
 	m.queueLock.Lock()

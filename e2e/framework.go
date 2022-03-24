@@ -635,7 +635,6 @@ func (v *valString) CalcProposer(round uint64) pbft.NodeID {
 
 	pick := seed % uint64(v.Len())
 	node := (v.nodes)[pick]
-	fmt.Printf("Calculated new proposer: %v based on round: %v, last proposer: %v, seed: %v, pick: %v.\n", node, round, v.lastProposer, seed, pick)
 	return node
 }
 
