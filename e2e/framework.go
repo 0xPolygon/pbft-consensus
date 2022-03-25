@@ -4,11 +4,7 @@ import (
 	"context"
 	"crypto/sha1"
 	"fmt"
-	"io"
-	"io/ioutil"
 	"log"
-	"os"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -94,6 +90,8 @@ func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transportHook) 
 	} else {
 		config.LogsDir = logsDir
 	}
+
+	tt.logger = log.New(GetLoggerOutput("transport", logsDir), "", log.LstdFlags)
 
 	c := &Cluster{
 		t:               t,
@@ -361,19 +359,7 @@ type node struct {
 }
 
 func newPBFTNode(name, logsDir string, nodes []string, trace trace.Tracer, tt *transport) (*node, error) {
-	var loggerOutput io.Writer
-	var err error
-	if os.Getenv("SILENT") == "true" {
-		loggerOutput = ioutil.Discard
-	} else if logsDir != "" {
-		loggerOutput, err = os.OpenFile(filepath.Join(logsDir, name+".log"), os.O_RDWR|os.O_APPEND|os.O_CREATE, 0660)
-		if err != nil {
-			log.Printf("[WARNING] Failed to open file for node: %v. Reason: %v. Fallbacked to standard output.", name, err)
-			loggerOutput = os.Stdout
-		}
-	} else {
-		loggerOutput = os.Stdout
-	}
+	loggerOutput := GetLoggerOutput(name, logsDir)
 
 	kk := key(name)
 	con := pbft.New(kk, tt, pbft.WithTracer(trace), pbft.WithLogger(log.New(loggerOutput, "", log.LstdFlags)))
