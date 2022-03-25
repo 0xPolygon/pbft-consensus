@@ -784,6 +784,11 @@ func (p *Pbft) getNextMessage(span trace.Span, timeout time.Duration) (*MessageR
 
 func (p *Pbft) PushMessageInternal(msg *MessageReq) {
 	p.msgQueue.pushMessage(msg)
+
+	select {
+	case p.updateCh <- struct{}{}:
+	default:
+	}
 }
 
 // PushMessage pushes a new message to the message queue
@@ -793,12 +798,7 @@ func (p *Pbft) PushMessage(msg *MessageReq) {
 		return
 	}
 
-	p.msgQueue.pushMessage(msg)
-
-	select {
-	case p.updateCh <- struct{}{}:
-	default:
-	}
+	p.PushMessageInternal(msg)
 }
 
 // Reads next message with discards from message queue based on current state, sequence and round
