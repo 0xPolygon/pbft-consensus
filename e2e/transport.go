@@ -28,6 +28,9 @@ func (t *transport) Register(name pbft.NodeID, handler transportHandler) {
 
 func (t *transport) Gossip(msg *pbft.MessageReq) error {
 	for to, handler := range t.nodes {
+		if msg.From == to {
+			continue
+		}
 		go func(to pbft.NodeID, handler transportHandler) {
 			send := true
 			if t.hook != nil {
