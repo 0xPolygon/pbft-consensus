@@ -50,7 +50,8 @@ func (fc *FuzzCommand) Run(args []string) int {
 	fc.UI.Info(fmt.Sprintf("Duration: %v\n", fc.duration))
 	rand.Seed(time.Now().Unix())
 
-	replayMessageHandler := &replay.ReplayMessagesNotifier{}
+	replayMessageHandler := replay.NewReplayMessagesNotifierWithPersister()
+
 	runner := fuzz.NewRunner(fc.numberOfNodes, replayMessageHandler)
 	err = runner.Run(fc.duration)
 	if err != nil {

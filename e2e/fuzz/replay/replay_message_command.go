@@ -1,8 +1,6 @@
 package replay
 
 import (
-	"bufio"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -41,56 +39,28 @@ func (rmc *ReplayMessageCommand) Synopsis() string {
 
 // Run implements the cli.Command interface and runs the command
 func (rmc *ReplayMessageCommand) Run(args []string) int {
+	os.Setenv("E2E_LOG_TO_FILES", "true")
 	err := rmc.validateInput(args)
 	if err != nil {
 		rmc.UI.Error(err.Error())
 		return 1
 	}
 
-	file, err := openFile(rmc.filePath)
+	messageReader := &replayMessageReader{
+		msgProcessingDone: make(chan string),
+	}
+
+	err = messageReader.openFile(rmc.filePath)
 	if err != nil {
 		rmc.UI.Error(err.Error())
 		return 1
 	}
 
-	scanner := createScanner(file)
-	nodeNames, err := readNodeMetaData(scanner)
+	nodeNames, err := messageReader.readNodeMetaData()
 	if err != nil {
 		rmc.UI.Error(err.Error())
 		return 1
 	}
-
-	nodesCount := len(nodeNames)
-	messagesChannel := make(chan []*ReplayMessage)
-	doneChannel := make(chan struct{})
-
-	go func(s *bufio.Scanner) {
-		messages := make([]*ReplayMessage, 0)
-		i := 0
-		for s.Scan() {
-			var message *ReplayMessage
-			if err := json.Unmarshal(s.Bytes(), &message); err != nil {
-				rmc.UI.Error(fmt.Sprintf("Error happened on unmarshalling a message in .flow file. Reason: %v", err))
-				return
-			}
-
-			messages = append(messages, message)
-			i++
-
-			if i%200 == 0 {
-				messagesChannel <- messages
-				messages = nil
-			}
-		}
-
-		if len(messages) > 0 {
-			//its the leftover of messages
-			messagesChannel <- messages
-			messages = nil
-		}
-
-		doneChannel <- struct{}{}
-	}(scanner)
 
 	i := strings.Index(nodeNames[0], "_")
 	prefix := ""
@@ -98,7 +68,9 @@ func (rmc *ReplayMessageCommand) Run(args []string) int {
 		prefix = (nodeNames[0])[:i]
 	}
 
-	replayMessagesNotifier := NewReplayMessagesNotifier(nodesCount)
+	replayMessagesNotifier := NewReplayMessagesNotifierWithReader(messageReader)
+
+	nodesCount := len(nodeNames)
 	config := &e2e.ClusterConfig{
 		Count:                 nodesCount,
 		Name:                  "fuzz_cluster",
@@ -109,33 +81,9 @@ func (rmc *ReplayMessageCommand) Run(args []string) int {
 	}
 
 	cluster := e2e.NewPBFTCluster(nil, config)
-	nodes := cluster.GetNodesMap()
 
-	isDone := false
-LOOP:
-	for !isDone {
-		select {
-		case messages := <-messagesChannel:
-			for _, message := range messages {
-				node, exists := nodes[string(message.To)]
-				if !exists {
-					rmc.UI.Warn(fmt.Sprintf("Could not find node: %v to push message from .flow file", message.To))
-				} else {
-					// since timeouts have .From property always empty, and To always non empty, they will be pushed to message queue
-					// for regular messages we will only push those where sender and receiver differ or if its a PrePrepare message
-					node.PushMessageInternal(message.Message)
-					if replayMessagesNotifier.lastSequence < message.Message.View.Sequence {
-						replayMessagesNotifier.lastSequence = message.Message.View.Sequence
-					}
-				}
-			}
-		case <-doneChannel:
-			isDone = true
-			break LOOP
-		}
-	}
-
-	file.Close()
+	messageReader.readMessages(cluster)
+	messageReader.closeFile()
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -144,7 +92,7 @@ LOOP:
 	go func() {
 		for {
 			select {
-			case nodeDone := <-replayMessagesNotifier.msgProcessingDone:
+			case nodeDone := <-messageReader.msgProcessingDone:
 				nodesDone[nodeDone] = true
 				if len(nodesDone) == nodesCount {
 					wg.Done()
@@ -180,40 +128,6 @@ func (rmc *ReplayMessageCommand) NewFlagSet() *flag.FlagSet {
 // roundTimeout is an implementation of roundTimeout in pbft
 func roundTimeout(round uint64) time.Duration {
 	return 5 * time.Millisecond
-}
-
-// openFile opens the file on provided location
-func openFile(filePath string) (*os.File, error) {
-	_, err := os.Stat(filePath)
-	if err != nil {
-		return nil, err
-	}
-
-	return os.Open(filePath)
-}
-
-// createScanner creates a new bufio Scanner to load file line by line
-func createScanner(file *os.File) *bufio.Scanner {
-	scanner := bufio.NewScanner(file)
-
-	buffer := []byte{}
-	scanner.Buffer(buffer, MaxCharactersPerLine)
-
-	return scanner
-}
-
-// readNodeMetaData reads the first line of .flow file which should be a list of nodes
-func readNodeMetaData(scanner *bufio.Scanner) ([]string, error) {
-	var nodeNames []string
-	scanner.Scan() // first line carries the node names needed to create appropriate number of nodes for replay
-	err := json.Unmarshal(scanner.Bytes(), &nodeNames)
-	if err != nil {
-		return nil, err
-	} else if len(nodeNames) == 0 {
-		err = errors.New("no nodes were found in .flow file, so no cluster will be started")
-	}
-
-	return nodeNames, err
 }
 
 // validateInput parses arguments from CLI and validates their correctness
