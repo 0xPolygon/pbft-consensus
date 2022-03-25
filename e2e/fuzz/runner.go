@@ -147,8 +147,7 @@ func validateCluster(c *e2e.Cluster) ([]string, bool) {
 			runningNodes = append(runningNodes, n.GetName())
 		}
 	}
-	stoppedNodesCount := totalNodesCount - len(runningNodes)
-	return runningNodes, stoppedNodesCount <= pbft.MaxFaultyNodes(totalNodesCount)
+	return runningNodes, len(runningNodes) >= pbft.QuorumSize(totalNodesCount)
 }
 
 func getAvailableActions() []e2e.FunctionalAction {
