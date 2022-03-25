@@ -470,7 +470,7 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 		}
 
 		if p.state.numPrepared() > p.state.NumValid() {
-			// we have received enough pre-prepare messages
+			// we have received enough prepare messages
 			sendCommit(span)
 		}
 

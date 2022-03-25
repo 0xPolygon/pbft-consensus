@@ -37,7 +37,7 @@ func (dn *DropNodeAction) Apply(c *Cluster) RevertFunc {
 	c.StopNode(nodeToStop.name)
 
 	return func() {
-		log.Printf("Reverting drop of node: %v\n", nodeToStop.name)
+		log.Printf("Reverting stopped node %v\n", nodeToStop.name)
 		nodeToStop.Start()
 	}
 }
@@ -50,14 +50,16 @@ func (action *PartitionAction) CanApply(c *Cluster) bool {
 }
 
 func (action *PartitionAction) Apply(c *Cluster) RevertFunc {
+	c.lock.Lock()
+	defer c.lock.Unlock()
 	hook := newPartitionTransport(500 * time.Millisecond)
 	// create 2 partition with random number of nodes
-	// minority with no more than max faulty nodes and majority with the rest of the nodes
-	maxFaultyNodes := pbft.MaxFaultyNodes(len(c.nodes))
+	// minority with less than quorum size nodes and majority with the rest of the nodes
+	quorumSize := pbft.QuorumSize(len(c.nodes))
 
 	var minorityPartition []string
 	var majorityPartition []string
-	minorityPartitionSize := rand.Intn(maxFaultyNodes + 1)
+	minorityPartitionSize := rand.Intn(quorumSize + 1)
 	i := 0
 	for n := range c.nodes {
 		if i < minorityPartitionSize {
@@ -73,6 +75,8 @@ func (action *PartitionAction) Apply(c *Cluster) RevertFunc {
 	c.hook = hook
 
 	return func() {
+		c.lock.Lock()
+		defer c.lock.Unlock()
 		log.Println("Reverting partitions.")
 		c.hook.Reset()
 	}
