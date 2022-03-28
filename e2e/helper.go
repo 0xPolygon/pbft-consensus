@@ -2,8 +2,12 @@ package e2e
 
 import (
 	"fmt"
+	"io"
+	"io/ioutil"
+	"log"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -85,4 +89,21 @@ func CreateLogsDir(directoryName string) (string, error) {
 	}
 
 	return logsDir, err
+}
+
+func GetLoggerOutput(name string, logsDir string) io.Writer {
+	var loggerOutput io.Writer
+	var err error
+	if os.Getenv("SILENT") == "true" {
+		loggerOutput = ioutil.Discard
+	} else if logsDir != "" {
+		loggerOutput, err = os.OpenFile(filepath.Join(logsDir, name+".log"), os.O_RDWR|os.O_APPEND|os.O_CREATE, 0660)
+		if err != nil {
+			log.Printf("[WARNING] Failed to open file for node: %v. Reason: %v. Fallbacked to standard output.", name, err)
+			loggerOutput = os.Stdout
+		}
+	} else {
+		loggerOutput = os.Stdout
+	}
+	return loggerOutput
 }

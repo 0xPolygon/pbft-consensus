@@ -3,12 +3,9 @@ package e2e
 import (
 	"context"
 	"crypto/sha1"
+	"errors"
 	"fmt"
-	"io"
-	"io/ioutil"
 	"log"
-	"os"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -108,6 +105,8 @@ func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transportHook) 
 		config.LogsDir = logsDir
 	}
 
+	tt.logger = log.New(GetLoggerOutput("transport", logsDir), "", log.LstdFlags)
+
 	c := &Cluster{
 		t:                     t,
 		nodes:                 map[string]*node{},
@@ -124,7 +123,7 @@ func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transportHook) 
 
 	for _, name := range names {
 		trace := c.tracer.Tracer(name)
-		n, _ := newPBFTNode(name, names, config, trace, tt)
+		n, _ := newPBFTNode(name, config, names, trace, tt)
 		n.c = c
 		c.nodes[name] = n
 	}
@@ -132,20 +131,27 @@ func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transportHook) 
 }
 
 // insertFinalProposal inserts final proposal from the node to the cluster
-func (c *Cluster) insertFinalProposal(p *pbft.SealedProposal) {
+func (c *Cluster) insertFinalProposal(sealProp *pbft.SealedProposal) error {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
+	insertIndex := sealProp.Number - 1
 	lastIndex := len(c.sealedProposals) - 1
-	insertIndex := p.Number - 1
-	if insertIndex == uint64(lastIndex) {
-		// already exists
-		if !c.sealedProposals[insertIndex].Proposal.Equal(p.Proposal) {
-			panic("Proposals are not equal")
+
+	if lastIndex >= 0 {
+		if insertIndex <= uint64(lastIndex) {
+			// already exists
+			if !c.sealedProposals[insertIndex].Proposal.Equal(sealProp.Proposal) {
+				return errors.New("existing proposal on a given position is not not equal to the one being inserted to the same position")
+			} else {
+				return nil
+			}
+		} else if insertIndex != uint64(lastIndex+1) {
+			return fmt.Errorf("expected that final proposal number is %v, but was %v", len(c.sealedProposals)+1, sealProp.Number)
 		}
-	} else {
-		c.sealedProposals = append(c.sealedProposals, p)
 	}
+	c.sealedProposals = append(c.sealedProposals, sealProp)
+	return nil
 }
 
 func (c *Cluster) resolveNodes(nodes ...[]string) []string {
@@ -309,13 +315,16 @@ func (c *Cluster) Nodes() []*node {
 // Returns nodes which satisfy provided filter delegate function.
 // If filter is not provided, all the nodes will be retreived.
 func (c *Cluster) GetFilteredNodes(filter func(*node) bool) []*node {
-	var filteredNodes []*node
-	for _, n := range c.nodes {
-		if filter == nil || filter(n) {
-			filteredNodes = append(filteredNodes, n)
+	if filter != nil {
+		var filteredNodes []*node
+		for _, n := range c.nodes {
+			if filter(n) {
+				filteredNodes = append(filteredNodes, n)
+			}
 		}
+		return filteredNodes
 	}
-	return filteredNodes
+	return c.GetNodes()
 }
 
 func (c *Cluster) GetRunningNodes() []*node {
@@ -377,20 +386,8 @@ type node struct {
 	faulty uint64
 }
 
-func newPBFTNode(name string, nodes []string, clusterConfig *ClusterConfig, trace trace.Tracer, tt *transport) (*node, error) {
-	var loggerOutput io.Writer
-	var err error
-	if os.Getenv("SILENT") == "true" {
-		loggerOutput = ioutil.Discard
-	} else if clusterConfig.LogsDir != "" {
-		loggerOutput, err = os.OpenFile(filepath.Join(clusterConfig.LogsDir, name+".log"), os.O_RDWR|os.O_APPEND|os.O_CREATE, 0660)
-		if err != nil {
-			log.Printf("[WARNING] Failed to open file for node: %v. Reason: %v. Fallbacked to standard output.", name, err)
-			loggerOutput = os.Stdout
-		}
-	} else {
-		loggerOutput = os.Stdout
-	}
+func newPBFTNode(name string, clusterConfig *ClusterConfig, nodes []string, trace trace.Tracer, tt *transport) (*node, error) {
+	loggerOutput := GetLoggerOutput(name, clusterConfig.LogsDir)
 
 	con := pbft.New(
 		key(name),
@@ -441,7 +438,10 @@ func (n *node) isStuck(num uint64) (uint64, bool) {
 }
 
 func (n *node) Insert(pp *pbft.SealedProposal) error {
-	n.c.insertFinalProposal(pp)
+	err := n.c.insertFinalProposal(pp)
+	if err != nil {
+		panic(err)
+	}
 	return nil
 }
 
@@ -610,6 +610,19 @@ func hash(p []byte) []byte {
 	h := sha1.New()
 	h.Write(p)
 	return h.Sum(nil)
+}
+
+func newSealedProposal(proposalData []byte, proposer pbft.NodeID, number uint64) *pbft.SealedProposal {
+	proposal := &pbft.Proposal{
+		Data: proposalData,
+		Time: time.Now(),
+	}
+	proposal.Hash = hash(proposal.Data)
+	return &pbft.SealedProposal{
+		Proposal: proposal,
+		Proposer: proposer,
+		Number:   number,
+	}
 }
 
 func (f *fsm) Init(*pbft.RoundInfo) {

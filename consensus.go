@@ -752,12 +752,16 @@ func (p *Pbft) getNextMessage(span trace.Span, timeout time.Duration) (*MessageR
 	for {
 		msg, discards := p.notifier.ReadNextMessage(p)
 		// send the discard messages
+		p.logger.Printf("[TRACE] Current state %s, number of prepared messages: %d, number of committed messages %d", PbftState(p.state.state), p.state.numPrepared(), p.state.numCommitted())
+
 		for _, msg := range discards {
+			p.logger.Printf("[TRACE] Discarded %s ", msg)
 			spanAddEventMessage("dropMessage", span, msg)
 		}
 		if msg != nil {
 			// add the event to the span
 			spanAddEventMessage("message", span, msg)
+			p.logger.Printf("[TRACE] Received %s", msg)
 			return msg, true
 		}
 
@@ -770,6 +774,7 @@ func (p *Pbft) getNextMessage(span trace.Span, timeout time.Duration) (*MessageR
 				Round:    p.state.view.Round,
 				Sequence: p.state.view.Sequence,
 			})
+			p.logger.Printf("[TRACE] Message read timeout occurred")
 			return nil, true
 		case <-p.ctx.Done():
 			return nil, false
