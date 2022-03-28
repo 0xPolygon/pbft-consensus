@@ -37,9 +37,9 @@ func (t *transport) Gossip(msg *pbft.MessageReq) error {
 			}
 			if send {
 				handler(msg)
-				t.logger.Printf("[DEBUG] Message sent to %s - %s", to, msg)
+				t.logger.Printf("[TRACE] Message sent to %s - %s", to, msg)
 			} else {
-				t.logger.Printf("[DEBUG] Message not sent to %s - %s", to, msg)
+				t.logger.Printf("[TRACE] Message not sent to %s - %s", to, msg)
 			}
 		}(to, handler)
 	}
