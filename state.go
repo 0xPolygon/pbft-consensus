@@ -51,6 +51,10 @@ type MessageReq struct {
 	Proposal []byte
 }
 
+func (m MessageReq) String() string {
+	return fmt.Sprintf("message - type: %s from: %s, view: %v, proposal: %v, hash: %v, seal: %v", m.Type, m.From, m.View, m.Proposal, m.Hash, m.Seal)
+}
+
 func (m *MessageReq) Validate() error {
 	// Hash field has to exist for state != RoundStateChange
 	if m.Type != MessageReq_RoundChange {

@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"log"
 	"math/rand"
 	"sync"
 	"time"
@@ -9,8 +10,9 @@ import (
 )
 
 type transport struct {
-	nodes map[pbft.NodeID]transportHandler
-	hook  transportHook
+	logger *log.Logger
+	nodes  map[pbft.NodeID]transportHandler
+	hook   transportHook
 }
 
 func (t *transport) addHook(hook transportHook) {
@@ -38,6 +40,9 @@ func (t *transport) Gossip(msg *pbft.MessageReq) error {
 			}
 			if send {
 				handler(msg)
+				t.logger.Printf("[TRACE] Message sent to %s - %s", to, msg)
+			} else {
+				t.logger.Printf("[TRACE] Message not sent to %s - %s", to, msg)
 			}
 		}(to, handler)
 	}
