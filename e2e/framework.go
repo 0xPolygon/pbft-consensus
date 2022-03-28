@@ -3,6 +3,7 @@ package e2e
 import (
 	"context"
 	"crypto/sha1"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -102,20 +103,27 @@ func (c *cluster) getSyncIndex(node string) int64 {
 }
 
 // insertFinalProposal inserts final proposal from the node to the cluster
-func (c *cluster) insertFinalProposal(p *pbft.SealedProposal) {
+func (c *cluster) insertFinalProposal(sealProp *pbft.SealedProposal) error {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
+	insertIndex := sealProp.Number - 1
 	lastIndex := len(c.sealedProposals) - 1
-	insertIndex := p.Number - 1
-	if insertIndex == uint64(lastIndex) {
-		// already exists
-		if !c.sealedProposals[insertIndex].Proposal.Equal(p.Proposal) {
-			panic("Proposals are not equal")
+
+	if lastIndex >= 0 {
+		if insertIndex <= uint64(lastIndex) {
+			// already exists
+			if !c.sealedProposals[insertIndex].Proposal.Equal(sealProp.Proposal) {
+				return errors.New("existing proposal on a given position is not not equal to the one being inserted to the same position")
+			} else {
+				return nil
+			}
+		} else if insertIndex != uint64(lastIndex+1) {
+			return fmt.Errorf("expected that final proposal number is %v, but was %v", len(c.sealedProposals)+1, sealProp.Number)
 		}
-	} else {
-		c.sealedProposals = append(c.sealedProposals, p)
 	}
+	c.sealedProposals = append(c.sealedProposals, sealProp)
+	return nil
 }
 
 func (c *cluster) resolveNodes(nodes ...[]string) []string {
@@ -348,7 +356,10 @@ func (n *node) isStuck(num uint64) (uint64, bool) {
 }
 
 func (n *node) Insert(pp *pbft.SealedProposal) error {
-	n.c.insertFinalProposal(pp)
+	err := n.c.insertFinalProposal(pp)
+	if err != nil {
+		panic(err)
+	}
 	return nil
 }
 
@@ -504,6 +515,19 @@ func hash(p []byte) []byte {
 	h := sha1.New()
 	h.Write(p)
 	return h.Sum(nil)
+}
+
+func newSealedProposal(proposalData []byte, proposer pbft.NodeID, number uint64) *pbft.SealedProposal {
+	proposal := &pbft.Proposal{
+		Data: proposalData,
+		Time: time.Now(),
+	}
+	proposal.Hash = hash(proposal.Data)
+	return &pbft.SealedProposal{
+		Proposal: proposal,
+		Proposer: proposer,
+		Number:   number,
+	}
 }
 
 func (f *fsm) Init(*pbft.RoundInfo) {
