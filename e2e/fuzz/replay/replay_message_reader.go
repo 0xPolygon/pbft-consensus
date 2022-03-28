@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	MaxCharactersPerLine   = 2048 * 1024 // Increase Scanner buffer size to 2MB per line
+	maxCharactersPerLine   = 2048 * 1024 // Increase Scanner buffer size to 2MB per line
 	roundMessagesWaitLimit = 50
 	messageChunkSize       = 200
 )
@@ -44,7 +44,7 @@ func (r *replayMessageReader) openFile(filePath string) error {
 	r.scanner = bufio.NewScanner(r.file)
 
 	buffer := []byte{}
-	r.scanner.Buffer(buffer, MaxCharactersPerLine)
+	r.scanner.Buffer(buffer, maxCharactersPerLine)
 
 	return nil
 }

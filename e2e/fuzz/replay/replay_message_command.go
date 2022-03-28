@@ -127,7 +127,7 @@ func (rmc *ReplayMessageCommand) NewFlagSet() *flag.FlagSet {
 
 // roundTimeout is an implementation of roundTimeout in pbft
 func roundTimeout(round uint64) time.Duration {
-	return 5 * time.Millisecond
+	return time.Millisecond
 }
 
 // validateInput parses arguments from CLI and validates their correctness

@@ -180,10 +180,6 @@ type Pbft struct {
 	notifier StateNotifier
 }
 
-func (p *Pbft) Log(log string) {
-	p.logger.Println(log)
-}
-
 type SignKey interface {
 	NodeID() NodeID
 	Sign(b []byte) ([]byte, error)

@@ -118,15 +118,16 @@ func msgToState(msg MsgType) PbftState {
 }
 
 func stateToMsg(pbftState PbftState) MsgType {
-	if pbftState == RoundChangeState {
+	switch pbftState {
+	case RoundChangeState:
 		return MessageReq_RoundChange
-	} else if pbftState == AcceptState {
+	case AcceptState:
 		return MessageReq_Preprepare
-	} else if pbftState == ValidateState {
+	case ValidateState:
 		return MessageReq_Prepare
+	default:
+		panic("BUG: not expected")
 	}
-
-	panic("BUG: not expected")
 }
 
 type msgQueueImpl []*MessageReq

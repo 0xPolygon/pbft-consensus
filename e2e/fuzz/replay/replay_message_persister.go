@@ -10,6 +10,8 @@ import (
 	"time"
 )
 
+const directoryPath = "../SavedState"
+
 // replayMessagePersister encapsulates logic for saving messages in .flow file
 type replayMessagePersister struct {
 	lock     sync.Mutex
@@ -62,15 +64,14 @@ func (r *replayMessagePersister) saveCachedMessages() error {
 // createFile creates a .flow file to save messages and timeouts on the predifined location
 func (r *replayMessagePersister) createFile() error {
 	if r.file == nil {
-		relativePath := "../SavedState"
-		if _, err := os.Stat(relativePath); os.IsNotExist(err) {
-			err := os.Mkdir(relativePath, 0777)
+		if _, err := os.Stat(directoryPath); os.IsNotExist(err) {
+			err := os.Mkdir(directoryPath, 0777)
 			if err != nil {
 				return err
 			}
 		}
 
-		path, err := filepath.Abs(relativePath)
+		path, err := filepath.Abs(directoryPath)
 		if err != nil {
 			return err
 		}
@@ -107,7 +108,7 @@ func (r *replayMessagePersister) saveMessages(fileWriter *os.File) error {
 		return err
 	}
 
-	bufWriter := bufio.NewWriterSize(fileWriter, MaxCharactersPerLine)
+	bufWriter := bufio.NewWriterSize(fileWriter, maxCharactersPerLine)
 	defer bufWriter.Flush()
 
 	for _, rawMessage := range rawMessages {

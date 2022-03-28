@@ -244,7 +244,11 @@ func (c *Cluster) GetNodesMap() map[string]*node {
 }
 
 func (c *Cluster) GetNodes() []*node {
-	return c.GetFilteredNodes(nil)
+	nodes := make([]*node, 0, len(c.nodes))
+	for _, node := range c.nodes {
+		nodes = append(nodes, node)
+	}
+	return nodes
 }
 
 // getNodeHeight returns node height depending on node index
@@ -430,7 +434,6 @@ func (n *node) setSyncIndex(idx int64) {
 func (n *node) isStuck(num uint64) (uint64, bool) {
 	// get max height in the network
 	height, _ := n.c.syncWithNetwork(n.name)
-	n.pbft.Log(fmt.Sprintf("Checking if node is stuck. Num: %v. Height: %v", num, height))
 	if height > num {
 		return height, true
 	}
@@ -634,8 +637,7 @@ func (v *valString) CalcProposer(round uint64) pbft.NodeID {
 	}
 
 	pick := seed % uint64(v.Len())
-	node := (v.nodes)[pick]
-	return node
+	return (v.nodes)[pick]
 }
 
 func (v *valString) Index(addr pbft.NodeID) int {

@@ -1,17 +1,12 @@
 package main
 
 import (
-	"flag"
 	"log"
 	"os"
 
 	"github.com/0xPolygon/pbft-consensus/e2e/fuzz/replay"
 	"github.com/mitchellh/cli"
 )
-
-type FuzzCLICommand interface {
-	NewFlagSet() *flag.FlagSet
-}
 
 func main() {
 	commands := getCommands()
