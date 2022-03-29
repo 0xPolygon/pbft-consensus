@@ -4,7 +4,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -39,7 +38,6 @@ func (rmc *ReplayMessageCommand) Synopsis() string {
 
 // Run implements the cli.Command interface and runs the command
 func (rmc *ReplayMessageCommand) Run(args []string) int {
-	os.Setenv("E2E_LOG_TO_FILES", "true")
 	err := rmc.validateInput(args)
 	if err != nil {
 		rmc.UI.Error(err.Error())
