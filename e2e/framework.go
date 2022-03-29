@@ -59,19 +59,23 @@ func initTracer(name string) *sdktrace.TracerProvider {
 }
 
 type Cluster struct {
-	t               *testing.T
-	lock            sync.Mutex
-	nodes           map[string]*node
-	tracer          *sdktrace.TracerProvider
-	hook            transportHook
-	sealedProposals []*pbft.SealedProposal
+	t                     *testing.T
+	lock                  sync.Mutex
+	nodes                 map[string]*node
+	tracer                *sdktrace.TracerProvider
+	hook                  transportHook
+	sealedProposals       []*pbft.SealedProposal
+	replayMessageNotifier ReplayNotifier
 }
 
 type ClusterConfig struct {
-	Count   int
-	Name    string
-	Prefix  string
-	LogsDir string
+	Count                 int
+	Name                  string
+	Prefix                string
+	LogsDir               string
+	ReplayMessageNotifier ReplayNotifier
+	TransportHandler      transportHandler
+	RoundTimeout          pbft.RoundTimeout
 }
 
 func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transportHook) *Cluster {
@@ -85,7 +89,16 @@ func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transportHook) 
 		tt.addHook(hook[0])
 	}
 
-	logsDir, err := CreateLogsDir(t)
+	var directoryName string
+	if t != nil {
+		directoryName = t.Name()
+	}
+
+	if config.ReplayMessageNotifier == nil {
+		config.ReplayMessageNotifier = &DefaultReplayNotifier{}
+	}
+
+	logsDir, err := CreateLogsDir(directoryName)
 	if err != nil {
 		log.Printf("[WARNING] Could not create logs directory. Reason: %v. Logging will be defaulted to standard output.", err)
 	} else {
@@ -95,24 +108,26 @@ func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transportHook) 
 	tt.logger = log.New(GetLoggerOutput("transport", logsDir), "", log.LstdFlags)
 
 	c := &Cluster{
-		t:               t,
-		nodes:           map[string]*node{},
-		tracer:          initTracer("fuzzy_" + config.Name),
-		hook:            tt.hook,
-		sealedProposals: []*pbft.SealedProposal{},
+		t:                     t,
+		nodes:                 map[string]*node{},
+		tracer:                initTracer("fuzzy_" + config.Name),
+		hook:                  tt.hook,
+		sealedProposals:       []*pbft.SealedProposal{},
+		replayMessageNotifier: config.ReplayMessageNotifier,
 	}
+
+	err = c.replayMessageNotifier.SaveMetaData(&names)
+	if err != nil {
+		log.Printf("[WARNING] Could not write node meta data to replay messages file. Reason: %v", err)
+	}
+
 	for _, name := range names {
 		trace := c.tracer.Tracer(name)
-		n, _ := newPBFTNode(name, config.LogsDir, names, trace, tt)
+		n, _ := newPBFTNode(name, config, names, trace, tt)
 		n.c = c
 		c.nodes[name] = n
 	}
 	return c
-}
-
-// getSyncIndex returns an index up to which the node is synced with the network
-func (c *Cluster) getSyncIndex(node string) int64 {
-	return c.nodes[node].getSyncIndex()
 }
 
 // insertFinalProposal inserts final proposal from the node to the cluster
@@ -191,7 +206,7 @@ func (c *Cluster) GetMaxHeight(nodes ...[]string) uint64 {
 	queryNodes := c.resolveNodes(nodes...)
 	var max uint64
 	for _, node := range queryNodes {
-		h, _ := c.syncWithNetwork(node)
+		h := c.nodes[node].getNodeHeight()
 		if h > max {
 			max = h
 		}
@@ -228,6 +243,18 @@ func (c *Cluster) WaitForHeight(num uint64, timeout time.Duration, nodes ...[]st
 			return fmt.Errorf("timeout")
 		}
 	}
+}
+
+func (c *Cluster) GetNodesMap() map[string]*node {
+	return c.nodes
+}
+
+func (c *Cluster) GetNodes() []*node {
+	nodes := make([]*node, 0, len(c.nodes))
+	for _, node := range c.nodes {
+		nodes = append(nodes, node)
+	}
+	return nodes
 }
 
 // getNodeHeight returns node height depending on node index
@@ -275,15 +302,6 @@ func (c *Cluster) getProposer(index int64) pbft.NodeID {
 	return proposer
 }
 
-func (n *node) currentHeight() uint64 {
-	height := uint64(0) // initial height is always 0
-	index := n.getSyncIndex()
-	if index >= 0 {
-		height = uint64(index) + 1
-	}
-	return height
-}
-
 func (c *Cluster) Nodes() []*node {
 	list := make([]*node, len(c.nodes))
 	i := 0
@@ -294,13 +312,19 @@ func (c *Cluster) Nodes() []*node {
 	return list
 }
 
-func (c *Cluster) GetFilteredNodes(filter func(*node) bool) (filteredNodes []*node) {
-	for _, n := range c.nodes {
-		if filter(n) {
-			filteredNodes = append(filteredNodes, n)
+// Returns nodes which satisfy provided filter delegate function.
+// If filter is not provided, all the nodes will be retreived.
+func (c *Cluster) GetFilteredNodes(filter func(*node) bool) []*node {
+	if filter != nil {
+		var filteredNodes []*node
+		for _, n := range c.nodes {
+			if filter(n) {
+				filteredNodes = append(filteredNodes, n)
+			}
 		}
+		return filteredNodes
 	}
-	return
+	return c.GetNodes()
 }
 
 func (c *Cluster) GetRunningNodes() []*node {
@@ -340,10 +364,6 @@ func (c *Cluster) Stop() {
 	}
 }
 
-func (c *Cluster) FailNode(name string) {
-	c.nodes[name].setFaultyNode(true)
-}
-
 func (c *Cluster) GetTransportHook() transportHook {
 	return c.hook
 }
@@ -366,16 +386,28 @@ type node struct {
 	faulty uint64
 }
 
-func newPBFTNode(name, logsDir string, nodes []string, trace trace.Tracer, tt *transport) (*node, error) {
-	loggerOutput := GetLoggerOutput(name, logsDir)
+func newPBFTNode(name string, clusterConfig *ClusterConfig, nodes []string, trace trace.Tracer, tt *transport) (*node, error) {
+	loggerOutput := GetLoggerOutput(name, clusterConfig.LogsDir)
 
-	kk := key(name)
-	con := pbft.New(kk, tt, pbft.WithTracer(trace), pbft.WithLogger(log.New(loggerOutput, "", log.LstdFlags)))
+	con := pbft.New(
+		key(name),
+		tt,
+		pbft.WithTracer(trace),
+		pbft.WithLogger(log.New(loggerOutput, "", log.LstdFlags)),
+		pbft.WithNotifier(clusterConfig.ReplayMessageNotifier),
+		pbft.WithRoundTimeout(clusterConfig.RoundTimeout),
+	)
 
-	tt.Register(pbft.NodeID(name), func(msg *pbft.MessageReq) {
-		// pipe messages from mock transport to pbft
-		con.PushMessage(msg)
-	})
+	if clusterConfig.TransportHandler != nil {
+		//for replay messages when we do not want to gossip messages
+		tt.Register(pbft.NodeID(name), clusterConfig.TransportHandler)
+	} else {
+		tt.Register(pbft.NodeID(name), func(to pbft.NodeID, msg *pbft.MessageReq) {
+			// pipe messages from mock transport to pbft
+			con.PushMessage(msg)
+			clusterConfig.ReplayMessageNotifier.HandleMessage(to, msg)
+		})
+	}
 
 	n := &node{
 		nodes:   nodes,
@@ -399,7 +431,6 @@ func (n *node) setSyncIndex(idx int64) {
 func (n *node) isStuck(num uint64) (uint64, bool) {
 	// get max height in the network
 	height, _ := n.c.syncWithNetwork(n.name)
-
 	if height > num {
 		return height, true
 	}
@@ -430,6 +461,10 @@ func (n *node) isFaulty() bool {
 	return atomic.LoadUint64(&n.faulty) != 0
 }
 
+func (n *node) PushMessageInternal(message *pbft.MessageReq) {
+	n.pbft.PushMessageInternal(message)
+}
+
 func (n *node) Start() {
 	if n.IsRunning() {
 		panic(fmt.Errorf("node '%s' is already started", n))
@@ -456,12 +491,17 @@ func (n *node) Start() {
 				height:          n.getNodeHeight() + 1,
 				validationFails: n.isFaulty(),
 			}
+
 			if err := n.pbft.SetBackend(fsm); err != nil {
 				panic(err)
 			}
 
 			// start the execution
 			n.pbft.Run(ctx)
+			err := n.c.replayMessageNotifier.SaveState()
+			if err != nil {
+				log.Printf("[WARNING] Could not write state to file. Reason: %v", err)
+			}
 
 			switch n.pbft.GetState() {
 			case pbft.SyncState:
@@ -541,10 +581,6 @@ func (f *fsm) BuildProposal() (*pbft.Proposal, error) {
 	}
 	proposal.Hash = hash(proposal.Data)
 	return proposal, nil
-}
-
-func (f *fsm) setValidationFails(v bool) {
-	f.validationFails = v
 }
 
 func (f *fsm) Validate(proposal *pbft.Proposal) error {
@@ -638,3 +674,33 @@ func (v *valString) Includes(id pbft.NodeID) bool {
 func (v *valString) Len() int {
 	return len(v.nodes)
 }
+
+// ReplayNotifier is an interface that expands the StateNotifier with additional methods for saving and loading replay messages
+type ReplayNotifier interface {
+	pbft.StateNotifier
+	SaveMetaData(nodeNames *[]string) error
+	SaveState() error
+	HandleMessage(to pbft.NodeID, message *pbft.MessageReq)
+}
+
+// DefaultReplayNotifier is a null object implementation of ReplayNotifier interface
+type DefaultReplayNotifier struct {
+}
+
+// HandleTimeout implements StateNotifier interface
+func (n *DefaultReplayNotifier) HandleTimeout(to pbft.NodeID, msgType pbft.MsgType, view *pbft.View) {
+}
+
+// ReadNextMessage is an implementation of StateNotifier interface
+func (n *DefaultReplayNotifier) ReadNextMessage(p *pbft.Pbft) (*pbft.MessageReq, []*pbft.MessageReq) {
+	return p.ReadMessageWithDiscards()
+}
+
+// SaveMetaData is an implementation of ReplayNotifier interface
+func (n *DefaultReplayNotifier) SaveMetaData(nodeNames *[]string) error { return nil }
+
+// SaveState is an implementation of ReplayNotifier interface
+func (n *DefaultReplayNotifier) SaveState() error { return nil }
+
+// HandleMessage is an implementation of ReplayNotifier interface
+func (n *DefaultReplayNotifier) HandleMessage(to pbft.NodeID, message *pbft.MessageReq) {}

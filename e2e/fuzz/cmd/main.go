@@ -1,28 +1,44 @@
 package main
 
 import (
-	"flag"
 	"log"
-	"math/rand"
-	"time"
+	"os"
 
-	"github.com/0xPolygon/pbft-consensus/e2e/fuzz"
+	"github.com/0xPolygon/pbft-consensus/e2e/fuzz/replay"
+	"github.com/mitchellh/cli"
 )
 
 func main() {
-	initialNodesCount := flag.Uint("nodes", 5, "Count of initially started nodes")
-	duration := flag.Duration("duration", 25*time.Minute, "Duration of fuzz daemon running")
-	flag.Parse()
-	log.Printf("Starting PolyBFT fuzz runner...")
-	log.Printf("Node count: %v\n", *initialNodesCount)
-	log.Printf("Duration: %v\n", *duration)
-	rand.Seed(time.Now().Unix())
+	commands := getCommands()
 
-	runner := fuzz.NewRunner(*initialNodesCount)
-	err := runner.Run(*duration)
+	cli := &cli.CLI{
+		Name:     "fuzz",
+		Args:     os.Args[1:],
+		Commands: commands,
+	}
+
+	_, err := cli.Run()
 	if err != nil {
-		log.Printf("Error while running PolyBFT fuzz runner: %s\n", err)
-	} else {
-		log.Println("PolyBFT fuzz runner is stopped.")
+		log.Fatalf("Error executing CLI: %s\n", err.Error())
+	}
+}
+
+func getCommands() map[string]cli.CommandFactory {
+	ui := &cli.BasicUi{
+		Reader:      os.Stdin,
+		Writer:      os.Stdout,
+		ErrorWriter: os.Stderr,
+	}
+	return map[string]cli.CommandFactory{
+		"fuzz-run": func() (cli.Command, error) {
+			return &FuzzCommand{
+				UI: ui,
+			}, nil
+		},
+		"replay-messages": func() (cli.Command, error) {
+			return &replay.ReplayMessageCommand{
+				UI: ui,
+			}, nil
+		},
 	}
 }

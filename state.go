@@ -33,22 +33,22 @@ func (m MsgType) String() string {
 
 type MessageReq struct {
 	// type is the type of the message
-	Type MsgType
+	Type MsgType `json:"type"`
 
 	// from is the address of the sender
-	From NodeID
+	From NodeID `json:"from"`
 
 	// seal is the committed seal for the proposal (only for commit messages)
-	Seal []byte
+	Seal []byte `json:"seal"`
 
 	// view is the view assigned to the message
-	View *View
+	View *View `json:"view"`
 
 	// hash of the proposal
-	Hash []byte
+	Hash []byte `json:"hash"`
 
 	// proposal is the arbitrary data proposal (only for preprepare messages)
-	Proposal []byte
+	Proposal []byte `json:"proposal"`
 }
 
 func (m MessageReq) String() string {
@@ -88,10 +88,10 @@ func (m *MessageReq) Copy() *MessageReq {
 
 type View struct {
 	// round is the current round/height being finalized
-	Round uint64
+	Round uint64 `json:"round"`
 
 	// Sequence is a sequence number inside the round
-	Sequence uint64
+	Sequence uint64 `json:"sequence"`
 }
 
 func (v *View) Copy() *View {
@@ -364,4 +364,24 @@ type ValidatorSet interface {
 	CalcProposer(round uint64) NodeID
 	Includes(id NodeID) bool
 	Len() int
+}
+
+// StateNotifier enables custom logic encapsulation related to internal triggers within PBFT state machine (namely receiving timeouts).
+type StateNotifier interface {
+	// HandleTimeout notifies that a timeout occured while getting next message
+	HandleTimeout(to NodeID, msgType MsgType, view *View)
+	// ReadNextMessage reads the next message from message queue of the state machine
+	ReadNextMessage(p *Pbft) (*MessageReq, []*MessageReq)
+}
+
+// DefaultStateNotifier is a null object implementation of StateNotifier interface
+type DefaultStateNotifier struct {
+}
+
+// HandleTimeout implements StateNotifier interface
+func (d *DefaultStateNotifier) HandleTimeout(to NodeID, msgType MsgType, view *View) {}
+
+// ReadNextMessage is an implementation of StateNotifier interface
+func (d *DefaultStateNotifier) ReadNextMessage(p *Pbft) (*MessageReq, []*MessageReq) {
+	return p.ReadMessageWithDiscards()
 }

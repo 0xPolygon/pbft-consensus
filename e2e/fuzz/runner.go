@@ -12,6 +12,7 @@ import (
 
 var (
 	revertProbabilityThreshold = 20
+	waitForHeightTimeInterval  = 3 * time.Minute
 )
 
 type Runner struct {
@@ -20,11 +21,12 @@ type Runner struct {
 	availableActions []e2e.FunctionalAction
 }
 
-func NewRunner(initialNodesCount uint) *Runner {
+func NewRunner(initialNodesCount uint, replayMessageNotifier e2e.ReplayNotifier) *Runner {
 	config := &e2e.ClusterConfig{
-		Count:  int(initialNodesCount),
-		Name:   "fuzz_cluster",
-		Prefix: "NODE",
+		Count:                 int(initialNodesCount),
+		Name:                  "fuzz_cluster",
+		Prefix:                "NODE",
+		ReplayMessageNotifier: replayMessageNotifier,
 	}
 
 	return &Runner{
@@ -96,8 +98,8 @@ func validateNodes(c *e2e.Cluster) {
 	if runningNodes, ok := validateCluster(c); ok {
 		currentHeight := c.GetMaxHeight(runningNodes)
 		expectedHeight := currentHeight + 10
-		log.Printf("Current height %v and waiting expected %v height.\n", currentHeight, expectedHeight)
-		err := c.WaitForHeight(expectedHeight, 3*time.Minute, runningNodes)
+		log.Printf("Running nodes: %v. Current height: %v and waiting expected: %v height.\n", runningNodes, currentHeight, expectedHeight)
+		err := c.WaitForHeight(expectedHeight, waitForHeightTimeInterval, runningNodes)
 		if err != nil {
 			transportHook := c.GetTransportHook()
 			if transportHook != nil {
