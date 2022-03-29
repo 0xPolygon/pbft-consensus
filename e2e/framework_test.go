@@ -7,7 +7,12 @@ import (
 )
 
 func Test_ClusterInsertFinalProposal(t *testing.T) {
-	c := newPBFTCluster(t, "cluster", "N", 3)
+	clusterConfig := &ClusterConfig{
+		Count:  3,
+		Name:   "cluster",
+		Prefix: "N",
+	}
+	c := NewPBFTCluster(t, clusterConfig)
 
 	// valid proposal => insert it
 	seq1Proposal := newSealedProposal([]byte{0x1}, "N0", 1)

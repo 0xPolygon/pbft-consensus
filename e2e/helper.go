@@ -1,7 +1,13 @@
 package e2e
 
 import (
+	"fmt"
+	"io"
+	"io/ioutil"
+	"log"
+	"math/rand"
 	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -47,8 +53,57 @@ func executeInTimer(tickTime time.Duration, duration time.Duration, fn func(time
 	return end
 }
 
+func Contains(nodes []string, node string) bool {
+	for _, n := range nodes {
+		if n == node {
+			return true
+		}
+	}
+
+	return false
+}
+
+// ShouldApply is used to check if random event meets the threshold
+func ShouldApply(threshold int) bool {
+	r := rand.Intn(101)
+	return r >= threshold
+}
+
 func isFuzzEnabled(t *testing.T) {
 	if os.Getenv("FUZZ") != "true" {
 		t.Skip("Fuzz tests are disabled.")
 	}
+}
+
+func CreateLogsDir(directoryName string) (string, error) {
+	//logs directory will be generated at the root of the e2e project
+	var logsDir string
+	var err error
+
+	if directoryName == "" {
+		directoryName = fmt.Sprintf("logs_%v", time.Now().Format(time.RFC3339))
+	}
+
+	if os.Getenv("E2E_LOG_TO_FILES") == "true" {
+		logsDir, err = os.MkdirTemp("../", directoryName+"-")
+	}
+
+	return logsDir, err
+}
+
+func GetLoggerOutput(name string, logsDir string) io.Writer {
+	var loggerOutput io.Writer
+	var err error
+	if os.Getenv("SILENT") == "true" {
+		loggerOutput = ioutil.Discard
+	} else if logsDir != "" {
+		loggerOutput, err = os.OpenFile(filepath.Join(logsDir, name+".log"), os.O_RDWR|os.O_APPEND|os.O_CREATE, 0660)
+		if err != nil {
+			log.Printf("[WARNING] Failed to open file for node: %v. Reason: %v. Fallbacked to standard output.", name, err)
+			loggerOutput = os.Stdout
+		}
+	} else {
+		loggerOutput = os.Stdout
+	}
+	return loggerOutput
 }

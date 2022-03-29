@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"log"
 	"math/rand"
 	"sync"
 	"time"
@@ -9,15 +10,16 @@ import (
 )
 
 type transport struct {
-	nodes map[pbft.NodeID]transportHandler
-	hook  transportHook
+	logger *log.Logger
+	nodes  map[pbft.NodeID]transportHandler
+	hook   transportHook
 }
 
 func (t *transport) addHook(hook transportHook) {
 	t.hook = hook
 }
 
-type transportHandler func(*pbft.MessageReq)
+type transportHandler func(pbft.NodeID, *pbft.MessageReq)
 
 func (t *transport) Register(name pbft.NodeID, handler transportHandler) {
 	if t.nodes == nil {
@@ -37,7 +39,10 @@ func (t *transport) Gossip(msg *pbft.MessageReq) error {
 				send = t.hook.Gossip(msg.From, to, msg)
 			}
 			if send {
-				handler(msg)
+				handler(to, msg)
+				t.logger.Printf("[TRACE] Message sent to %s - %s", to, msg)
+			} else {
+				t.logger.Printf("[TRACE] Message not sent to %s - %s", to, msg)
 			}
 		}(to, handler)
 	}
@@ -47,6 +52,8 @@ func (t *transport) Gossip(msg *pbft.MessageReq) error {
 type transportHook interface {
 	Connects(from, to pbft.NodeID) bool
 	Gossip(from, to pbft.NodeID, msg *pbft.MessageReq) bool
+	Reset()
+	GetPartitions() map[string][]string
 }
 
 // latency transport
@@ -70,6 +77,13 @@ func (r *randomTransport) Gossip(from, to pbft.NodeID, msg *pbft.MessageReq) boo
 	}
 	return true
 }
+func (r *randomTransport) Reset() {
+	// no impl
+}
+
+func (r *randomTransport) GetPartitions() map[string][]string {
+	return nil
+}
 
 type partitionTransport struct {
 	jitterMax time.Duration
@@ -82,6 +96,10 @@ func newPartitionTransport(jitterMax time.Duration) *partitionTransport {
 }
 
 func (p *partitionTransport) isConnected(from, to pbft.NodeID) bool {
+	if p.subsets == nil {
+		return true
+	}
+
 	subset, ok := p.subsets[string(from)]
 	if !ok {
 		// if not set, they are connected
@@ -109,7 +127,11 @@ func (p *partitionTransport) Reset() {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	p.subsets = map[string][]string{}
+	p.subsets = nil
+}
+
+func (p *partitionTransport) GetPartitions() map[string][]string {
+	return p.subsets
 }
 
 func (p *partitionTransport) addSubset(from string, to []string) {

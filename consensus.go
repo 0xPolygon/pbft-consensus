@@ -31,6 +31,9 @@ type Config struct {
 
 	// RoundTimeout is a function that calculates timeout based on a round number
 	RoundTimeout RoundTimeout
+
+	// Notifier is a reference to the struct which encapsulates handling messages and timeouts
+	Notifier StateNotifier
 }
 
 type ConfigOption func(*Config)
@@ -61,7 +64,17 @@ func WithTracer(t trace.Tracer) ConfigOption {
 
 func WithRoundTimeout(roundTimeout RoundTimeout) ConfigOption {
 	return func(c *Config) {
-		c.RoundTimeout = roundTimeout
+		if roundTimeout != nil {
+			c.RoundTimeout = roundTimeout
+		}
+	}
+}
+
+func WithNotifier(notifier StateNotifier) ConfigOption {
+	return func(c *Config) {
+		if notifier != nil {
+			c.Notifier = notifier
+		}
 	}
 }
 
@@ -78,6 +91,7 @@ func DefaultConfig() *Config {
 		Logger:          log.New(os.Stderr, "", log.LstdFlags),
 		Tracer:          trace.NewNoopTracerProvider().Tracer(""),
 		RoundTimeout:    exponentialTimeout,
+		Notifier:        &DefaultStateNotifier{},
 	}
 }
 
@@ -159,10 +173,11 @@ type Pbft struct {
 	// tracer is a reference to the OpenTelemetry tracer
 	tracer trace.Tracer
 
-	// calculates timeout for a specific round
+	// roundTimeout calculates timeout for a specific round
 	roundTimeout RoundTimeout
 
-	forceTimeoutCh bool
+	// notifier is a reference to the struct which encapsulates handling messages and timeouts
+	notifier StateNotifier
 }
 
 type SignKey interface {
@@ -185,6 +200,7 @@ func New(validator SignKey, transport Transport, opts ...ConfigOption) *Pbft {
 		logger:       config.Logger,
 		tracer:       config.Tracer,
 		roundTimeout: config.RoundTimeout,
+		notifier:     config.Notifier,
 	}
 
 	p.logger.Printf("[INFO] validator key: addr=%s\n", p.validator.NodeID())
@@ -450,7 +466,7 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 		}
 
 		if p.state.numPrepared() > p.state.NumValid() {
-			// we have received enough pre-prepare messages
+			// we have received enough prepare messages
 			sendCommit(span)
 		}
 
@@ -700,6 +716,12 @@ func (p *Pbft) gossip(msgType MsgType) {
 	}
 }
 
+// GetValidatorId returns validator NodeID
+func (p *Pbft) GetValidatorId() NodeID {
+	return p.validator.NodeID()
+}
+
+// GetState returns the current PBFT state
 func (p *Pbft) GetState() PbftState {
 	return p.getState()
 }
@@ -724,30 +746,23 @@ func (p *Pbft) setState(s PbftState) {
 	p.state.setState(s)
 }
 
-// forceTimeout sets the forceTimeoutCh flag to true
-func (p *Pbft) forceTimeout() {
-	p.forceTimeoutCh = true
-}
-
 // getNextMessage reads a new message from the message queue
 func (p *Pbft) getNextMessage(span trace.Span, timeout time.Duration) (*MessageReq, bool) {
 	timeoutCh := time.After(timeout)
 	for {
-		msg, discards := p.msgQueue.readMessageWithDiscards(p.getState(), p.state.view)
+		msg, discards := p.notifier.ReadNextMessage(p)
 		// send the discard messages
+		p.logger.Printf("[TRACE] Current state %s, number of prepared messages: %d, number of committed messages %d", PbftState(p.state.state), p.state.numPrepared(), p.state.numCommitted())
+
 		for _, msg := range discards {
+			p.logger.Printf("[TRACE] Discarded %s ", msg)
 			spanAddEventMessage("dropMessage", span, msg)
 		}
 		if msg != nil {
 			// add the event to the span
 			spanAddEventMessage("message", span, msg)
-
+			p.logger.Printf("[TRACE] Received %s", msg)
 			return msg, true
-		}
-
-		if p.forceTimeoutCh {
-			p.forceTimeoutCh = false
-			return nil, true
 		}
 
 		// wait until there is a new message or
@@ -755,11 +770,25 @@ func (p *Pbft) getNextMessage(span trace.Span, timeout time.Duration) (*MessageR
 		select {
 		case <-timeoutCh:
 			span.AddEvent("Timeout")
+			p.notifier.HandleTimeout(p.validator.NodeID(), stateToMsg(p.getState()), &View{
+				Round:    p.state.view.Round,
+				Sequence: p.state.view.Sequence,
+			})
+			p.logger.Printf("[TRACE] Message read timeout occurred")
 			return nil, true
 		case <-p.ctx.Done():
 			return nil, false
 		case <-p.updateCh:
 		}
+	}
+}
+
+func (p *Pbft) PushMessageInternal(msg *MessageReq) {
+	p.msgQueue.pushMessage(msg)
+
+	select {
+	case p.updateCh <- struct{}{}:
+	default:
 	}
 }
 
@@ -770,14 +799,15 @@ func (p *Pbft) PushMessage(msg *MessageReq) {
 		return
 	}
 
-	p.msgQueue.pushMessage(msg)
-
-	select {
-	case p.updateCh <- struct{}{}:
-	default:
-	}
+	p.PushMessageInternal(msg)
 }
 
+// Reads next message with discards from message queue based on current state, sequence and round
+func (p *Pbft) ReadMessageWithDiscards() (*MessageReq, []*MessageReq) {
+	return p.msgQueue.readMessageWithDiscards(p.getState(), p.state.view)
+}
+
+// --- package-level helper functions ---
 // exponentialTimeout calculates the timeout duration depending on the current round.
 // Round acts as an exponent when determining timeout (2^round).
 func exponentialTimeout(round uint64) time.Duration {
@@ -793,12 +823,12 @@ func exponentialTimeout(round uint64) time.Duration {
 	return timeout
 }
 
-// Calculate max faulty nodes in order to have Byzantine-fault tollerant system.
+// MaxFaultyNodes calculate max faulty nodes in order to have Byzantine-fault tollerant system.
 // Formula explanation:
 // N -> number of nodes in PBFT
 // F -> number of faulty nodes
 // N = 3 * F + 1 => F = (N - 1) / 3
-
+//
 // PBFT tolerates 1 failure with 4 nodes
 // 4 = 3 * 1 + 1
 // To tolerate 2 failures, PBFT requires 7 nodes
@@ -811,7 +841,7 @@ func MaxFaultyNodes(nodesCount int) int {
 	return (nodesCount - 1) / 3
 }
 
-// Calculates quorum size (namely the number of required messages of some type in order to proceed to the next state in PolyBFT state machine).
+// QuorumSize calculates quorum size (namely the number of required messages of some type in order to proceed to the next state in PolyBFT state machine).
 // It is calculated by formula:
 // 2 * F + 1, where F denotes maximum count of faulty nodes in order to have Byzantine fault tollerant property satisfied.
 func QuorumSize(nodesCount int) int {

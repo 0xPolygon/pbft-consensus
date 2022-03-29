@@ -5,10 +5,7 @@ import (
 	"crypto/sha1"
 	"errors"
 	"fmt"
-	"io"
-	"io/ioutil"
 	"log"
-	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -61,19 +58,30 @@ func initTracer(name string) *sdktrace.TracerProvider {
 	return tracerProvider
 }
 
-type cluster struct {
-	t               *testing.T
-	lock            sync.Mutex
-	nodes           map[string]*node
-	tracer          *sdktrace.TracerProvider
-	hook            transportHook
-	sealedProposals []*pbft.SealedProposal
+type Cluster struct {
+	t                     *testing.T
+	lock                  sync.Mutex
+	nodes                 map[string]*node
+	tracer                *sdktrace.TracerProvider
+	hook                  transportHook
+	sealedProposals       []*pbft.SealedProposal
+	replayMessageNotifier ReplayNotifier
 }
 
-func newPBFTCluster(t *testing.T, name, prefix string, count int, hook ...transportHook) *cluster {
-	names := make([]string, count)
-	for i := 0; i < count; i++ {
-		names[i] = fmt.Sprintf("%s_%d", prefix, i)
+type ClusterConfig struct {
+	Count                 int
+	Name                  string
+	Prefix                string
+	LogsDir               string
+	ReplayMessageNotifier ReplayNotifier
+	TransportHandler      transportHandler
+	RoundTimeout          pbft.RoundTimeout
+}
+
+func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transportHook) *Cluster {
+	names := make([]string, config.Count)
+	for i := 0; i < config.Count; i++ {
+		names[i] = fmt.Sprintf("%s_%d", config.Prefix, i)
 	}
 
 	tt := &transport{}
@@ -81,29 +89,49 @@ func newPBFTCluster(t *testing.T, name, prefix string, count int, hook ...transp
 		tt.addHook(hook[0])
 	}
 
-	c := &cluster{
-		t:               t,
-		nodes:           map[string]*node{},
-		tracer:          initTracer("fuzzy_" + name),
-		hook:            tt.hook,
-		sealedProposals: []*pbft.SealedProposal{},
+	var directoryName string
+	if t != nil {
+		directoryName = t.Name()
 	}
+
+	if config.ReplayMessageNotifier == nil {
+		config.ReplayMessageNotifier = &DefaultReplayNotifier{}
+	}
+
+	logsDir, err := CreateLogsDir(directoryName)
+	if err != nil {
+		log.Printf("[WARNING] Could not create logs directory. Reason: %v. Logging will be defaulted to standard output.", err)
+	} else {
+		config.LogsDir = logsDir
+	}
+
+	tt.logger = log.New(GetLoggerOutput("transport", logsDir), "", log.LstdFlags)
+
+	c := &Cluster{
+		t:                     t,
+		nodes:                 map[string]*node{},
+		tracer:                initTracer("fuzzy_" + config.Name),
+		hook:                  tt.hook,
+		sealedProposals:       []*pbft.SealedProposal{},
+		replayMessageNotifier: config.ReplayMessageNotifier,
+	}
+
+	err = c.replayMessageNotifier.SaveMetaData(&names)
+	if err != nil {
+		log.Printf("[WARNING] Could not write node meta data to replay messages file. Reason: %v", err)
+	}
+
 	for _, name := range names {
 		trace := c.tracer.Tracer(name)
-		n, _ := newPBFTNode(name, names, trace, tt)
+		n, _ := newPBFTNode(name, config, names, trace, tt)
 		n.c = c
 		c.nodes[name] = n
 	}
 	return c
 }
 
-// getSyncIndex returns an index up to which the node is synced with the network
-func (c *cluster) getSyncIndex(node string) int64 {
-	return c.nodes[node].getSyncIndex()
-}
-
 // insertFinalProposal inserts final proposal from the node to the cluster
-func (c *cluster) insertFinalProposal(sealProp *pbft.SealedProposal) error {
+func (c *Cluster) insertFinalProposal(sealProp *pbft.SealedProposal) error {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
@@ -126,7 +154,7 @@ func (c *cluster) insertFinalProposal(sealProp *pbft.SealedProposal) error {
 	return nil
 }
 
-func (c *cluster) resolveNodes(nodes ...[]string) []string {
+func (c *Cluster) resolveNodes(nodes ...[]string) []string {
 	queryNodes := []string{}
 	if len(nodes) == 1 {
 		for _, n := range nodes[0] {
@@ -143,7 +171,7 @@ func (c *cluster) resolveNodes(nodes ...[]string) []string {
 	return queryNodes
 }
 
-func (c *cluster) IsStuck(timeout time.Duration, nodes ...[]string) {
+func (c *Cluster) IsStuck(timeout time.Duration, nodes ...[]string) {
 	queryNodes := c.resolveNodes(nodes...)
 
 	nodeHeight := map[string]uint64{}
@@ -174,7 +202,19 @@ func (c *cluster) IsStuck(timeout time.Duration, nodes ...[]string) {
 	}
 }
 
-func (c *cluster) WaitForHeight(num uint64, timeout time.Duration, nodes ...[]string) error {
+func (c *Cluster) GetMaxHeight(nodes ...[]string) uint64 {
+	queryNodes := c.resolveNodes(nodes...)
+	var max uint64
+	for _, node := range queryNodes {
+		h := c.nodes[node].getNodeHeight()
+		if h > max {
+			max = h
+		}
+	}
+	return max
+}
+
+func (c *Cluster) WaitForHeight(num uint64, timeout time.Duration, nodes ...[]string) error {
 	// we need to check every node in the ensemble?
 	// yes, this should test if everyone can agree on the final set.
 	// note, if we include drops, we need to do sync otherwise this will never work
@@ -205,6 +245,18 @@ func (c *cluster) WaitForHeight(num uint64, timeout time.Duration, nodes ...[]st
 	}
 }
 
+func (c *Cluster) GetNodesMap() map[string]*node {
+	return c.nodes
+}
+
+func (c *Cluster) GetNodes() []*node {
+	nodes := make([]*node, 0, len(c.nodes))
+	for _, node := range c.nodes {
+		nodes = append(nodes, node)
+	}
+	return nodes
+}
+
 // getNodeHeight returns node height depending on node index
 // difference between height and syncIndex is 1
 // first inserted proposal is on index 0 with height 1
@@ -212,7 +264,7 @@ func (n *node) getNodeHeight() uint64 {
 	return uint64(n.getSyncIndex()) + 1
 }
 
-func (c *cluster) syncWithNetwork(nodeID string) (uint64, int64) {
+func (c *Cluster) syncWithNetwork(nodeID string) (uint64, int64) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
@@ -238,7 +290,7 @@ func (c *cluster) syncWithNetwork(nodeID string) (uint64, int64) {
 	return height, syncIndex
 }
 
-func (c *cluster) getProposer(index int64) pbft.NodeID {
+func (c *Cluster) getProposer(index int64) pbft.NodeID {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
@@ -250,16 +302,7 @@ func (c *cluster) getProposer(index int64) pbft.NodeID {
 	return proposer
 }
 
-func (n *node) currentHeight() uint64 {
-	height := uint64(0) // initial height is always 0
-	index := n.getSyncIndex()
-	if index >= 0 {
-		height = uint64(index) + 1
-	}
-	return height
-}
-
-func (c *cluster) Nodes() []*node {
+func (c *Cluster) Nodes() []*node {
 	list := make([]*node, len(c.nodes))
 	i := 0
 	for _, n := range c.nodes {
@@ -269,34 +312,67 @@ func (c *cluster) Nodes() []*node {
 	return list
 }
 
-func (c *cluster) Start() {
+// Returns nodes which satisfy provided filter delegate function.
+// If filter is not provided, all the nodes will be retreived.
+func (c *Cluster) GetFilteredNodes(filter func(*node) bool) []*node {
+	if filter != nil {
+		var filteredNodes []*node
+		for _, n := range c.nodes {
+			if filter(n) {
+				filteredNodes = append(filteredNodes, n)
+			}
+		}
+		return filteredNodes
+	}
+	return c.GetNodes()
+}
+
+func (c *Cluster) GetRunningNodes() []*node {
+	return c.GetFilteredNodes(func(n *node) bool {
+		return n.IsRunning()
+	})
+}
+
+func (c *Cluster) GetStoppedNodes() []*node {
+	return c.GetFilteredNodes(func(n *node) bool {
+		return !n.IsRunning()
+	})
+}
+
+func (c *Cluster) Start() {
 	for _, n := range c.nodes {
 		n.Start()
 	}
 }
 
-func (c *cluster) StartNode(name string) {
+func (c *Cluster) StartNode(name string) {
 	c.nodes[name].Start()
 }
 
-func (c *cluster) StopNode(name string) {
+func (c *Cluster) StopNode(name string) {
 	c.nodes[name].Stop()
 }
 
-func (c *cluster) Stop() {
+func (c *Cluster) Stop() {
 	for _, n := range c.nodes {
-		n.Stop()
+		if n.IsRunning() {
+			n.Stop()
+		}
 	}
 	if err := c.tracer.Shutdown(context.Background()); err != nil {
 		panic("failed to shutdown TracerProvider")
 	}
 }
 
+func (c *Cluster) GetTransportHook() transportHook {
+	return c.hook
+}
+
 type node struct {
 	// index of node synchronization with the cluster
 	localSyncIndex int64
 
-	c *cluster
+	c *Cluster
 
 	name     string
 	pbft     *pbft.Pbft
@@ -310,21 +386,28 @@ type node struct {
 	faulty uint64
 }
 
-func newPBFTNode(name string, nodes []string, trace trace.Tracer, tt *transport) (*node, error) {
-	var loggerOutput io.Writer
-	if os.Getenv("SILENT") == "true" {
-		loggerOutput = ioutil.Discard
+func newPBFTNode(name string, clusterConfig *ClusterConfig, nodes []string, trace trace.Tracer, tt *transport) (*node, error) {
+	loggerOutput := GetLoggerOutput(name, clusterConfig.LogsDir)
+
+	con := pbft.New(
+		key(name),
+		tt,
+		pbft.WithTracer(trace),
+		pbft.WithLogger(log.New(loggerOutput, "", log.LstdFlags)),
+		pbft.WithNotifier(clusterConfig.ReplayMessageNotifier),
+		pbft.WithRoundTimeout(clusterConfig.RoundTimeout),
+	)
+
+	if clusterConfig.TransportHandler != nil {
+		//for replay messages when we do not want to gossip messages
+		tt.Register(pbft.NodeID(name), clusterConfig.TransportHandler)
 	} else {
-		loggerOutput = os.Stdout
+		tt.Register(pbft.NodeID(name), func(to pbft.NodeID, msg *pbft.MessageReq) {
+			// pipe messages from mock transport to pbft
+			con.PushMessage(msg)
+			clusterConfig.ReplayMessageNotifier.HandleMessage(to, msg)
+		})
 	}
-
-	kk := key(name)
-	con := pbft.New(kk, tt, pbft.WithTracer(trace), pbft.WithLogger(log.New(loggerOutput, "", log.LstdFlags)))
-
-	tt.Register(pbft.NodeID(name), func(msg *pbft.MessageReq) {
-		// pipe messages from mock transport to pbft
-		con.PushMessage(msg)
-	})
 
 	n := &node{
 		nodes:   nodes,
@@ -348,7 +431,6 @@ func (n *node) setSyncIndex(idx int64) {
 func (n *node) isStuck(num uint64) (uint64, bool) {
 	// get max height in the network
 	height, _ := n.c.syncWithNetwork(n.name)
-
 	if height > num {
 		return height, true
 	}
@@ -379,9 +461,13 @@ func (n *node) isFaulty() bool {
 	return atomic.LoadUint64(&n.faulty) != 0
 }
 
+func (n *node) PushMessageInternal(message *pbft.MessageReq) {
+	n.pbft.PushMessageInternal(message)
+}
+
 func (n *node) Start() {
 	if n.IsRunning() {
-		panic("already started")
+		panic(fmt.Errorf("node '%s' is already started", n))
 	}
 
 	// create the ctx and the cancelFn
@@ -405,12 +491,17 @@ func (n *node) Start() {
 				height:          n.getNodeHeight() + 1,
 				validationFails: n.isFaulty(),
 			}
+
 			if err := n.pbft.SetBackend(fsm); err != nil {
 				panic(err)
 			}
 
 			// start the execution
 			n.pbft.Run(ctx)
+			err := n.c.replayMessageNotifier.SaveState()
+			if err != nil {
+				log.Printf("[WARNING] Could not write state to file. Reason: %v", err)
+			}
 
 			switch n.pbft.GetState() {
 			case pbft.SyncState:
@@ -430,7 +521,7 @@ func (n *node) Start() {
 
 func (n *node) Stop() {
 	if !n.IsRunning() {
-		panic("already stopped")
+		panic(fmt.Errorf("node %s is already stopped", n.name))
 	}
 	n.cancelFn()
 	// block until node is running
@@ -445,6 +536,14 @@ func (n *node) IsRunning() bool {
 func (n *node) Restart() {
 	n.Stop()
 	n.Start()
+}
+
+func (n *node) GetName() string {
+	return n.name
+}
+
+func (n *node) String() string {
+	return n.name
 }
 
 type key string
@@ -482,10 +581,6 @@ func (f *fsm) BuildProposal() (*pbft.Proposal, error) {
 	}
 	proposal.Hash = hash(proposal.Data)
 	return proposal, nil
-}
-
-func (f *fsm) setValidationFails(v bool) {
-	f.validationFails = v
 }
 
 func (f *fsm) Validate(proposal *pbft.Proposal) error {
@@ -579,3 +674,33 @@ func (v *valString) Includes(id pbft.NodeID) bool {
 func (v *valString) Len() int {
 	return len(v.nodes)
 }
+
+// ReplayNotifier is an interface that expands the StateNotifier with additional methods for saving and loading replay messages
+type ReplayNotifier interface {
+	pbft.StateNotifier
+	SaveMetaData(nodeNames *[]string) error
+	SaveState() error
+	HandleMessage(to pbft.NodeID, message *pbft.MessageReq)
+}
+
+// DefaultReplayNotifier is a null object implementation of ReplayNotifier interface
+type DefaultReplayNotifier struct {
+}
+
+// HandleTimeout implements StateNotifier interface
+func (n *DefaultReplayNotifier) HandleTimeout(to pbft.NodeID, msgType pbft.MsgType, view *pbft.View) {
+}
+
+// ReadNextMessage is an implementation of StateNotifier interface
+func (n *DefaultReplayNotifier) ReadNextMessage(p *pbft.Pbft) (*pbft.MessageReq, []*pbft.MessageReq) {
+	return p.ReadMessageWithDiscards()
+}
+
+// SaveMetaData is an implementation of ReplayNotifier interface
+func (n *DefaultReplayNotifier) SaveMetaData(nodeNames *[]string) error { return nil }
+
+// SaveState is an implementation of ReplayNotifier interface
+func (n *DefaultReplayNotifier) SaveState() error { return nil }
+
+// HandleMessage is an implementation of ReplayNotifier interface
+func (n *DefaultReplayNotifier) HandleMessage(to pbft.NodeID, message *pbft.MessageReq) {}

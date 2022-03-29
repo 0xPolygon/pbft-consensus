@@ -117,6 +117,19 @@ func msgToState(msg MsgType) PbftState {
 	panic("BUG: not expected")
 }
 
+func stateToMsg(pbftState PbftState) MsgType {
+	switch pbftState {
+	case RoundChangeState:
+		return MessageReq_RoundChange
+	case AcceptState:
+		return MessageReq_Preprepare
+	case ValidateState:
+		return MessageReq_Prepare
+	default:
+		panic("BUG: not expected")
+	}
+}
+
 type msgQueueImpl []*MessageReq
 
 // head returns the head of the queue

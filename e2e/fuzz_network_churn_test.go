@@ -16,7 +16,13 @@ func TestFuzz_NetworkChurn(t *testing.T) {
 	nodeCount := 20
 	maxFaulty := nodeCount/3 - 1
 	const prefix = "ptr_"
-	c := newPBFTCluster(t, "network_churn", "ptr", nodeCount)
+	config := &ClusterConfig{
+		Count:  nodeCount,
+		Name:   "network_churn",
+		Prefix: "ptr",
+	}
+
+	c := NewPBFTCluster(t, config)
 	c.Start()
 	defer c.Stop()
 	runningNodeCount := nodeCount
