@@ -10,13 +10,22 @@ import (
 )
 
 type transport struct {
+	lock   sync.Mutex
 	logger *log.Logger
 	nodes  map[pbft.NodeID]transportHandler
 	hook   transportHook
 }
 
 func (t *transport) addHook(hook transportHook) {
+	t.lock.Lock()
+	defer t.lock.Unlock()
 	t.hook = hook
+}
+
+func (t *transport) getHook() transportHook {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+	return t.hook
 }
 
 type transportHandler func(pbft.NodeID, *pbft.MessageReq)
@@ -35,8 +44,8 @@ func (t *transport) Gossip(msg *pbft.MessageReq) error {
 		}
 		go func(to pbft.NodeID, handler transportHandler) {
 			send := true
-			if t.hook != nil {
-				send = t.hook.Gossip(msg.From, to, msg)
+			if hook := t.getHook(); hook != nil {
+				send = hook.Gossip(msg.From, to, msg)
 			}
 			if send {
 				handler(to, msg)

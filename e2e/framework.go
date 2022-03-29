@@ -63,7 +63,7 @@ type Cluster struct {
 	lock                  sync.Mutex
 	nodes                 map[string]*node
 	tracer                *sdktrace.TracerProvider
-	hook                  transportHook
+	transport             *transport
 	sealedProposals       []*pbft.SealedProposal
 	replayMessageNotifier ReplayNotifier
 }
@@ -111,7 +111,7 @@ func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transportHook) 
 		t:                     t,
 		nodes:                 map[string]*node{},
 		tracer:                initTracer("fuzzy_" + config.Name),
-		hook:                  tt.hook,
+		transport:             tt,
 		sealedProposals:       []*pbft.SealedProposal{},
 		replayMessageNotifier: config.ReplayMessageNotifier,
 	}
@@ -177,7 +177,7 @@ func (c *Cluster) IsStuck(timeout time.Duration, nodes ...[]string) {
 	nodeHeight := map[string]uint64{}
 	isStuck := func() bool {
 		for _, n := range queryNodes {
-			height := c.nodes[n].getNodeHeight()
+			height := c.nodes[n].GetNodeHeight()
 			if lastHeight, ok := nodeHeight[n]; ok {
 				if lastHeight != height {
 					return false
@@ -202,11 +202,15 @@ func (c *Cluster) IsStuck(timeout time.Duration, nodes ...[]string) {
 	}
 }
 
+func (c *Cluster) SetHook(hook transportHook) {
+	c.transport.addHook(hook)
+}
+
 func (c *Cluster) GetMaxHeight(nodes ...[]string) uint64 {
 	queryNodes := c.resolveNodes(nodes...)
 	var max uint64
 	for _, node := range queryNodes {
-		h := c.nodes[node].getNodeHeight()
+		h := c.nodes[node].GetNodeHeight()
 		if h > max {
 			max = h
 		}
@@ -225,7 +229,7 @@ func (c *Cluster) WaitForHeight(num uint64, timeout time.Duration, nodes ...[]st
 		defer c.lock.Unlock()
 
 		for _, name := range queryNodes {
-			if c.nodes[name].getNodeHeight() < num {
+			if c.nodes[name].GetNodeHeight() < num {
 				return false
 			}
 		}
@@ -257,10 +261,10 @@ func (c *Cluster) GetNodes() []*node {
 	return nodes
 }
 
-// getNodeHeight returns node height depending on node index
+// GetNodeHeight returns node height depending on node index
 // difference between height and syncIndex is 1
 // first inserted proposal is on index 0 with height 1
-func (n *node) getNodeHeight() uint64 {
+func (n *node) GetNodeHeight() uint64 {
 	return uint64(n.getSyncIndex()) + 1
 }
 
@@ -274,20 +278,28 @@ func (c *Cluster) syncWithNetwork(nodeID string) (uint64, int64) {
 		if n.name == nodeID {
 			continue
 		}
-		if c.hook != nil {
+		if hook := c.transport.getHook(); hook != nil {
 			// we need to see if this transport does allow those two nodes to be connected
 			// Otherwise, that node should not be eligible to sync
-			if !c.hook.Connects(pbft.NodeID(nodeID), pbft.NodeID(n.name)) {
+			if !hook.Connects(pbft.NodeID(nodeID), pbft.NodeID(n.name)) {
 				continue
 			}
 		}
-		localHeight := n.getNodeHeight()
+		localHeight := n.GetNodeHeight()
 		if localHeight > height {
 			height = localHeight
 			syncIndex = int64(localHeight) - 1 // we know that syncIndex is less than height by 1
 		}
 	}
 	return height, syncIndex
+}
+
+func (n *node) IsLocked() bool {
+	return n.pbft.IsLocked()
+}
+
+func (n *node) GetProposal() *pbft.Proposal {
+	return n.pbft.GetProposal()
 }
 
 func (c *Cluster) getProposer(index int64) pbft.NodeID {
@@ -365,7 +377,7 @@ func (c *Cluster) Stop() {
 }
 
 func (c *Cluster) GetTransportHook() transportHook {
-	return c.hook
+	return c.transport.getHook()
 }
 
 type node struct {
@@ -488,7 +500,7 @@ func (n *node) Start() {
 				lastProposer: n.c.getProposer(n.getSyncIndex()),
 
 				// important: in this iteration of the fsm we have increased our height
-				height:          n.getNodeHeight() + 1,
+				height:          n.GetNodeHeight() + 1,
 				validationFails: n.isFaulty(),
 			}
 
