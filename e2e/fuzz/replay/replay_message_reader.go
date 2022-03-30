@@ -14,19 +14,23 @@ import (
 )
 
 const (
-	maxCharactersPerLine   = 2048 * 1024 // Increase Scanner buffer size to 2MB per line
-	roundMessagesWaitLimit = 50
-	messageChunkSize       = 200
+	maxCharactersPerLine = 2048 * 1024 // Increase Scanner buffer size to 2MB per line
+	messageChunkSize     = 200
 )
+
+type sequenceMessages struct {
+	sequence uint64
+	messages []*pbft.MessageReq
+}
 
 // replayMessageReader encapsulates logic for reading messages from flow file
 type replayMessageReader struct {
 	lock                   sync.Mutex
 	file                   *os.File
 	scanner                *bufio.Scanner
-	lastSequence           uint64
 	msgProcessingDone      chan string
 	nodesDoneWithExecution map[pbft.NodeID]bool
+	lastSequenceMessages   map[pbft.NodeID]*sequenceMessages
 }
 
 // openFile opens the file on provided location
@@ -74,12 +78,19 @@ func (r *replayMessageReader) readNodeMetaData() ([]string, error) {
 // readMessages reads messages from open .flow file and pushes them to appropriate nodes
 func (r *replayMessageReader) readMessages(cluster *e2e.Cluster) {
 	nodes := cluster.GetNodesMap()
-	r.nodesDoneWithExecution = make(map[pbft.NodeID]bool, len(nodes))
+
+	nodesCount := len(nodes)
+	r.nodesDoneWithExecution = make(map[pbft.NodeID]bool, nodesCount)
+	r.lastSequenceMessages = make(map[pbft.NodeID]*sequenceMessages, nodesCount)
 
 	messagesChannel := make(chan []*ReplayMessage)
 	doneChannel := make(chan struct{})
 
 	r.startChunkReading(messagesChannel, doneChannel)
+	nodeMessages := make(map[pbft.NodeID]map[uint64][]*pbft.MessageReq, nodesCount)
+	for _, n := range nodes {
+		nodeMessages[pbft.NodeID(n.GetName())] = make(map[uint64][]*pbft.MessageReq)
+	}
 
 	isDone := false
 LOOP:
@@ -92,12 +103,24 @@ LOOP:
 					log.Println(fmt.Sprintf("[WARNING] Could not find node: %v to push message from .flow file", message.To))
 				} else {
 					node.PushMessageInternal(message.Message)
-					if r.lastSequence < message.Message.View.Sequence {
-						r.lastSequence = message.Message.View.Sequence
-					}
+					nodeMessages[message.To][message.Message.View.Sequence] = append(nodeMessages[message.To][message.Message.View.Sequence], message.Message)
 				}
 			}
 		case <-doneChannel:
+			for name, n := range nodeMessages {
+				nodeLastSequence := uint64(0)
+				for sequence := range n {
+					if nodeLastSequence < sequence {
+						nodeLastSequence = sequence
+					}
+				}
+
+				r.lastSequenceMessages[name] = &sequenceMessages{
+					sequence: nodeLastSequence,
+					messages: nodeMessages[name][nodeLastSequence],
+				}
+			}
+
 			isDone = true
 			break LOOP
 		}
@@ -135,12 +158,10 @@ func (r *replayMessageReader) startChunkReading(messagesChannel chan []*ReplayMe
 	}()
 }
 
-// checks if given node is done with execution of messages
+// checkIfDoneWithExecution checks if node finished with processing all the messages from .flow file
 func (r *replayMessageReader) checkIfDoneWithExecution(validatorId pbft.NodeID, msg *pbft.MessageReq) {
-	//when nodes reach sequence that is higher than the sequence in file,
-	//or if it is in constant round change we know we either reached the end of execution or nodes are stuck and there is a problem
-	if msg.View.Sequence > r.lastSequence ||
-		isSequenceInContinuousRoundChange(msg, validatorId) {
+	if msg.View.Sequence > r.lastSequenceMessages[validatorId].sequence ||
+		(msg.View.Sequence == r.lastSequenceMessages[validatorId].sequence && r.areMessagesFromLastSequenceProcessed(msg, validatorId)) {
 		r.lock.Lock()
 		if _, isDone := r.nodesDoneWithExecution[validatorId]; !isDone {
 			r.nodesDoneWithExecution[validatorId] = true
@@ -150,13 +171,30 @@ func (r *replayMessageReader) checkIfDoneWithExecution(validatorId pbft.NodeID, 
 	}
 }
 
+// areMessagesFromLastSequenceProcessed checks if all the messages from the last sequence of given node are processed so that the node can be stoped
+func (r *replayMessageReader) areMessagesFromLastSequenceProcessed(msg *pbft.MessageReq, validatorId pbft.NodeID) bool {
+	lastSequenceMessages := r.lastSequenceMessages[validatorId]
+
+	lastSequenceMessagesCount := len(lastSequenceMessages.messages)
+	if lastSequenceMessagesCount > 0 {
+		messageIndexToRemove := -1
+		for i, message := range lastSequenceMessages.messages {
+			if msg.Equal(message) {
+				messageIndexToRemove = i
+				break
+			}
+		}
+
+		if messageIndexToRemove != -1 {
+			lastSequenceMessages.messages = append(lastSequenceMessages.messages[:messageIndexToRemove], lastSequenceMessages.messages[messageIndexToRemove+1:]...)
+			lastSequenceMessagesCount = len(lastSequenceMessages.messages)
+		}
+	}
+
+	return lastSequenceMessagesCount == 0
+}
+
 // isTimeoutMessage checks if message in .flow file represents a timeout
 func isTimeoutMessage(message *pbft.MessageReq) bool {
 	return message.Hash == nil && message.Proposal == nil && message.Seal == nil && message.From == ""
-}
-
-// isSequenceInContinuousRoundChange checks if node is stuck in continuous round change
-// means either all messages are read and processed from file and nodes can not reach a consensus for next proposal, or there is some problem
-func isSequenceInContinuousRoundChange(msg *pbft.MessageReq, validatorId pbft.NodeID) bool {
-	return msg.Type == pbft.MessageReq_RoundChange && msg.View.Round >= roundMessagesWaitLimit
 }

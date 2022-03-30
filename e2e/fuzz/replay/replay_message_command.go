@@ -92,6 +92,7 @@ func (rmc *ReplayMessageCommand) Run(args []string) int {
 			select {
 			case nodeDone := <-messageReader.msgProcessingDone:
 				nodesDone[nodeDone] = true
+				cluster.StopNode(nodeDone)
 				if len(nodesDone) == nodesCount {
 					wg.Done()
 					return

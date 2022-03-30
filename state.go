@@ -86,6 +86,17 @@ func (m *MessageReq) Copy() *MessageReq {
 	return mm
 }
 
+// Equal compares if two messages are equal
+func (m *MessageReq) Equal(other *MessageReq) bool {
+	return other != nil &&
+		m.Type == other.Type && m.From == other.From &&
+		bytes.Equal(m.Proposal, other.Proposal) &&
+		bytes.Equal(m.Hash, other.Hash) &&
+		bytes.Equal(m.Seal, other.Seal) &&
+		m.View.Round == other.View.Round &&
+		m.View.Sequence == other.View.Sequence
+}
+
 type View struct {
 	// round is the current round/height being finalized
 	Round uint64 `json:"round"`
