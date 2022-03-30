@@ -53,12 +53,8 @@ func (r *ReplayMessagesNotifier) HandleTimeout(to pbft.NodeID, msgType pbft.MsgT
 func (r *ReplayMessagesNotifier) ReadNextMessage(p *pbft.Pbft) (*pbft.MessageReq, []*pbft.MessageReq) {
 	msg, discards := p.ReadMessageWithDiscards()
 
-	if r.messageReader != nil && msg != nil {
-		if isTimeoutMessage(msg) {
-			return nil, nil
-		} else {
-			r.messageReader.checkIfDoneWithExecution(p.GetValidatorId(), msg)
-		}
+	if r.messageReader != nil && msg != nil && r.messageReader.processMessage(p.GetValidatorId(), msg) {
+		return nil, nil
 	}
 
 	return msg, discards
