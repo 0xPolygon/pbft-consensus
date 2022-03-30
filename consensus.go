@@ -746,6 +746,16 @@ func (p *Pbft) setState(s PbftState) {
 	p.state.setState(s)
 }
 
+// IsLocked returns if the current proposal is locked
+func (p *Pbft) IsLocked() bool {
+	return p.state.locked
+}
+
+// GetProposal returns current proposal in the pbft
+func (p *Pbft) GetProposal() *Proposal {
+	return p.state.proposal
+}
+
 // getNextMessage reads a new message from the message queue
 func (p *Pbft) getNextMessage(span trace.Span, timeout time.Duration) (*MessageReq, bool) {
 	timeoutCh := time.After(timeout)

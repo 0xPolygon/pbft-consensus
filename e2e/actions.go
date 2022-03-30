@@ -45,7 +45,7 @@ func (dn *DropNodeAction) Apply(c *Cluster) RevertFunc {
 type PartitionAction struct {
 }
 
-func (action *PartitionAction) CanApply(c *Cluster) bool {
+func (action *PartitionAction) CanApply(_ *Cluster) bool {
 	return true
 }
 
@@ -72,12 +72,14 @@ func (action *PartitionAction) Apply(c *Cluster) RevertFunc {
 	log.Printf("Partitions ratio %d/%d, [%v], [%v]\n", len(majorityPartition), len(minorityPartition), majorityPartition, minorityPartition)
 	hook.Partition(minorityPartition, majorityPartition)
 
-	c.hook = hook
+	c.SetHook(hook)
 
 	return func() {
 		c.lock.Lock()
 		defer c.lock.Unlock()
 		log.Println("Reverting partitions.")
-		c.hook.Reset()
+		if tHook := c.transport.getHook(); tHook != nil {
+			tHook.Reset()
+		}
 	}
 }

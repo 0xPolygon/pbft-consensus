@@ -12,7 +12,7 @@ import (
 
 var (
 	revertProbabilityThreshold = 20
-	waitForHeightTimeInterval  = 3 * time.Minute
+	waitForHeightTimeInterval  = 10 * time.Minute
 )
 
 type Runner struct {
@@ -106,7 +106,7 @@ func validateNodes(c *e2e.Cluster) {
 				log.Printf("Cluster partitions: %v\n", transportHook.GetPartitions())
 			}
 			for _, n := range c.Nodes() {
-				log.Printf("Node: %v, running: %v\n", n.GetName(), n.IsRunning())
+				log.Printf("Node: %v, running: %v, locked: %v, height: %v, proposal: %v\n", n.GetName(), n.IsRunning(), n.IsLocked(), n.GetNodeHeight(), n.GetProposal())
 			}
 			panic("Desired height not reached.")
 		}
