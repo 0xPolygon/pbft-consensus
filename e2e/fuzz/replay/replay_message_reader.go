@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"os"
 	"sync"
@@ -31,6 +30,7 @@ type replayMessageReader struct {
 	msgProcessingDone      chan string
 	nodesDoneWithExecution map[pbft.NodeID]bool
 	lastSequenceMessages   map[pbft.NodeID]*sequenceMessages
+	prePrepareMessages     map[uint64]*pbft.MessageReq
 }
 
 // openFile opens the file on provided location
@@ -82,6 +82,7 @@ func (r *replayMessageReader) readMessages(cluster *e2e.Cluster) {
 	nodesCount := len(nodes)
 	r.nodesDoneWithExecution = make(map[pbft.NodeID]bool, nodesCount)
 	r.lastSequenceMessages = make(map[pbft.NodeID]*sequenceMessages, nodesCount)
+	r.prePrepareMessages = make(map[uint64]*pbft.MessageReq)
 
 	messagesChannel := make(chan []*ReplayMessage)
 	doneChannel := make(chan struct{})
@@ -100,10 +101,16 @@ LOOP:
 			for _, message := range messages {
 				node, exists := nodes[string(message.To)]
 				if !exists {
-					log.Println(fmt.Sprintf("[WARNING] Could not find node: %v to push message from .flow file", message.To))
+					log.Printf("[WARNING] Could not find node: %v to push message from .flow file.\n", message.To)
 				} else {
 					node.PushMessageInternal(message.Message)
 					nodeMessages[message.To][message.Message.View.Sequence] = append(nodeMessages[message.To][message.Message.View.Sequence], message.Message)
+
+					if !isTimeoutMessage(message.Message) && message.Message.Type == pbft.MessageReq_Preprepare {
+						if _, isPrePrepareAdded := r.prePrepareMessages[message.Message.View.Sequence]; !isPrePrepareAdded {
+							r.prePrepareMessages[message.Message.View.Sequence] = message.Message
+						}
+					}
 				}
 			}
 		case <-doneChannel:
@@ -135,7 +142,7 @@ func (r *replayMessageReader) startChunkReading(messagesChannel chan []*ReplayMe
 		for r.scanner.Scan() {
 			var message *ReplayMessage
 			if err := json.Unmarshal(r.scanner.Bytes(), &message); err != nil {
-				log.Println((fmt.Sprintf("[ERROR] Error happened on unmarshalling a message in .flow file. Reason: %v", err)))
+				log.Printf("[ERROR] Error happened on unmarshalling a message in .flow file. Reason: %v.\n", err)
 				return
 			}
 
