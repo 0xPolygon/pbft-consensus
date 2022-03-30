@@ -2,7 +2,6 @@ package replay
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -109,8 +108,7 @@ LOOP:
 			}
 		case <-doneChannel:
 			for name, n := range nodeMessages {
-				var nodeLastSequence uint64
-				nodeLastSequence = 0
+				nodeLastSequence := uint64(0)
 				for sequence := range n {
 					if nodeLastSequence < sequence {
 						nodeLastSequence = sequence
@@ -160,56 +158,40 @@ func (r *replayMessageReader) startChunkReading(messagesChannel chan []*ReplayMe
 	}()
 }
 
-// processMessage checks if message is a timeout, or if all messages have been read from the queue
-func (r *replayMessageReader) processMessage(validatorId pbft.NodeID, msg *pbft.MessageReq) bool {
-	if isTimeoutMessage(msg) {
-		return true
-	}
-
+// checkIfDoneWithExecution checks if node finished with processing all the messages from .flow file
+func (r *replayMessageReader) checkIfDoneWithExecution(validatorId pbft.NodeID, msg *pbft.MessageReq) {
 	if msg.View.Sequence > r.lastSequenceMessages[validatorId].sequence ||
 		(msg.View.Sequence == r.lastSequenceMessages[validatorId].sequence && r.areMessagesFromLastSequenceProcessed(msg, validatorId)) {
 		r.lock.Lock()
-		_, isDone := r.nodesDoneWithExecution[validatorId]
-		if !isDone {
+		if _, isDone := r.nodesDoneWithExecution[validatorId]; !isDone {
 			r.nodesDoneWithExecution[validatorId] = true
 			r.msgProcessingDone <- string(validatorId)
 		}
 		r.lock.Unlock()
 	}
-
-	return false
 }
 
 // areMessagesFromLastSequenceProcessed checks if all the messages from the last sequence of given node are processed so that the node can be stoped
 func (r *replayMessageReader) areMessagesFromLastSequenceProcessed(msg *pbft.MessageReq, validatorId pbft.NodeID) bool {
 	lastSequenceMessages := r.lastSequenceMessages[validatorId]
 
-	if len(lastSequenceMessages.messages) == 0 {
-		return true
-	} else {
+	lastSequenceMessagesCount := len(lastSequenceMessages.messages)
+	if lastSequenceMessagesCount > 0 {
 		messageIndexToRemove := -1
 		for i, message := range lastSequenceMessages.messages {
-			if areMessagesEqual(msg, message) {
+			if msg.Equal(message) {
 				messageIndexToRemove = i
+				break
 			}
 		}
 
 		if messageIndexToRemove != -1 {
 			lastSequenceMessages.messages = append(lastSequenceMessages.messages[:messageIndexToRemove], lastSequenceMessages.messages[messageIndexToRemove+1:]...)
+			lastSequenceMessagesCount = len(lastSequenceMessages.messages)
 		}
-
-		return len(lastSequenceMessages.messages) == 0
 	}
-}
 
-// areMessagesEqual compares if two messages are equal
-func areMessagesEqual(msgOne, msgTwo *pbft.MessageReq) bool {
-	return msgOne.Type == msgTwo.Type && msgOne.From == msgTwo.From &&
-		bytes.Equal(msgOne.Proposal, msgTwo.Proposal) &&
-		bytes.Equal(msgOne.Hash, msgTwo.Hash) &&
-		bytes.Equal(msgOne.Seal, msgTwo.Seal) &&
-		msgOne.View.Round == msgTwo.View.Round &&
-		msgOne.View.Sequence == msgTwo.View.Sequence
+	return lastSequenceMessagesCount == 0
 }
 
 // isTimeoutMessage checks if message in .flow file represents a timeout
