@@ -88,7 +88,8 @@ func (m *MessageReq) Copy() *MessageReq {
 
 // Equal compares if two messages are equal
 func (m *MessageReq) Equal(other *MessageReq) bool {
-	return m.Type == other.Type && m.From == other.From &&
+	return other != nil &&
+		m.Type == other.Type && m.From == other.From &&
 		bytes.Equal(m.Proposal, other.Proposal) &&
 		bytes.Equal(m.Hash, other.Hash) &&
 		bytes.Equal(m.Seal, other.Seal) &&
