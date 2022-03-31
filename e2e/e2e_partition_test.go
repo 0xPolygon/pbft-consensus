@@ -207,7 +207,7 @@ func TestE2E_Partition_LivenessIssue_Case2_SixNodes_OneFaulty(t *testing.T) {
 // one node gets dropped from a network once the proposal gets locked (A_3)
 // two nodes are locked on the same proposal (A_0 and A_1)
 // and one node is not locked (A_2).
-func TestE2E_Partition_Issue(t *testing.T) {
+func TestE2E_Network_stuck(t *testing.T) {
 	round0 := roundMetadata{
 		round: 0,
 		routingMap: map[sender]receivers{
@@ -257,9 +257,9 @@ func TestE2E_Partition_Issue(t *testing.T) {
 		for _, n := range c.nodes {
 			proposal := n.pbft.GetProposal()
 			if proposal != nil {
-				t.Logf("Node %v, running: %v, isProposalLocked: %v, proposal data: %v\n", n.name, n.IsRunning(), n.pbft.IsStateLocked(), proposal)
+				t.Logf("Node %v, running: %v, isProposalLocked: %v, proposal data: %v\n", n.name, n.IsRunning(), n.pbft.IsLocked(), proposal)
 			} else {
-				t.Logf("Node %v, running: %v, isProposalLocked: %v, no proposal set\n", n.name, n.IsRunning(), n.pbft.IsStateLocked())
+				t.Logf("Node %v, running: %v, isProposalLocked: %v, no proposal set\n", n.name, n.IsRunning(), n.pbft.IsLocked())
 			}
 		}
 	}
