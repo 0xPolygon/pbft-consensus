@@ -21,7 +21,6 @@ import (
 // it routes messages only to specific nodes and induces that nodes lock on different proposal.
 // In the round=1, it marks one node as faulty (meaning that it doesn't takes part in gossiping).
 func TestE2E_Partition_LivenessIssue_Case1_FiveNodes_OneFaulty(t *testing.T) {
-	const nodesCnt = 5
 	round0 := roundMetadata{
 		round: 0,
 		// induce locking A_3 and A_4 on one proposal
@@ -72,10 +71,11 @@ func TestE2E_Partition_LivenessIssue_Case1_FiveNodes_OneFaulty(t *testing.T) {
 	transport.withFlowMap(flowMap).withGossipHandler(livenessGossipHandler)
 
 	config := &ClusterConfig{
+		Count:  5,
 		Name:   "liveness_issue",
 		Prefix: "A",
-		Count:  nodesCnt,
 	}
+
 	c := NewPBFTCluster(t, config, transport)
 	c.Start()
 	defer c.Stop()
@@ -108,7 +108,6 @@ func TestE2E_Partition_LivenessIssue_Case1_FiveNodes_OneFaulty(t *testing.T) {
 // it routes messages only to specific nodes and induces that nodes lock on different proposal.
 // In the round=3, it marks one node as faulty (meaning that it doesn't takes part in gossiping).
 func TestE2E_Partition_LivenessIssue_Case2_SixNodes_OneFaulty(t *testing.T) {
-	const nodesCnt = 6
 	round0 := roundMetadata{
 		round: 0,
 		// lock A_1, A_4
@@ -172,10 +171,11 @@ func TestE2E_Partition_LivenessIssue_Case2_SixNodes_OneFaulty(t *testing.T) {
 	transport.withFlowMap(flowMap).withGossipHandler(livenessGossipHandler)
 
 	config := &ClusterConfig{
+		Count:  6,
 		Name:   "liveness_issue",
 		Prefix: "A",
-		Count:  nodesCnt,
 	}
+
 	c := NewPBFTCluster(t, config, transport)
 	c.Start()
 	defer c.Stop()
