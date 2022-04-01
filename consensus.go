@@ -756,11 +756,16 @@ func (p *Pbft) GetProposal() *Proposal {
 	return p.state.proposal
 }
 
+// GetCurrentView returnes current view
+func (p *Pbft) GetCurrentView() *View {
+	return p.state.view.Copy()
+}
+
 // getNextMessage reads a new message from the message queue
 func (p *Pbft) getNextMessage(span trace.Span, timeout time.Duration) (*MessageReq, bool) {
-	timeoutCh := time.After(timeout)
+	timeoutCh := p.notifier.CreateTimeoutChannel(timeout)
 	for {
-		msg, discards := p.notifier.ReadNextMessage(p)
+		msg, discards := p.notifier.ReadNextMessage(p, timeoutCh)
 		// send the discard messages
 		p.logger.Printf("[TRACE] Current state %s, number of prepared messages: %d, number of committed messages %d", PbftState(p.state.state), p.state.numPrepared(), p.state.numCommitted())
 
@@ -775,8 +780,9 @@ func (p *Pbft) getNextMessage(span trace.Span, timeout time.Duration) (*MessageR
 			return msg, true
 		}
 
-		// wait until there is a new message or
-		// someone closes the stopCh (i.e. timeout for round change)
+		// wait until there is a new message,
+		// someone closes the timeoutCh (i.e. timeout for round change) or
+		// cancel function is triggered
 		select {
 		case <-timeoutCh:
 			span.AddEvent("Timeout")

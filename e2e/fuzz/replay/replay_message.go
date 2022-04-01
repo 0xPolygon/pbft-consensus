@@ -31,8 +31,8 @@ func NewReplayTimeoutMessage(to pbft.NodeID, msgType pbft.MsgType, view *pbft.Vi
 	}
 }
 
-// ConvertToByteArrays converts ReplayMessage slice to JSON representation and return it back as slice of byte arrays
-func ConvertToByteArrays(messages []*ReplayMessage) ([][]byte, error) {
+// ConvertMessagesToByteArrays converts ReplayMessage slice to JSON representation and return it back as slice of byte arrays
+func ConvertMessagesToByteArrays(messages []*ReplayMessage) ([][]byte, error) {
 	var allRawMessages [][]byte
 	for _, message := range messages {
 		currentRawMessage, err := json.Marshal(message)

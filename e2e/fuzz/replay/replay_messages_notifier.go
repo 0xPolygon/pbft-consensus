@@ -1,17 +1,21 @@
 package replay
 
 import (
+	"time"
+
 	"github.com/0xPolygon/pbft-consensus"
+	"github.com/0xPolygon/pbft-consensus/e2e"
 )
 
 const (
-	FileName = "messages"
+	MessagesFilePrefix = "messages"
+	MetaDataFilePrefix = "metaData"
 )
 
 // ReplayMessagesNotifier is a struct that implements ReplayNotifier interface
 type ReplayMessagesNotifier struct {
-	messagePersister *replayMessagePersister
-	messageReader    *replayMessageReader
+	messagePersister    messagePersister
+	nodeExectionHandler *replayNodeExecutionHandler
 }
 
 // NewReplayMessagesNotifierWithPersister creates a new messages notifier with messages persister (required when fuzz-run is executed to save messages to file)
@@ -21,17 +25,17 @@ func NewReplayMessagesNotifierWithPersister() *ReplayMessagesNotifier {
 	}
 }
 
-// NewReplayMessagesNotifierWithReader creates a new messages notifier with messages reader (required when replay-messages is executed to read messages from file)
-func NewReplayMessagesNotifierWithReader(r *replayMessageReader) *ReplayMessagesNotifier {
+// NewReplayMessagesNotifierForReplay creates a new messages notifier with plugins needed for replay
+func NewReplayMessagesNotifierForReplay(nodeExecutionHandler *replayNodeExecutionHandler) *ReplayMessagesNotifier {
 	return &ReplayMessagesNotifier{
-		messageReader:    r,
-		messagePersister: &replayMessagePersister{},
+		messagePersister:    &defaultMessagePersister{},
+		nodeExectionHandler: nodeExecutionHandler,
 	}
 }
 
 // SaveMetaData saves node meta data to .flow file
-func (r *ReplayMessagesNotifier) SaveMetaData(nodeNames *[]string) error {
-	return r.messagePersister.saveMetaData(nodeNames)
+func (r *ReplayMessagesNotifier) SaveMetaData(nodeNames []string, lastSequences []*e2e.MetaData) error {
+	return r.messagePersister.saveMetaData(nodeNames, lastSequences)
 }
 
 // SaveState saves currently cached messages and timeouts to .flow file
@@ -50,14 +54,18 @@ func (r *ReplayMessagesNotifier) HandleTimeout(to pbft.NodeID, msgType pbft.MsgT
 }
 
 // ReadNextMessage is an implementation of StateNotifier interface
-func (r *ReplayMessagesNotifier) ReadNextMessage(p *pbft.Pbft) (*pbft.MessageReq, []*pbft.MessageReq) {
+func (r *ReplayMessagesNotifier) ReadNextMessage(p *pbft.Pbft, timeoutChannel chan time.Time) (*pbft.MessageReq, []*pbft.MessageReq) {
 	msg, discards := p.ReadMessageWithDiscards()
 
-	if r.messageReader != nil && msg != nil {
-		if isTimeoutMessage(msg) {
-			return nil, nil
+	if r.nodeExectionHandler != nil {
+		validatorId := p.GetValidatorId()
+		if msg != nil {
+			if r.nodeExectionHandler.checkIsTimeout(validatorId, msg, timeoutChannel) {
+				return nil, nil
+			}
 		} else {
-			r.messageReader.checkIfDoneWithExecution(p.GetValidatorId(), msg)
+			// if node has no more messages for given round and sequence in queue it was dropped in fuzz
+			r.nodeExectionHandler.checkIfShouldDrop(validatorId, p.GetCurrentView(), timeoutChannel)
 		}
 	}
 
@@ -67,4 +75,14 @@ func (r *ReplayMessagesNotifier) ReadNextMessage(p *pbft.Pbft) (*pbft.MessageReq
 // CloseFile closes file created by the ReplayMessagesHandler if it is open
 func (r *ReplayMessagesNotifier) CloseFile() error {
 	return r.messagePersister.closeFile()
+}
+
+// CreateTimeoutChannel is an implementation of StateNotifier interface
+func (r *ReplayMessagesNotifier) CreateTimeoutChannel(timeout time.Duration) chan time.Time {
+	return make(chan time.Time)
+}
+
+// HandleAction is an implementation of ReplayMessageNotifier interface
+func (r *ReplayMessagesNotifier) HandleAction(action *e2e.MetaData) {
+	r.messagePersister.addAction(action)
 }

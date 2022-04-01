@@ -1,12 +1,51 @@
 package e2e
 
 import (
+	"encoding/json"
 	"log"
 	"math/rand"
 	"time"
 
 	"github.com/0xPolygon/pbft-consensus"
 )
+
+const (
+	DropNode       string = "DropNode"
+	RevertDropNode string = "RevertDropNode"
+	Partition      string = "Partition"
+	LastSequence   string = "LastSequence"
+)
+
+// MetaData is a struct that holds data about fuzz actions that happened and need to be saved in .flow file
+type MetaData struct {
+	DataType string `json:"actionType"`
+	Data     string `json:"data"`
+	Sequence uint64 `json:"sequence"`
+	Round    uint64 `json:"round"`
+}
+
+// NewMetaData creates a new MetaData object
+func NewMetaData(dataType, data string, sequence, round uint64) *MetaData {
+	return &MetaData{
+		DataType: dataType,
+		Data:     data,
+		Sequence: sequence,
+		Round:    round,
+	}
+}
+
+// ConvertActionsToByteArrays converts ActionSerializable slice to JSON representation and returns it back as slice of byte arrays
+func ConvertActionsToByteArrays(actions []*MetaData) ([][]byte, error) {
+	var allRawACtions [][]byte
+	for _, message := range actions {
+		currentRawAction, err := json.Marshal(message)
+		if err != nil {
+			return allRawACtions, err
+		}
+		allRawACtions = append(allRawACtions, currentRawAction)
+	}
+	return allRawACtions, nil
+}
 
 type RevertFunc func()
 
@@ -35,10 +74,13 @@ func (dn *DropNodeAction) Apply(c *Cluster) RevertFunc {
 	log.Printf("Dropping node: '%s'.", nodeToStop)
 
 	c.StopNode(nodeToStop.name)
+	view := nodeToStop.GetCurrentView()
+	c.replayMessageNotifier.HandleAction(NewMetaData(DropNode, nodeToStop.name, view.Sequence, view.Round))
 
 	return func() {
 		log.Printf("Reverting stopped node %v\n", nodeToStop.name)
 		nodeToStop.Start()
+		c.replayMessageNotifier.HandleAction(NewMetaData(RevertDropNode, nodeToStop.name, c.GetMaxHeight()+1, 0))
 	}
 }
 

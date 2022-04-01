@@ -382,7 +382,9 @@ type StateNotifier interface {
 	// HandleTimeout notifies that a timeout occured while getting next message
 	HandleTimeout(to NodeID, msgType MsgType, view *View)
 	// ReadNextMessage reads the next message from message queue of the state machine
-	ReadNextMessage(p *Pbft) (*MessageReq, []*MessageReq)
+	ReadNextMessage(p *Pbft, timeoutChannel chan time.Time) (*MessageReq, []*MessageReq)
+	//CreateTimeoutChannel creates a channel on which timeout will be signaled
+	CreateTimeoutChannel(timeout time.Duration) chan time.Time
 }
 
 // DefaultStateNotifier is a null object implementation of StateNotifier interface
@@ -393,6 +395,17 @@ type DefaultStateNotifier struct {
 func (d *DefaultStateNotifier) HandleTimeout(to NodeID, msgType MsgType, view *View) {}
 
 // ReadNextMessage is an implementation of StateNotifier interface
-func (d *DefaultStateNotifier) ReadNextMessage(p *Pbft) (*MessageReq, []*MessageReq) {
+func (d *DefaultStateNotifier) ReadNextMessage(p *Pbft, timeoutChannel chan time.Time) (*MessageReq, []*MessageReq) {
 	return p.ReadMessageWithDiscards()
+}
+
+// CreateTimeoutChannel is an implementation of StateNotifier interface
+func (d *DefaultStateNotifier) CreateTimeoutChannel(timeout time.Duration) chan time.Time {
+	timeoutChannel := make(chan time.Time)
+
+	time.AfterFunc(timeout, func() {
+		timeoutChannel <- time.Now()
+	})
+
+	return timeoutChannel
 }

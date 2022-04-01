@@ -133,11 +133,6 @@ func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transportHook) 
 		createBackend:         config.CreateBackend,
 	}
 
-	err = c.replayMessageNotifier.SaveMetaData(&names)
-	if err != nil {
-		log.Printf("[WARNING] Could not write node meta data to replay messages file. Reason: %v", err)
-	}
-
 	for _, name := range names {
 		trace := c.tracer.Tracer(name)
 		n, _ := newPBFTNode(name, config, names, trace, tt)
@@ -286,6 +281,11 @@ func (n *node) GetNodeHeight() uint64 {
 	return uint64(n.getSyncIndex()) + 1
 }
 
+// GetCurrentView gets current view from the state machine
+func (n *node) GetCurrentView() *pbft.View {
+	return n.pbft.GetCurrentView()
+}
+
 func (c *Cluster) syncWithNetwork(nodeID string) (uint64, int64) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
@@ -389,6 +389,7 @@ func (c *Cluster) Stop() {
 			n.Stop()
 		}
 	}
+	c.SaveState()
 	if err := c.tracer.Shutdown(context.Background()); err != nil {
 		panic("failed to shutdown TracerProvider")
 	}
@@ -396,6 +397,44 @@ func (c *Cluster) Stop() {
 
 func (c *Cluster) GetTransportHook() transportHook {
 	return c.transport.getHook()
+}
+
+// SaveState saves messages and action meta data to corresponding .flow files
+func (c *Cluster) SaveState() {
+	c.saveMessages()
+	c.saveMetaData()
+}
+
+// saveMessages saves all cached messages to .flow file
+func (c *Cluster) saveMessages() {
+	err := c.replayMessageNotifier.SaveState()
+	if err != nil {
+		log.Printf("[WARNING] Could not write state to file. Reason: %v", err)
+	}
+}
+
+// saveMetaData saves all cached actions meta data to .flow file
+func (c *Cluster) saveMetaData() {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	var nodeNames []string
+	var lastSequences []*MetaData
+	for name, node := range c.GetNodesMap() {
+		nodeNames = append(nodeNames, name)
+		view := node.GetCurrentView()
+		lastSequences = append(lastSequences, &MetaData{
+			DataType: LastSequence,
+			Data:     name,
+			Sequence: view.Sequence,
+			Round:    view.Round,
+		})
+	}
+
+	err := c.replayMessageNotifier.SaveMetaData(nodeNames, lastSequences)
+	if err != nil {
+		log.Printf("[WARNING] Could not write node meta data to replay messages file. Reason: %v", err)
+	}
 }
 
 type node struct {
@@ -521,10 +560,7 @@ func (n *node) Start() {
 
 			// start the execution
 			n.pbft.Run(ctx)
-			err := n.c.replayMessageNotifier.SaveState()
-			if err != nil {
-				log.Printf("[WARNING] Could not write state to file. Reason: %v", err)
-			}
+			n.c.saveMessages()
 
 			switch n.pbft.GetState() {
 			case pbft.SyncState:
@@ -536,6 +572,7 @@ func (n *node) Start() {
 				n.setSyncIndex(currentSyncIndex + 1)
 			default:
 				// stopped
+				n.c.saveMessages()
 				return
 			}
 		}
@@ -716,29 +753,27 @@ func (v *valString) Len() int {
 // ReplayNotifier is an interface that expands the StateNotifier with additional methods for saving and loading replay messages
 type ReplayNotifier interface {
 	pbft.StateNotifier
-	SaveMetaData(nodeNames *[]string) error
+	SaveMetaData(nodeNames []string, metaData []*MetaData) error
 	SaveState() error
 	HandleMessage(to pbft.NodeID, message *pbft.MessageReq)
+	HandleAction(action *MetaData)
 }
 
 // DefaultReplayNotifier is a null object implementation of ReplayNotifier interface
 type DefaultReplayNotifier struct {
-}
-
-// HandleTimeout implements StateNotifier interface
-func (n *DefaultReplayNotifier) HandleTimeout(to pbft.NodeID, msgType pbft.MsgType, view *pbft.View) {
-}
-
-// ReadNextMessage is an implementation of StateNotifier interface
-func (n *DefaultReplayNotifier) ReadNextMessage(p *pbft.Pbft) (*pbft.MessageReq, []*pbft.MessageReq) {
-	return p.ReadMessageWithDiscards()
+	pbft.DefaultStateNotifier
 }
 
 // SaveMetaData is an implementation of ReplayNotifier interface
-func (n *DefaultReplayNotifier) SaveMetaData(nodeNames *[]string) error { return nil }
+func (n *DefaultReplayNotifier) SaveMetaData(nodeNames []string, metaData []*MetaData) error {
+	return nil
+}
 
 // SaveState is an implementation of ReplayNotifier interface
 func (n *DefaultReplayNotifier) SaveState() error { return nil }
 
 // HandleMessage is an implementation of ReplayNotifier interface
 func (n *DefaultReplayNotifier) HandleMessage(to pbft.NodeID, message *pbft.MessageReq) {}
+
+// HandleAction is an implementation of ReplayNotifier interface
+func (n *DefaultReplayNotifier) HandleAction(action *MetaData) {}

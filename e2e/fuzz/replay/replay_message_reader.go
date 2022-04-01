@@ -4,9 +4,10 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"os"
-	"sync"
+	"strings"
 
 	"github.com/0xPolygon/pbft-consensus"
 	"github.com/0xPolygon/pbft-consensus/e2e"
@@ -14,84 +15,120 @@ import (
 
 const (
 	maxCharactersPerLine = 2048 * 1024 // Increase Scanner buffer size to 2MB per line
-	messageChunkSize     = 200
+	messageChunkSize     = 200         // Size of a chunk of messages being loaded from .flow file
 )
-
-type sequenceMessages struct {
-	sequence uint64
-	messages []*pbft.MessageReq
-}
 
 // replayMessageReader encapsulates logic for reading messages from flow file
 type replayMessageReader struct {
-	lock                   sync.Mutex
-	file                   *os.File
-	scanner                *bufio.Scanner
-	msgProcessingDone      chan string
-	nodesDoneWithExecution map[pbft.NodeID]bool
-	lastSequenceMessages   map[pbft.NodeID]*sequenceMessages
-	prePrepareMessages     map[uint64]*pbft.MessageReq
+	messagesFile       *os.File
+	metaDataFile       *os.File
+	prePrepareMessages map[uint64]*pbft.MessageReq
 }
 
-// openFile opens the file on provided location
-func (r *replayMessageReader) openFile(filePath string) error {
-	_, err := os.Stat(filePath)
+// openFiles opens the .flow files on provided location
+func (r *replayMessageReader) openFiles(messagesFilePath, metaDataFilePath string) error {
+	_, err := os.Stat(messagesFilePath)
 	if err != nil {
 		return err
 	}
 
-	r.file, err = os.Open(filePath)
+	r.messagesFile, err = os.Open(messagesFilePath)
 	if err != nil {
 		return err
 	}
 
-	r.scanner = bufio.NewScanner(r.file)
+	_, err = os.Stat(metaDataFilePath)
+	if err != nil {
+		return err
+	}
 
-	buffer := []byte{}
-	r.scanner.Buffer(buffer, maxCharactersPerLine)
+	r.metaDataFile, err = os.Open(metaDataFilePath)
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
 
-// closeFile closes the opened .flow file
+// closeFile closes the opened .flow files
 func (r *replayMessageReader) closeFile() error {
-	if r.file != nil {
-		return r.file.Close()
+	var errors []string
+	if r.messagesFile != nil {
+		if err := r.messagesFile.Close(); err != nil {
+			errors = append(errors, err.Error())
+		}
 	}
+
+	if r.metaDataFile != nil {
+		if err := r.metaDataFile.Close(); err != nil {
+			errors = append(errors, err.Error())
+		}
+	}
+
+	if len(errors) > 0 {
+		return fmt.Errorf(strings.Join(errors, "\n"))
+	}
+
 	return nil
 }
 
-// readNodeMetaData reads the first line of .flow file which should be a list of nodes
-func (r *replayMessageReader) readNodeMetaData() ([]string, error) {
+// readNodeMetaData reads the node names and action from metaData.flow file
+func (r *replayMessageReader) readNodeMetaData(nodeExecutionHandler *replayNodeExecutionHandler) ([]string, error) {
+	scanner := bufio.NewScanner(r.metaDataFile)
+	buffer := []byte{}
+	scanner.Buffer(buffer, maxCharactersPerLine)
+
 	var nodeNames []string
-	r.scanner.Scan() // first line carries the node names needed to create appropriate number of nodes for replay
-	err := json.Unmarshal(r.scanner.Bytes(), &nodeNames)
+	scanner.Scan() // first line carries the node names needed to create appropriate number of nodes for replay
+	err := json.Unmarshal(scanner.Bytes(), &nodeNames)
+	nodeCount := len(nodeNames)
 	if err != nil {
 		return nil, err
-	} else if len(nodeNames) == 0 {
+	} else if nodeCount == 0 {
 		err = errors.New("no nodes were found in .flow file, so no cluster will be started")
+		return nil, err
+	}
+
+	nodeExecutionHandler.dropNodeActions = make(map[pbft.NodeID]map[uint64]*e2e.MetaData, nodeCount)
+	nodeExecutionHandler.revertDropNodeActions = make(map[pbft.NodeID]map[uint64]*e2e.MetaData, nodeCount)
+	nodeExecutionHandler.lastSequencesByNode = make(map[pbft.NodeID]*e2e.MetaData, nodeCount)
+
+	for _, name := range nodeNames {
+		nodeExecutionHandler.dropNodeActions[pbft.NodeID(name)] = make(map[uint64]*e2e.MetaData)
+		nodeExecutionHandler.revertDropNodeActions[pbft.NodeID(name)] = make(map[uint64]*e2e.MetaData)
+	}
+
+	for scanner.Scan() {
+		var action *e2e.MetaData
+		if err := json.Unmarshal(scanner.Bytes(), &action); err != nil {
+			log.Printf("[ERROR] Error happened on unmarshalling action in .flow file. Reason: %v", err)
+			return nodeNames, err
+		}
+
+		switch action.DataType {
+		case e2e.DropNode:
+			nodeExecutionHandler.dropNodeActions[pbft.NodeID(action.Data)][action.Sequence] = action
+		case e2e.RevertDropNode:
+			nodeExecutionHandler.revertDropNodeActions[pbft.NodeID(action.Data)][action.Sequence] = action
+		case e2e.LastSequence:
+			nodeExecutionHandler.lastSequencesByNode[pbft.NodeID(action.Data)] = action
+		default:
+			panic("unknown action data type read from metaData.flow file")
+		}
 	}
 
 	return nodeNames, err
 }
 
 // readMessages reads messages from open .flow file and pushes them to appropriate nodes
-func (r *replayMessageReader) readMessages(cluster *e2e.Cluster) {
+func (r *replayMessageReader) readMessages(cluster *e2e.Cluster, nodeExecutionHandler *replayNodeExecutionHandler) {
 	nodes := cluster.GetNodesMap()
-
-	nodesCount := len(nodes)
-	r.nodesDoneWithExecution = make(map[pbft.NodeID]bool, nodesCount)
-	r.lastSequenceMessages = make(map[pbft.NodeID]*sequenceMessages, nodesCount)
-	r.prePrepareMessages = make(map[uint64]*pbft.MessageReq)
 
 	messagesChannel := make(chan []*ReplayMessage)
 	doneChannel := make(chan struct{})
+	r.prePrepareMessages = make(map[uint64]*pbft.MessageReq)
 
 	r.startChunkReading(messagesChannel, doneChannel)
-	nodeMessages := make(map[pbft.NodeID]map[uint64][]*pbft.MessageReq, nodesCount)
-	for _, n := range nodes {
-		nodeMessages[pbft.NodeID(n.GetName())] = make(map[uint64][]*pbft.MessageReq)
-	}
 
 	isDone := false
 LOOP:
@@ -101,11 +138,9 @@ LOOP:
 			for _, message := range messages {
 				node, exists := nodes[string(message.To)]
 				if !exists {
-					log.Printf("[WARNING] Could not find node: %v to push message from .flow file.\n", message.To)
+					log.Printf("[WARNING] Could not find node: %v to push message from .flow file", message.To)
 				} else {
 					node.PushMessageInternal(message.Message)
-					nodeMessages[message.To][message.Message.View.Sequence] = append(nodeMessages[message.To][message.Message.View.Sequence], message.Message)
-
 					if !isTimeoutMessage(message.Message) && message.Message.Type == pbft.MessageReq_Preprepare {
 						if _, isPrePrepareAdded := r.prePrepareMessages[message.Message.View.Sequence]; !isPrePrepareAdded {
 							r.prePrepareMessages[message.Message.View.Sequence] = message.Message
@@ -114,20 +149,6 @@ LOOP:
 				}
 			}
 		case <-doneChannel:
-			for name, n := range nodeMessages {
-				nodeLastSequence := uint64(0)
-				for sequence := range n {
-					if nodeLastSequence < sequence {
-						nodeLastSequence = sequence
-					}
-				}
-
-				r.lastSequenceMessages[name] = &sequenceMessages{
-					sequence: nodeLastSequence,
-					messages: nodeMessages[name][nodeLastSequence],
-				}
-			}
-
 			isDone = true
 			break LOOP
 		}
@@ -137,12 +158,16 @@ LOOP:
 // startChunkReading reads messages from .flow file in chunks
 func (r *replayMessageReader) startChunkReading(messagesChannel chan []*ReplayMessage, doneChannel chan struct{}) {
 	go func() {
+		scanner := bufio.NewScanner(r.messagesFile)
+		buffer := []byte{}
+		scanner.Buffer(buffer, maxCharactersPerLine)
+
 		messages := make([]*ReplayMessage, 0)
 		i := 0
-		for r.scanner.Scan() {
+		for scanner.Scan() {
 			var message *ReplayMessage
-			if err := json.Unmarshal(r.scanner.Bytes(), &message); err != nil {
-				log.Printf("[ERROR] Error happened on unmarshalling a message in .flow file. Reason: %v.\n", err)
+			if err := json.Unmarshal(scanner.Bytes(), &message); err != nil {
+				log.Printf("[ERROR] Error happened on unmarshalling a message in .flow file. Reason: %v", err)
 				return
 			}
 
@@ -163,45 +188,4 @@ func (r *replayMessageReader) startChunkReading(messagesChannel chan []*ReplayMe
 
 		doneChannel <- struct{}{}
 	}()
-}
-
-// checkIfDoneWithExecution checks if node finished with processing all the messages from .flow file
-func (r *replayMessageReader) checkIfDoneWithExecution(validatorId pbft.NodeID, msg *pbft.MessageReq) {
-	if msg.View.Sequence > r.lastSequenceMessages[validatorId].sequence ||
-		(msg.View.Sequence == r.lastSequenceMessages[validatorId].sequence && r.areMessagesFromLastSequenceProcessed(msg, validatorId)) {
-		r.lock.Lock()
-		if _, isDone := r.nodesDoneWithExecution[validatorId]; !isDone {
-			r.nodesDoneWithExecution[validatorId] = true
-			r.msgProcessingDone <- string(validatorId)
-		}
-		r.lock.Unlock()
-	}
-}
-
-// areMessagesFromLastSequenceProcessed checks if all the messages from the last sequence of given node are processed so that the node can be stoped
-func (r *replayMessageReader) areMessagesFromLastSequenceProcessed(msg *pbft.MessageReq, validatorId pbft.NodeID) bool {
-	lastSequenceMessages := r.lastSequenceMessages[validatorId]
-
-	lastSequenceMessagesCount := len(lastSequenceMessages.messages)
-	if lastSequenceMessagesCount > 0 {
-		messageIndexToRemove := -1
-		for i, message := range lastSequenceMessages.messages {
-			if msg.Equal(message) {
-				messageIndexToRemove = i
-				break
-			}
-		}
-
-		if messageIndexToRemove != -1 {
-			lastSequenceMessages.messages = append(lastSequenceMessages.messages[:messageIndexToRemove], lastSequenceMessages.messages[messageIndexToRemove+1:]...)
-			lastSequenceMessagesCount = len(lastSequenceMessages.messages)
-		}
-	}
-
-	return lastSequenceMessagesCount == 0
-}
-
-// isTimeoutMessage checks if message in .flow file represents a timeout
-func isTimeoutMessage(message *pbft.MessageReq) bool {
-	return message.Hash == nil && message.Proposal == nil && message.Seal == nil && message.From == ""
 }
