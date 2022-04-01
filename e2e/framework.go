@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/rand"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -58,6 +59,15 @@ func initTracer(name string) *sdktrace.TracerProvider {
 	return tracerProvider
 }
 
+// IntegrationBackend extends the pbft Backend interface with additional methods
+type IntegrationBackend interface {
+	pbft.Backend
+	SetBackendData(n *node)
+}
+
+// CreateBackend is a delegate that creates a new instance of IntegrationBackend interface
+type CreateBackend func() IntegrationBackend
+
 type Cluster struct {
 	t                     *testing.T
 	lock                  sync.Mutex
@@ -66,6 +76,7 @@ type Cluster struct {
 	transport             *transport
 	sealedProposals       []*pbft.SealedProposal
 	replayMessageNotifier ReplayNotifier
+	createBackend         CreateBackend
 }
 
 type ClusterConfig struct {
@@ -76,6 +87,7 @@ type ClusterConfig struct {
 	ReplayMessageNotifier ReplayNotifier
 	TransportHandler      transportHandler
 	RoundTimeout          pbft.RoundTimeout
+	CreateBackend         CreateBackend
 }
 
 func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transportHook) *Cluster {
@@ -98,6 +110,10 @@ func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transportHook) 
 		config.ReplayMessageNotifier = &DefaultReplayNotifier{}
 	}
 
+	if config.CreateBackend == nil {
+		config.CreateBackend = func() IntegrationBackend { return &Fsm{} }
+	}
+
 	logsDir, err := CreateLogsDir(directoryName)
 	if err != nil {
 		log.Printf("[WARNING] Could not create logs directory. Reason: %v. Logging will be defaulted to standard output.", err)
@@ -114,6 +130,7 @@ func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transportHook) 
 		transport:             tt,
 		sealedProposals:       []*pbft.SealedProposal{},
 		replayMessageNotifier: config.ReplayMessageNotifier,
+		createBackend:         config.CreateBackend,
 	}
 
 	err = c.replayMessageNotifier.SaveMetaData(&names)
@@ -494,15 +511,8 @@ func (n *node) Start() {
 		_, syncIndex := n.c.syncWithNetwork(n.name)
 		n.setSyncIndex(syncIndex)
 		for {
-			fsm := &fsm{
-				n:            n,
-				nodes:        n.nodes,
-				lastProposer: n.c.getProposer(n.getSyncIndex()),
-
-				// important: in this iteration of the fsm we have increased our height
-				height:          n.GetNodeHeight() + 1,
-				validationFails: n.isFaulty(),
-			}
+			fsm := n.c.createBackend()
+			fsm.SetBackendData(n)
 
 			if err := n.pbft.SetBackend(fsm); err != nil {
 				panic(err)
@@ -570,7 +580,7 @@ func (k key) Sign(b []byte) ([]byte, error) {
 
 // -- fsm --
 
-type fsm struct {
+type Fsm struct {
 	n               *node
 	nodes           []string
 	lastProposer    pbft.NodeID
@@ -578,35 +588,41 @@ type fsm struct {
 	validationFails bool
 }
 
-func (f *fsm) Height() uint64 {
+func (f *Fsm) Height() uint64 {
 	return f.height
 }
 
-func (f *fsm) IsStuck(num uint64) (uint64, bool) {
+func (f *Fsm) IsStuck(num uint64) (uint64, bool) {
 	return f.n.isStuck(num)
 }
 
-func (f *fsm) BuildProposal() (*pbft.Proposal, error) {
+func (f *Fsm) BuildProposal() (*pbft.Proposal, error) {
 	proposal := &pbft.Proposal{
-		Data: []byte{byte(f.Height())},
+		Data: GenerateProposal(),
 		Time: time.Now().Add(1 * time.Second),
 	}
-	proposal.Hash = hash(proposal.Data)
+	proposal.Hash = Hash(proposal.Data)
 	return proposal, nil
 }
 
-func (f *fsm) Validate(proposal *pbft.Proposal) error {
+func GenerateProposal() []byte {
+	prop := make([]byte, 4)
+	_, _ = rand.Read(prop)
+	return prop
+}
+
+func (f *Fsm) Validate(proposal *pbft.Proposal) error {
 	if f.validationFails {
 		return fmt.Errorf("validation error")
 	}
 	return nil
 }
 
-func (f *fsm) Insert(pp *pbft.SealedProposal) error {
+func (f *Fsm) Insert(pp *pbft.SealedProposal) error {
 	return f.n.Insert(pp)
 }
 
-func (f *fsm) ValidatorSet() pbft.ValidatorSet {
+func (f *Fsm) ValidatorSet() pbft.ValidatorSet {
 	valsAsNode := []pbft.NodeID{}
 	for _, i := range f.nodes {
 		valsAsNode = append(valsAsNode, pbft.NodeID(i))
@@ -618,7 +634,16 @@ func (f *fsm) ValidatorSet() pbft.ValidatorSet {
 	return &vv
 }
 
-func hash(p []byte) []byte {
+// SetBackendData implements IntegrationBackend interface and sets the data needed for backend
+func (f *Fsm) SetBackendData(n *node) {
+	f.n = n
+	f.nodes = n.nodes
+	f.lastProposer = n.c.getProposer(n.getSyncIndex())
+	f.height = n.GetNodeHeight() + 1
+	f.validationFails = n.isFaulty()
+}
+
+func Hash(p []byte) []byte {
 	h := sha1.New()
 	h.Write(p)
 	return h.Sum(nil)
@@ -629,7 +654,7 @@ func newSealedProposal(proposalData []byte, proposer pbft.NodeID, number uint64)
 		Data: proposalData,
 		Time: time.Now(),
 	}
-	proposal.Hash = hash(proposal.Data)
+	proposal.Hash = Hash(proposal.Data)
 	return &pbft.SealedProposal{
 		Proposal: proposal,
 		Proposer: proposer,
@@ -637,10 +662,10 @@ func newSealedProposal(proposalData []byte, proposer pbft.NodeID, number uint64)
 	}
 }
 
-func (f *fsm) Init(*pbft.RoundInfo) {
+func (f *Fsm) Init(*pbft.RoundInfo) {
 }
 
-func (f *fsm) ValidateCommit(node pbft.NodeID, seal []byte) error {
+func (f *Fsm) ValidateCommit(node pbft.NodeID, seal []byte) error {
 	return nil
 }
 

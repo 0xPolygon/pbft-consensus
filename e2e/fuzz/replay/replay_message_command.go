@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -76,6 +77,7 @@ func (rmc *ReplayMessageCommand) Run(args []string) int {
 		ReplayMessageNotifier: replayMessagesNotifier,
 		RoundTimeout:          roundTimeout,
 		TransportHandler:      func(to pbft.NodeID, msg *pbft.MessageReq) { replayMessagesNotifier.HandleMessage(to, msg) },
+		CreateBackend:         func() e2e.IntegrationBackend { return &ReplayBackend{messageReader: messageReader} },
 	}
 
 	cluster := e2e.NewPBFTCluster(nil, config)
@@ -142,4 +144,28 @@ func (rmc *ReplayMessageCommand) validateInput(args []string) error {
 		return err
 	}
 	return nil
+}
+
+// ReplayBackend implements the IntegrationBackend interface and implements its own BuildProposal method for replay
+type ReplayBackend struct {
+	e2e.Fsm
+	messageReader *replayMessageReader
+}
+
+// BuildProposal builds the next proposal. If it has a preprepare message for given height in .flow file it will take the proposal from file, otherwise it will generate a new one
+func (f *ReplayBackend) BuildProposal() (*pbft.Proposal, error) {
+	var data []byte
+	sequence := f.Height()
+	if prePrepareMessage, exists := f.messageReader.prePrepareMessages[sequence]; exists && prePrepareMessage != nil {
+		data = prePrepareMessage.Proposal
+	} else {
+		log.Printf("[WARNING] Could not find PRE-PREPARE message for sequence: %v", sequence)
+		data = e2e.GenerateProposal()
+	}
+
+	return &pbft.Proposal{
+		Data: data,
+		Time: time.Now().Add(1 * time.Second),
+		Hash: e2e.Hash(data),
+	}, nil
 }
