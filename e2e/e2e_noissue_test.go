@@ -8,13 +8,15 @@ import (
 )
 
 func TestE2E_NoIssue(t *testing.T) {
+	t.Parallel()
 	config := &ClusterConfig{
-		Count:  5,
-		Name:   "noissue",
-		Prefix: "noissue",
+		Count:        5,
+		Name:         "noissue",
+		Prefix:       "noissue",
+		RoundTimeout: GetPredefinedTimeout(2 * time.Second),
 	}
 
-	c := NewPBFTCluster(t, config, newRandomTransport(300*time.Millisecond))
+	c := NewPBFTCluster(t, config, newRandomTransport(50*time.Millisecond))
 	c.Start()
 	defer c.Stop()
 

@@ -12,14 +12,16 @@ import (
 func TestFuzz_NetworkChurn(t *testing.T) {
 	isFuzzEnabled(t)
 
+	t.Parallel()
 	rand.Seed(time.Now().Unix())
 	nodeCount := 20
 	maxFaulty := nodeCount/3 - 1
 	const prefix = "ptr_"
 	config := &ClusterConfig{
-		Count:  nodeCount,
-		Name:   "network_churn",
-		Prefix: "ptr",
+		Count:        nodeCount,
+		Name:         "network_churn",
+		Prefix:       "ptr",
+		RoundTimeout: GetPredefinedTimeout(2 * time.Second),
 	}
 
 	c := NewPBFTCluster(t, config)

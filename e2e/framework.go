@@ -254,9 +254,10 @@ func (c *Cluster) WaitForHeight(num uint64, timeout time.Duration, nodes ...[]st
 	}
 
 	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	for {
 		select {
-		case <-time.After(200 * time.Millisecond):
+		case <-time.After(300 * time.Millisecond):
 			if enough() {
 				return nil
 			}

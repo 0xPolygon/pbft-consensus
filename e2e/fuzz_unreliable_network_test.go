@@ -12,18 +12,20 @@ import (
 func TestFuzz_Unreliable_Network(t *testing.T) {
 	isFuzzEnabled(t)
 
+	t.Parallel()
 	rand.Seed(time.Now().Unix())
 	nodesCount := 20 + rand.Intn(11) // vary nodes [20,30]
 	maxFaulty := nodesCount/3 - 1
 	maxHeight := uint64(40)
 	currentHeight := uint64(0)
-	jitterMax := 500 * time.Millisecond
+	jitterMax := 300 * time.Millisecond
 	hook := newPartitionTransport(jitterMax)
 
 	config := &ClusterConfig{
-		Count:  nodesCount,
-		Name:   "network_unreliable",
-		Prefix: "prt",
+		Count:        nodesCount,
+		Name:         "network_unreliable",
+		Prefix:       "prt",
+		RoundTimeout: GetPredefinedTimeout(2 * time.Second),
 	}
 
 	c := NewPBFTCluster(t, config, hook)
