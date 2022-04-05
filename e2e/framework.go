@@ -688,6 +688,7 @@ func (v *valString) CalcProposer(round uint64) pbft.NodeID {
 	}
 
 	pick := seed % uint64(v.Len())
+
 	return (v.nodes)[pick]
 }
 
