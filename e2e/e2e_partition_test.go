@@ -1,13 +1,12 @@
 package e2e
 
 import (
+	"github.com/0xPolygon/pbft-consensus"
+	"github.com/stretchr/testify/assert"
 	"math"
 	"strconv"
 	"testing"
 	"time"
-
-	"github.com/0xPolygon/pbft-consensus"
-	"github.com/stretchr/testify/assert"
 )
 
 // Test proves existence of liveness issues which is described in
@@ -200,6 +199,67 @@ func TestE2E_Partition_LivenessIssue_Case2_SixNodes_OneFaulty(t *testing.T) {
 	}
 
 	// TODO: Temporary assertion until liveness issue is resolved (after fix is merged we need to revert back to assert.NoError(t, err))
+	assert.Error(t, err)
+}
+
+// TestE2E_Network_Stuck_Locked_Node_Dropped is a test that creates a situation with no consensus
+// one node gets dropped from a network once the proposal gets locked (A_3)
+// two nodes are locked on the same proposal (A_0 and A_1)
+// and one node is not locked (A_2).
+func TestE2E_Network_Stuck_Locked_Node_Dropped(t *testing.T) {
+	t.Parallel()
+
+	round0 := roundMetadata{
+		round: 0,
+		routingMap: map[sender]receivers{
+			"A_0": {"A_0", "A_1", "A_3", "A_2"},
+			"A_1": {"A_0", "A_1", "A_3"},
+			"A_2": {"A_0", "A_1", "A_2", "A_3"},
+		},
+	}
+	flowMap := map[uint64]roundMetadata{0: round0}
+	transport := newGenericGossipTransport()
+
+	config := &ClusterConfig{
+		Count:        4,
+		Name:         "liveness_issue",
+		Prefix:       "A",
+		RoundTimeout: GetPredefinedTimeout(2 * time.Second),
+	}
+
+	c := NewPBFTCluster(t, config, transport)
+	node3 := c.nodes["A_3"]
+	// If livenessGossipHandler returns false, message should not be transported.
+	gossipHandler := func(senderId, receiverId pbft.NodeID, msg *pbft.MessageReq) (sent bool) {
+
+		// all nodes are connected if sequence is > 1 or round > 0 for sequence 1
+		if msg.View.Sequence > 1 || (msg.View.Sequence == 1 && msg.View.Round > 0) {
+			return true
+		}
+		// stop node A_3 once it is locked
+		if node3.IsRunning() && node3.IsLocked() {
+			node3.Stop()
+		}
+		return transport.shouldGossipBasedOnMsgFlowMap(msg, senderId, receiverId)
+	}
+
+	transport.withFlowMap(flowMap).withGossipHandler(gossipHandler)
+
+	c.Start()
+	defer c.Stop()
+
+	err := c.WaitForHeight(3, 1*time.Minute, []string{"A_0", "A_1", "A_2"})
+
+	// log to check what is the end state
+	for _, n := range c.nodes {
+		proposal := n.pbft.GetProposal()
+		if proposal != nil {
+			t.Logf("Node %v, running: %v, isProposalLocked: %v, proposal data: %v\n", n.name, n.IsRunning(), n.pbft.IsLocked(), proposal)
+		} else {
+			t.Logf("Node %v, running: %v, isProposalLocked: %v, no proposal set\n", n.name, n.IsRunning(), n.pbft.IsLocked())
+		}
+	}
+	// TODO: Temporary assertion until liveness issue is fixed
 	assert.Error(t, err)
 }
 
