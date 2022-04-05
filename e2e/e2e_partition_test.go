@@ -1,12 +1,13 @@
 package e2e
 
 import (
-	"github.com/0xPolygon/pbft-consensus"
-	"github.com/stretchr/testify/assert"
 	"math"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/0xPolygon/pbft-consensus"
+	"github.com/stretchr/testify/assert"
 )
 
 // Test proves existence of liveness issues which is described in
@@ -82,7 +83,7 @@ func TestE2E_Partition_LivenessIssue_Case1_FiveNodes_OneFaulty(t *testing.T) {
 	c.Start()
 	defer c.Stop()
 
-	err := c.WaitForHeight(3, 1*time.Minute, []string{"A_0", "A_2", "A_3", "A_4"})
+	err := c.WaitForHeight(3, 5*time.Minute, []string{"A_0", "A_2", "A_3", "A_4"})
 
 	if err != nil {
 		// log to check what is the end state
@@ -96,8 +97,7 @@ func TestE2E_Partition_LivenessIssue_Case1_FiveNodes_OneFaulty(t *testing.T) {
 		}
 	}
 
-	// TODO: Temporary assertion until liveness issue is resolved (after fix is merged we need to revert back to assert.NoError(t, err))
-	assert.Error(t, err)
+	assert.NoError(t, err)
 }
 
 // Test proves existence of liveness issues which is described in
@@ -185,7 +185,7 @@ func TestE2E_Partition_LivenessIssue_Case2_SixNodes_OneFaulty(t *testing.T) {
 	c.Start()
 	defer c.Stop()
 
-	err := c.WaitForHeight(3, 1*time.Minute, []string{"A_0", "A_1", "A_3", "A_4", "A_5"})
+	err := c.WaitForHeight(3, 5*time.Minute, []string{"A_0", "A_1", "A_3", "A_4", "A_5"})
 
 	if err != nil {
 		// log to check what is the end state
@@ -199,8 +199,7 @@ func TestE2E_Partition_LivenessIssue_Case2_SixNodes_OneFaulty(t *testing.T) {
 		}
 	}
 
-	// TODO: Temporary assertion until liveness issue is resolved (after fix is merged we need to revert back to assert.NoError(t, err))
-	assert.Error(t, err)
+	assert.NoError(t, err)
 }
 
 // TestE2E_Network_Stuck_Locked_Node_Dropped is a test that creates a situation with no consensus
