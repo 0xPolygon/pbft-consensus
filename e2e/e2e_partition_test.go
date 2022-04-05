@@ -10,13 +10,15 @@ import (
 )
 
 func TestE2E_Partition_OneMajority(t *testing.T) {
+	t.Parallel()
 	const nodesCnt = 5
-	hook := newPartitionTransport(300 * time.Millisecond)
+	hook := newPartitionTransport(50 * time.Millisecond)
 
 	config := &ClusterConfig{
-		Count:  nodesCnt,
-		Name:   "majority_partition",
-		Prefix: "prt",
+		Count:        nodesCnt,
+		Name:         "majority_partition",
+		Prefix:       "prt",
+		RoundTimeout: GetPredefinedTimeout(2 * time.Second),
 	}
 
 	c := NewPBFTCluster(t, config, hook)
@@ -51,13 +53,15 @@ func TestE2E_Partition_OneMajority(t *testing.T) {
 }
 
 func TestE2E_Partition_MajorityCanValidate(t *testing.T) {
-	const nodesCnt = 7 // N=3F + 1, F = 2
-	hook := newPartitionTransport(300 * time.Millisecond)
+	t.Parallel()
+	const nodesCnt = 7 // N = 3 * F + 1, F = 2
+	hook := newPartitionTransport(50 * time.Millisecond)
 
 	config := &ClusterConfig{
-		Count:  nodesCnt,
-		Name:   "majority_partition",
-		Prefix: "prt",
+		Count:        nodesCnt,
+		Name:         "majority_partition",
+		Prefix:       "prt",
+		RoundTimeout: GetPredefinedTimeout(2 * time.Second),
 	}
 
 	c := NewPBFTCluster(t, config, hook)
@@ -81,13 +85,15 @@ func TestE2E_Partition_MajorityCanValidate(t *testing.T) {
 }
 
 func TestE2E_Partition_MajorityCantValidate(t *testing.T) {
-	const nodesCnt = 7 // N=3F + 1, F = 2
-	hook := newPartitionTransport(300 * time.Millisecond)
+	t.Parallel()
+	const nodesCnt = 7 // N = 3 * F + 1, F = 2
+	hook := newPartitionTransport(50 * time.Millisecond)
 
 	config := &ClusterConfig{
-		Count:  nodesCnt,
-		Name:   "majority_partition",
-		Prefix: "prt",
+		Count:        nodesCnt,
+		Name:         "majority_partition",
+		Prefix:       "prt",
+		RoundTimeout: GetPredefinedTimeout(2 * time.Second),
 	}
 
 	c := NewPBFTCluster(t, config, hook)
@@ -103,13 +109,15 @@ func TestE2E_Partition_MajorityCantValidate(t *testing.T) {
 }
 
 func TestE2E_Partition_BigMajorityCantValidate(t *testing.T) {
+	t.Parallel()
 	const nodesCnt = 100
-	hook := newPartitionTransport(300 * time.Millisecond)
+	hook := newPartitionTransport(50 * time.Millisecond)
 
 	config := &ClusterConfig{
-		Count:  nodesCnt,
-		Name:   "majority_partition",
-		Prefix: "prt",
+		Count:        nodesCnt,
+		Name:         "majority_partition",
+		Prefix:       "prt",
+		RoundTimeout: GetPredefinedTimeout(2 * time.Second),
 	}
 
 	c := NewPBFTCluster(t, config, hook)

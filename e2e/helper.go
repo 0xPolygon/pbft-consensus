@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/0xPolygon/pbft-consensus"
 )
 
 func generateNodeNames(from int, count int, prefix string) []string {
@@ -106,4 +108,11 @@ func GetLoggerOutput(name string, logsDir string) io.Writer {
 		loggerOutput = os.Stdout
 	}
 	return loggerOutput
+}
+
+// GetPredefinedTimeout is a closure to the function which is returning given predefined timeout.
+func GetPredefinedTimeout(timeout time.Duration) pbft.RoundTimeout {
+	return func(u uint64) time.Duration {
+		return timeout
+	}
 }

@@ -75,7 +75,7 @@ func (rmc *ReplayMessageCommand) Run(args []string) int {
 		Name:                  "fuzz_cluster",
 		Prefix:                prefix,
 		ReplayMessageNotifier: replayMessagesNotifier,
-		RoundTimeout:          roundTimeout,
+		RoundTimeout:          e2e.GetPredefinedTimeout(time.Millisecond),
 		TransportHandler:      func(to pbft.NodeID, msg *pbft.MessageReq) { replayMessagesNotifier.HandleMessage(to, msg) },
 		CreateBackend:         func() e2e.IntegrationBackend { return &ReplayBackend{messageReader: messageReader} },
 	}
@@ -124,11 +124,6 @@ func (rmc *ReplayMessageCommand) NewFlagSet() *flag.FlagSet {
 	flagSet.StringVar(&rmc.filePath, "file", "", "Full path to .flow file containing messages and timeouts to be replayed by the fuzz framework")
 
 	return flagSet
-}
-
-// roundTimeout is an implementation of roundTimeout in pbft
-func roundTimeout(round uint64) time.Duration {
-	return time.Millisecond
 }
 
 // validateInput parses arguments from CLI and validates their correctness
