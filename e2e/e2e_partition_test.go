@@ -1,12 +1,12 @@
 package e2e
 
 import (
+	"github.com/0xPolygon/pbft-consensus"
+	"github.com/stretchr/testify/assert"
 	"math"
 	"strconv"
 	"testing"
 	"time"
-
-	"github.com/stretchr/testify/assert"
 )
 
 // Test proves existence of liveness issues which is described in
@@ -207,6 +207,8 @@ func TestE2E_Partition_LivenessIssue_Case2_SixNodes_OneFaulty(t *testing.T) {
 // two nodes are locked on the same proposal (A_0 and A_1)
 // and one node is not locked (A_2).
 func TestE2E_Network_Stuck_Locked_Node_Dropped(t *testing.T) {
+	t.Parallel()
+
 	round0 := roundMetadata{
 		round: 0,
 		routingMap: map[sender]receivers{
