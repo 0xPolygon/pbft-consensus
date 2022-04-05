@@ -219,9 +219,10 @@ func TestE2E_Network_Stuck_Locked_Node_Dropped(t *testing.T) {
 	transport := newGenericGossipTransport()
 
 	config := &ClusterConfig{
-		Count:  4,
-		Name:   "liveness_issue",
-		Prefix: "A",
+		Count:        4,
+		Name:         "liveness_issue",
+		Prefix:       "A",
+		RoundTimeout: GetPredefinedTimeout(2 * time.Second),
 	}
 
 	c := NewPBFTCluster(t, config, transport)
@@ -245,8 +246,7 @@ func TestE2E_Network_Stuck_Locked_Node_Dropped(t *testing.T) {
 	c.Start()
 	defer c.Stop()
 
-	// TODO network is stuck, but it shouldn't
-	c.IsStuck(5*time.Minute, []string{"A_0", "A_1", "A_2"})
+	err := c.WaitForHeight(3, 1*time.Minute, []string{"A_0", "A_1", "A_2"})
 
 	// log to check what is the end state
 	for _, n := range c.nodes {
@@ -257,7 +257,8 @@ func TestE2E_Network_Stuck_Locked_Node_Dropped(t *testing.T) {
 			t.Logf("Node %v, running: %v, isProposalLocked: %v, no proposal set\n", n.name, n.IsRunning(), n.pbft.IsLocked())
 		}
 	}
-
+	// TODO: Temporary assertion until liveness issue is fixed
+	assert.Error(t, err)
 }
 
 func TestE2E_Partition_OneMajority(t *testing.T) {

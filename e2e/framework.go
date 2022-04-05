@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
-	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
