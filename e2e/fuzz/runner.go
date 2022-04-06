@@ -108,6 +108,8 @@ func validateNodes(c *e2e.Cluster) {
 			for _, n := range c.Nodes() {
 				log.Printf("Node: %v, running: %v, locked: %v, height: %v, proposal: %v\n", n.GetName(), n.IsRunning(), n.IsLocked(), n.GetNodeHeight(), n.GetProposal())
 			}
+
+			c.SaveState()
 			panic("Desired height not reached.")
 		}
 		log.Println("Cluster validation done.")

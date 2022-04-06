@@ -6,6 +6,24 @@ import (
 	"github.com/0xPolygon/pbft-consensus"
 )
 
+// MetaData is a struct that holds data about fuzz actions that happened and need to be saved in .flow file
+type MetaData struct {
+	DataType string `json:"actionType"`
+	Data     string `json:"data"`
+	Sequence uint64 `json:"sequence"`
+	Round    uint64 `json:"round"`
+}
+
+// NewMetaData creates a new MetaData object
+func NewMetaData(dataType, data string, sequence, round uint64) *MetaData {
+	return &MetaData{
+		DataType: dataType,
+		Data:     data,
+		Sequence: sequence,
+		Round:    round,
+	}
+}
+
 // ReplayMessage is a struct that represents a single json object in .flow file
 type ReplayMessage struct {
 	To      pbft.NodeID      `json:"to"`
@@ -31,10 +49,10 @@ func NewReplayTimeoutMessage(to pbft.NodeID, msgType pbft.MsgType, view *pbft.Vi
 	}
 }
 
-// ConvertToByteArrays converts ReplayMessage slice to JSON representation and return it back as slice of byte arrays
-func ConvertToByteArrays(messages []*ReplayMessage) ([][]byte, error) {
+// ConvertToByteArrays is a generic method that converts provided slice to JSON representation and returns it back as slice of byte arrays
+func ConvertToByteArrays(items []interface{}) ([][]byte, error) {
 	var allRawMessages [][]byte
-	for _, message := range messages {
+	for _, message := range items {
 		currentRawMessage, err := json.Marshal(message)
 		if err != nil {
 			return allRawMessages, err

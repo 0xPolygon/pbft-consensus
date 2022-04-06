@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/0xPolygon/pbft-consensus"
@@ -18,18 +17,18 @@ import (
 type ReplayMessageCommand struct {
 	UI cli.Ui
 
-	filePath string
+	filesDirectory string
 }
 
 // Help implements the cli.Command interface
-func (fc *ReplayMessageCommand) Help() string {
+func (rmc *ReplayMessageCommand) Help() string {
 	return `Runs the message and timeouts replay for analysis and testing purposes based on provided .flow file.
 	
-	Usage: replay-messages -file={fullPathToFlowFile}
+	Usage: replay-messages -messagesFile={fullPathToFlowFile} -metaDataFile={fullPathToFlowFile}
 	
 	Options:
 	
-	-file - Full path to .flow file containing messages and timeouts to be replayed by the fuzz framework`
+	-filesDirectory - Directory containing .flow files for messages and actions meta data to be replayed by the fuzz framework`
 }
 
 // Synopsis implements the cli.Command interface
@@ -45,17 +44,16 @@ func (rmc *ReplayMessageCommand) Run(args []string) int {
 		return 1
 	}
 
-	messageReader := &replayMessageReader{
-		msgProcessingDone: make(chan string),
-	}
+	messageReader := &replayMessageReader{}
+	nodeExecutionHandler := NewNodeExecutionHandler()
 
-	err = messageReader.openFile(rmc.filePath)
+	err = messageReader.openFiles(rmc.filesDirectory)
 	if err != nil {
 		rmc.UI.Error(err.Error())
 		return 1
 	}
 
-	nodeNames, err := messageReader.readNodeMetaData()
+	nodeNames, err := messageReader.readNodeMetaData(nodeExecutionHandler)
 	if err != nil {
 		rmc.UI.Error(err.Error())
 		return 1
@@ -67,47 +65,27 @@ func (rmc *ReplayMessageCommand) Run(args []string) int {
 		prefix = (nodeNames[0])[:i]
 	}
 
-	replayMessagesNotifier := NewReplayMessagesNotifierWithReader(messageReader)
+	replayMessagesNotifier := NewReplayMessagesNotifierForReplay(nodeExecutionHandler)
 
 	nodesCount := len(nodeNames)
+	var cluster *e2e.Cluster
 	config := &e2e.ClusterConfig{
 		Count:                 nodesCount,
 		Name:                  "fuzz_cluster",
 		Prefix:                prefix,
 		ReplayMessageNotifier: replayMessagesNotifier,
 		RoundTimeout:          e2e.GetPredefinedTimeout(time.Millisecond),
-		TransportHandler:      func(to pbft.NodeID, msg *pbft.MessageReq) { replayMessagesNotifier.HandleMessage(to, msg) },
+		TransportHandler:      func(to pbft.NodeID, msg *pbft.MessageReq) { /* we do not gossip messages in replay */ },
 		CreateBackend:         func() e2e.IntegrationBackend { return &ReplayBackend{messageReader: messageReader} },
 	}
 
-	cluster := e2e.NewPBFTCluster(nil, config)
+	cluster = e2e.NewPBFTCluster(nil, config)
 
-	messageReader.readMessages(cluster)
+	messageReader.readMessages(cluster, nodeExecutionHandler)
 	messageReader.closeFile()
 
-	var wg sync.WaitGroup
-	wg.Add(1)
-
-	nodesDone := make(map[string]bool, nodesCount)
-	go func() {
-		for {
-			select {
-			case nodeDone := <-messageReader.msgProcessingDone:
-				nodesDone[nodeDone] = true
-				cluster.StopNode(nodeDone)
-				if len(nodesDone) == nodesCount {
-					wg.Done()
-					return
-				}
-			default:
-				continue
-			}
-		}
-	}()
-
-	cluster.Start()
-	wg.Wait()
-	cluster.Stop()
+	nodeExecutionHandler.startActionSimulation(cluster)
+	nodeExecutionHandler.stopActionSimulation(cluster)
 
 	rmc.UI.Info("Done with execution")
 	if err = replayMessagesNotifier.CloseFile(); err != nil {
@@ -121,7 +99,7 @@ func (rmc *ReplayMessageCommand) Run(args []string) int {
 // NewFlagSet implements the FuzzCLICommand interface and creates a new flag set for command arguments
 func (rmc *ReplayMessageCommand) NewFlagSet() *flag.FlagSet {
 	flagSet := flag.NewFlagSet("replay-messages", flag.ContinueOnError)
-	flagSet.StringVar(&rmc.filePath, "file", "", "Full path to .flow file containing messages and timeouts to be replayed by the fuzz framework")
+	flagSet.StringVar(&rmc.filesDirectory, "filesDirectory", "", "Directory containing .flow files for messages and actions meta data to be replayed by the fuzz framework")
 
 	return flagSet
 }
@@ -134,10 +112,11 @@ func (rmc *ReplayMessageCommand) validateInput(args []string) error {
 		return err
 	}
 
-	if rmc.filePath == "" {
-		err = errors.New("provided file path is empty")
+	if rmc.filesDirectory == "" {
+		err = errors.New("provided files directory is empty")
 		return err
 	}
+
 	return nil
 }
 

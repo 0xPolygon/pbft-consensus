@@ -8,6 +8,12 @@ import (
 	"github.com/0xPolygon/pbft-consensus"
 )
 
+const (
+	DropNode       string = "DropNode"
+	RevertDropNode string = "RevertDropNode"
+	LastSequence   string = "LastSequence"
+)
+
 type RevertFunc func()
 
 type FunctionalAction interface {
@@ -35,10 +41,13 @@ func (dn *DropNodeAction) Apply(c *Cluster) RevertFunc {
 	log.Printf("Dropping node: '%s'.", nodeToStop)
 
 	c.StopNode(nodeToStop.name)
+	view := nodeToStop.GetCurrentView()
+	c.replayMessageNotifier.HandleAction(DropNode, nodeToStop.name, view.Sequence, view.Round)
 
 	return func() {
 		log.Printf("Reverting stopped node %v\n", nodeToStop.name)
 		nodeToStop.Start()
+		c.replayMessageNotifier.HandleAction(RevertDropNode, nodeToStop.name, c.GetMaxHeight()+1, 0)
 	}
 }
 
