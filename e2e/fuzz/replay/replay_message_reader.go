@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/0xPolygon/pbft-consensus"
@@ -26,8 +27,14 @@ type replayMessageReader struct {
 }
 
 // openFiles opens the .flow files on provided location
-func (r *replayMessageReader) openFiles(messagesFilePath, metaDataFilePath string) error {
-	_, err := os.Stat(messagesFilePath)
+func (r *replayMessageReader) openFiles(filesDirectory string) error {
+	_, err := os.Stat(filesDirectory)
+	if err != nil {
+		return err
+	}
+
+	messagesFilePath := filepath.Join(filesDirectory, fmt.Sprintf("%v.flow", MessagesFilePrefix))
+	_, err = os.Stat(messagesFilePath)
 	if err != nil {
 		return err
 	}
@@ -37,6 +44,7 @@ func (r *replayMessageReader) openFiles(messagesFilePath, metaDataFilePath strin
 		return err
 	}
 
+	metaDataFilePath := filepath.Join(filesDirectory, fmt.Sprintf("%v.flow", MetaDataFilePrefix))
 	_, err = os.Stat(metaDataFilePath)
 	if err != nil {
 		return err

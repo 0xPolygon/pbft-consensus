@@ -17,8 +17,7 @@ import (
 type ReplayMessageCommand struct {
 	UI cli.Ui
 
-	messagesFilePath string
-	metaDataFilePath string
+	filesDirectory string
 }
 
 // Help implements the cli.Command interface
@@ -29,8 +28,7 @@ func (rmc *ReplayMessageCommand) Help() string {
 	
 	Options:
 	
-	-messagesFile - Full path to .flow file containing messages and timeouts to be replayed by the fuzz framework
-	-metaDataFile - Full path to .flow file containing meta data for nodes and fuzz actions`
+	-filesDirectory - Directory containing .flow files for messages and actions meta data to be replayed by the fuzz framework`
 }
 
 // Synopsis implements the cli.Command interface
@@ -49,7 +47,7 @@ func (rmc *ReplayMessageCommand) Run(args []string) int {
 	messageReader := &replayMessageReader{}
 	nodeExecutionHandler := NewNodeExecutionHandler()
 
-	err = messageReader.openFiles(rmc.messagesFilePath, rmc.metaDataFilePath)
+	err = messageReader.openFiles(rmc.filesDirectory)
 	if err != nil {
 		rmc.UI.Error(err.Error())
 		return 1
@@ -101,8 +99,7 @@ func (rmc *ReplayMessageCommand) Run(args []string) int {
 // NewFlagSet implements the FuzzCLICommand interface and creates a new flag set for command arguments
 func (rmc *ReplayMessageCommand) NewFlagSet() *flag.FlagSet {
 	flagSet := flag.NewFlagSet("replay-messages", flag.ContinueOnError)
-	flagSet.StringVar(&rmc.messagesFilePath, "messagesFile", "", "Full path to .flow file containing messages and timeouts to be replayed by the fuzz framework")
-	flagSet.StringVar(&rmc.metaDataFilePath, "metaDataFile", "", "Full path to .flow file containing meta data for nodes and fuzz actions")
+	flagSet.StringVar(&rmc.filesDirectory, "filesDirectory", "", "Directory containing .flow files for messages and actions meta data to be replayed by the fuzz framework")
 
 	return flagSet
 }
@@ -115,13 +112,8 @@ func (rmc *ReplayMessageCommand) validateInput(args []string) error {
 		return err
 	}
 
-	if rmc.messagesFilePath == "" {
-		err = errors.New("provided messages file path is empty")
-		return err
-	}
-
-	if rmc.messagesFilePath == "" {
-		err = errors.New("provided meta data file path is empty")
+	if rmc.filesDirectory == "" {
+		err = errors.New("provided files directory is empty")
 		return err
 	}
 

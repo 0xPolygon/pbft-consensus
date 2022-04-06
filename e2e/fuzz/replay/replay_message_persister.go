@@ -168,23 +168,24 @@ func (r *replayMessagePersister) writeToFile(data [][]byte, bufWriter *bufio.Wri
 
 // createFile creates a .flow file to save messages and timeouts on the predifined location
 func (r *replayMessagePersister) createFile(filePrefix string) (*os.File, error) {
-	if _, err := os.Stat(directoryPath); os.IsNotExist(err) {
-		err := os.Mkdir(directoryPath, 0777)
+	if r.timestamp == "" {
+		r.timestamp = time.Now().Format(time.RFC3339)
+	}
+
+	directory := fmt.Sprintf("%v_%v", directoryPath, r.timestamp)
+	if _, err := os.Stat(directory); os.IsNotExist(err) {
+		err := os.Mkdir(directory, 0777)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	path, err := filepath.Abs(directoryPath)
+	path, err := filepath.Abs(directory)
 	if err != nil {
 		return nil, err
 	}
 
-	if r.timestamp == "" {
-		r.timestamp = time.Now().Format(time.RFC3339)
-	}
-
-	file, err := os.OpenFile(filepath.Join(path, fmt.Sprintf("%v_%v.flow", filePrefix, r.timestamp)), os.O_RDWR|os.O_APPEND|os.O_CREATE, 0660)
+	file, err := os.OpenFile(filepath.Join(path, fmt.Sprintf("%v.flow", filePrefix)), os.O_RDWR|os.O_APPEND|os.O_CREATE, 0660)
 	if err != nil {
 		return nil, err
 	}

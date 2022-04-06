@@ -12,7 +12,6 @@ import (
 const (
 	DropNode       string = "DropNode"
 	RevertDropNode string = "RevertDropNode"
-	Partition      string = "Partition"
 	LastSequence   string = "LastSequence"
 )
 
