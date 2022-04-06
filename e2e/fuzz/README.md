@@ -35,9 +35,9 @@ Replay takes the provided `messages.flow` and `metaData.flow` files, creates a c
 
 To run replay messages, run the following command:
 
-`go run ./e2e/fuzz/cmd/main.go replay-messages -messagesFile={fullPathToMessagesFile} -metaDataFile={fullPathToMetaDataFile}`
+`go run ./e2e/fuzz/cmd/main.go replay-messages -filesDirectory={directoryWhereFlowFilesAreStored}`
 
-e.g., `go run ./e2e/fuzz/cmd/main.go replay-messages -messagesFile=../SavedData/messages.flow -metaDataFile=../SavedData/metaData.flow`
+e.g., `go run ./e2e/fuzz/cmd/main.go replay-messages -filesDirectory=../SavedData`
 
 **NOTE**: Replay does not save .flow files on its execution.
 
