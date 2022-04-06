@@ -437,12 +437,7 @@ func (p *Pbft) shouldRelock(preprepareMsg *MessageReq) bool {
 	}
 
 	commitMsgsFound := 0
-	commitMsgsQueue := p.msgQueue.getQueue(msgToState(MessageReq_Commit))
-	if commitMsgsQueue == nil {
-		p.logger.Printf("[ERROR] Failed to resolve message queue for %s message type.", MessageReq_Commit)
-		return false
-	}
-	commitMsgsQueue.Iterator(func(currentMsg *MessageReq) {
+	err := p.msgQueue.iterator(msgToState(MessageReq_Commit), func(currentMsg *MessageReq) {
 		// Logical condition below decomposes to the following.
 		// Count messages that have following properties:
 		// 1. message is from the current round (and sequence),
@@ -456,6 +451,11 @@ func (p *Pbft) shouldRelock(preprepareMsg *MessageReq) bool {
 			commitMsgsFound++
 		}
 	})
+	if err != nil {
+		p.logger.Printf("[ERROR] Iterator failed. Reason: %v", err)
+		return false
+	}
+
 	// 2*F Commit messages (+1 commit message will correspond to the current non-proposer node COMMIT message)
 	return commitMsgsFound >= p.state.NumValid()
 }
