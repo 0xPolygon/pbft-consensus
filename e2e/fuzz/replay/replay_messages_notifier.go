@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/0xPolygon/pbft-consensus"
-	"github.com/0xPolygon/pbft-consensus/e2e"
 )
 
 const (
@@ -34,8 +33,8 @@ func NewReplayMessagesNotifierForReplay(nodeExecutionHandler *replayNodeExecutio
 }
 
 // SaveMetaData saves node meta data to .flow file
-func (r *ReplayMessagesNotifier) SaveMetaData(nodeNames []string, lastSequences []*e2e.MetaData) error {
-	return r.messagePersister.saveMetaData(nodeNames, lastSequences)
+func (r *ReplayMessagesNotifier) SaveMetaData(nodeNames []string) error {
+	return r.messagePersister.saveMetaData(nodeNames)
 }
 
 // SaveState saves currently cached messages and timeouts to .flow file
@@ -60,6 +59,7 @@ func (r *ReplayMessagesNotifier) ReadNextMessage(p *pbft.Pbft, timeoutChannel ch
 	if r.nodeExectionHandler != nil {
 		validatorId := p.GetValidatorId()
 		if msg != nil {
+			r.nodeExectionHandler.checkForNodesToBeRestarted(msg.View.Sequence)
 			if r.nodeExectionHandler.checkIsTimeout(validatorId, msg, timeoutChannel) {
 				return nil, nil
 			}
@@ -83,6 +83,6 @@ func (r *ReplayMessagesNotifier) CreateTimeoutChannel(timeout time.Duration) cha
 }
 
 // HandleAction is an implementation of ReplayMessageNotifier interface
-func (r *ReplayMessagesNotifier) HandleAction(action *e2e.MetaData) {
-	r.messagePersister.addAction(action)
+func (r *ReplayMessagesNotifier) HandleAction(actionType, data string, sequence, round uint64) {
+	r.messagePersister.addAction(NewMetaData(actionType, data, sequence, round))
 }

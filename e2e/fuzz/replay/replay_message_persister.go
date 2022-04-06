@@ -10,17 +10,15 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/0xPolygon/pbft-consensus/e2e"
 )
 
 const directoryPath = "../SavedState"
 
 // messagePersister is an interface for storing messages, node and action meta data to .flow files
 type messagePersister interface {
-	saveMetaData(nodeNames []string, lastSequences []*e2e.MetaData) error
+	saveMetaData(nodeNames []string) error
 	saveCachedMessages() error
-	addAction(action *e2e.MetaData)
+	addAction(action *MetaData)
 	addMessage(message *ReplayMessage)
 	closeFile() error
 }
@@ -28,11 +26,11 @@ type messagePersister interface {
 // defaultMessagePersister is a default implementation of messagePersister interface
 type defaultMessagePersister struct{}
 
-func (d *defaultMessagePersister) saveMetaData(nodeNames []string, lastSequences []*e2e.MetaData) error {
+func (d *defaultMessagePersister) saveMetaData(nodeNames []string) error {
 	return nil
 }
 func (d *defaultMessagePersister) saveCachedMessages() error         { return nil }
-func (d *defaultMessagePersister) addAction(action *e2e.MetaData)    {}
+func (d *defaultMessagePersister) addAction(action *MetaData)        {}
 func (d *defaultMessagePersister) addMessage(message *ReplayMessage) {}
 func (d *defaultMessagePersister) closeFile() error                  { return nil }
 
@@ -40,14 +38,14 @@ func (d *defaultMessagePersister) closeFile() error                  { return ni
 type replayMessagePersister struct {
 	lock         sync.Mutex
 	timestamp    string
-	messages     []*ReplayMessage
+	messages     []interface{}
 	messagesFile *os.File
 	metaDataFile *os.File
-	actions      []*e2e.MetaData
+	actions      []interface{}
 }
 
 // saveMetaData saves node meta data to .flow file
-func (r *replayMessagePersister) saveMetaData(nodeNames []string, lastSequences []*e2e.MetaData) error {
+func (r *replayMessagePersister) saveMetaData(nodeNames []string) error {
 	var err error
 	var file *os.File
 	if r.metaDataFile == nil {
@@ -69,13 +67,6 @@ func (r *replayMessagePersister) saveMetaData(nodeNames []string, lastSequences 
 	}
 
 	bufWriter.Write([]byte("\n"))
-
-	raw, err := e2e.ConvertActionsToByteArrays(lastSequences)
-	if err != nil {
-		log.Printf("[ERROR] An error occurred while converting last sequences to byte arrays")
-	} else {
-		r.writeToFile(raw, bufWriter)
-	}
 
 	r.saveActions(bufWriter)
 
@@ -104,7 +95,7 @@ func (r *replayMessagePersister) saveCachedMessages() error {
 }
 
 // addAction adds an action that happened in fuzz to cache that will be saved to .flow file on cluster Stop
-func (r *replayMessagePersister) addAction(action *e2e.MetaData) {
+func (r *replayMessagePersister) addAction(action *MetaData) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
@@ -120,7 +111,7 @@ func (r *replayMessagePersister) addMessage(message *ReplayMessage) {
 
 // saveMessages saves ReplayMessages to the JSON file within the pre-defined directory.
 func (r *replayMessagePersister) saveMessages() error {
-	rawMessages, err := ConvertMessagesToByteArrays(r.messages)
+	rawMessages, err := ConvertToByteArrays(r.messages)
 	if err != nil {
 		return err
 	}
@@ -134,7 +125,7 @@ func (r *replayMessagePersister) saveMessages() error {
 
 // saveActions saves cached actions to .flow file
 func (r *replayMessagePersister) saveActions(bufWritter *bufio.Writer) {
-	rawActions, err := e2e.ConvertActionsToByteArrays(r.actions)
+	rawActions, err := ConvertToByteArrays(r.actions)
 	if err != nil {
 		log.Printf("[ERROR] An error occurred while converting actions to byte arrays")
 		return

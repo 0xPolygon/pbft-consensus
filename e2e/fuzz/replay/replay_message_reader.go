@@ -97,17 +97,17 @@ func (r *replayMessageReader) readNodeMetaData(nodeExecutionHandler *replayNodeE
 		return nil, err
 	}
 
-	nodeExecutionHandler.dropNodeActions = make(map[pbft.NodeID]map[uint64]*e2e.MetaData, nodeCount)
-	nodeExecutionHandler.revertDropNodeActions = make(map[pbft.NodeID]map[uint64]*e2e.MetaData, nodeCount)
-	nodeExecutionHandler.lastSequencesByNode = make(map[pbft.NodeID]*e2e.MetaData, nodeCount)
+	nodeExecutionHandler.dropNodeActions = make(map[pbft.NodeID]map[uint64]*MetaData, nodeCount)
+	nodeExecutionHandler.revertDropNodeActions = make(map[pbft.NodeID]map[uint64]*MetaData, nodeCount)
+	nodeExecutionHandler.lastSequencesByNode = make(map[pbft.NodeID]*MetaData, nodeCount)
 
 	for _, name := range nodeNames {
-		nodeExecutionHandler.dropNodeActions[pbft.NodeID(name)] = make(map[uint64]*e2e.MetaData)
-		nodeExecutionHandler.revertDropNodeActions[pbft.NodeID(name)] = make(map[uint64]*e2e.MetaData)
+		nodeExecutionHandler.dropNodeActions[pbft.NodeID(name)] = make(map[uint64]*MetaData)
+		nodeExecutionHandler.revertDropNodeActions[pbft.NodeID(name)] = make(map[uint64]*MetaData)
 	}
 
 	for scanner.Scan() {
-		var action *e2e.MetaData
+		var action *MetaData
 		if err := json.Unmarshal(scanner.Bytes(), &action); err != nil {
 			log.Printf("[ERROR] Error happened on unmarshalling action in .flow file. Reason: %v", err)
 			return nodeNames, err

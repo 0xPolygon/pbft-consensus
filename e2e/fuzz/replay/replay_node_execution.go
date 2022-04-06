@@ -14,9 +14,9 @@ import (
 type replayNodeExecutionHandler struct {
 	actionLock            sync.Mutex
 	nodesExecutionLock    sync.Mutex
-	lastSequencesByNode   map[pbft.NodeID]*e2e.MetaData
-	dropNodeActions       map[pbft.NodeID]map[uint64]*e2e.MetaData
-	revertDropNodeActions map[pbft.NodeID]map[uint64]*e2e.MetaData
+	lastSequencesByNode   map[pbft.NodeID]*MetaData
+	dropNodeActions       map[pbft.NodeID]map[uint64]*MetaData
+	revertDropNodeActions map[pbft.NodeID]map[uint64]*MetaData
 	nodesDoneWithExection map[pbft.NodeID]bool
 	dropedNodes           map[pbft.NodeID]uint64
 	cluster               *e2e.Cluster
@@ -53,7 +53,7 @@ func (r *replayNodeExecutionHandler) startActionSimulation(cluster *e2e.Cluster)
 				if maxHeight < currentMaxHeight {
 					maxHeight = currentMaxHeight
 				}
-				r.checkForNodesToBeRestarted(maxHeight, cluster)
+				r.checkForNodesToBeRestarted(maxHeight)
 			case nodeDone := <-r.msgExecutionDone:
 				cluster.StopNode(nodeDone)
 				stoppedNodes[nodeDone] = true
@@ -97,15 +97,15 @@ func (r *replayNodeExecutionHandler) checkIfDoneWithExecution(validatorId pbft.N
 }
 
 // checkForNodesToBeRestarted checks if any node need to be restarted when a certain sequence is reached
-func (r *replayNodeExecutionHandler) checkForNodesToBeRestarted(sequence uint64, cluster *e2e.Cluster) {
+func (r *replayNodeExecutionHandler) checkForNodesToBeRestarted(sequence uint64) {
 	r.actionLock.Lock()
 	defer r.actionLock.Unlock()
 
-	for node, sequenceDroped := range r.dropedNodes {
-		if _, hasSequence := r.revertDropNodeActions[node][sequence]; hasSequence && sequence >= sequenceDroped {
-			log.Printf("[REPLAY] Restarting node: %v in sequence: %v.\n", node, sequence)
+	for node, dropedSequence := range r.dropedNodes {
+		if _, hasSequence := r.revertDropNodeActions[node][sequence]; hasSequence && sequence >= dropedSequence {
+			log.Printf("[REPLAY] Restarting node: %v in sequence: %v.", node, sequence)
 			delete(r.dropedNodes, node)
-			cluster.StartNode(string(node))
+			r.cluster.StartNode(string(node))
 		}
 	}
 }
@@ -114,7 +114,7 @@ func (r *replayNodeExecutionHandler) checkForNodesToBeRestarted(sequence uint64,
 func (r *replayNodeExecutionHandler) checkIsTimeout(validatorId pbft.NodeID, msg *pbft.MessageReq, timeoutChannel chan time.Time) bool {
 	if isTimeoutMessage(msg) {
 		go func() {
-			log.Printf("[REPLAY] A timeout occurred in node: %v, sequence: %v, round: %v.\n", validatorId, msg.View.Sequence, msg.View.Round)
+			log.Printf("[REPLAY] A timeout occurred in node: %v, sequence: %v, round: %v.", validatorId, msg.View.Sequence, msg.View.Round)
 			timeoutChannel <- time.Now()
 		}()
 		return true
@@ -126,7 +126,7 @@ func (r *replayNodeExecutionHandler) checkIsTimeout(validatorId pbft.NodeID, msg
 // checkIfShouldDrop checks if node should be dropped or stopped in given sequence and round
 func (r *replayNodeExecutionHandler) checkIfShouldDrop(validatorId pbft.NodeID, view *pbft.View, timeoutChannel chan time.Time) {
 	if _, exists := r.dropNodeActions[validatorId][view.Sequence]; exists {
-		log.Printf("[REPLAY] Dropping node: %v in sequence: %v.\n", validatorId, view.Sequence)
+		log.Printf("[REPLAY] Dropping node: %v in sequence: %v.", validatorId, view.Sequence)
 		r.nodesExecutionLock.Lock()
 		defer r.nodesExecutionLock.Unlock()
 

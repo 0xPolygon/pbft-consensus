@@ -756,7 +756,7 @@ func (p *Pbft) GetProposal() *Proposal {
 	return p.state.proposal
 }
 
-// GetCurrentView returnes current view
+// GetCurrentView returns current view
 func (p *Pbft) GetCurrentView() *View {
 	return p.state.view.Copy()
 }

@@ -419,19 +419,13 @@ func (c *Cluster) saveMetaData() {
 	defer c.lock.Unlock()
 
 	var nodeNames []string
-	var lastSequences []*MetaData
 	for name, node := range c.GetNodesMap() {
 		nodeNames = append(nodeNames, name)
 		view := node.GetCurrentView()
-		lastSequences = append(lastSequences, &MetaData{
-			DataType: LastSequence,
-			Data:     name,
-			Sequence: view.Sequence,
-			Round:    view.Round,
-		})
+		c.replayMessageNotifier.HandleAction(LastSequence, name, view.Sequence, view.Round)
 	}
 
-	err := c.replayMessageNotifier.SaveMetaData(nodeNames, lastSequences)
+	err := c.replayMessageNotifier.SaveMetaData(nodeNames)
 	if err != nil {
 		log.Printf("[WARNING] Could not write node meta data to replay messages file. Reason: %v", err)
 	}
@@ -753,10 +747,10 @@ func (v *valString) Len() int {
 // ReplayNotifier is an interface that expands the StateNotifier with additional methods for saving and loading replay messages
 type ReplayNotifier interface {
 	pbft.StateNotifier
-	SaveMetaData(nodeNames []string, metaData []*MetaData) error
+	SaveMetaData(nodeNames []string) error
 	SaveState() error
 	HandleMessage(to pbft.NodeID, message *pbft.MessageReq)
-	HandleAction(action *MetaData)
+	HandleAction(actionType, data string, sequence, round uint64)
 }
 
 // DefaultReplayNotifier is a null object implementation of ReplayNotifier interface
@@ -765,7 +759,7 @@ type DefaultReplayNotifier struct {
 }
 
 // SaveMetaData is an implementation of ReplayNotifier interface
-func (n *DefaultReplayNotifier) SaveMetaData(nodeNames []string, metaData []*MetaData) error {
+func (n *DefaultReplayNotifier) SaveMetaData(nodeNames []string) error {
 	return nil
 }
 
@@ -776,4 +770,4 @@ func (n *DefaultReplayNotifier) SaveState() error { return nil }
 func (n *DefaultReplayNotifier) HandleMessage(to pbft.NodeID, message *pbft.MessageReq) {}
 
 // HandleAction is an implementation of ReplayNotifier interface
-func (n *DefaultReplayNotifier) HandleAction(action *MetaData) {}
+func (n *DefaultReplayNotifier) HandleAction(actionType, data string, sequence, round uint64) {}
