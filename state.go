@@ -210,13 +210,20 @@ type currentState struct {
 	// Locked signals whether the proposal is locked
 	locked bool
 
+	// timeout tracks the time left for this round
+	timeout *time.Timer
+
 	// Describes whether there has been an error during the computation
 	err error
 }
 
 // newState creates a new state with reset round messages
 func newState() *currentState {
-	c := &currentState{}
+	c := &currentState{
+		// this is a default value, it will get reset
+		// at every iteration
+		timeout: time.NewTimer(0),
+	}
 	c.resetRoundMsgs()
 
 	return c
