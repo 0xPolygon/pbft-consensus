@@ -282,7 +282,7 @@ func (p *Pbft) setRound(round uint64) {
 
 	// reset current timeout and start a new one
 	timeout := p.roundTimeout(round)
-	p.state.timeout.Reset(timeout)
+	p.state.timeout = time.NewTimer(timeout)
 }
 
 // runAcceptState runs the Accept state loop
