@@ -322,7 +322,7 @@ func TestE2E_Liveness_Issue_3Nodes(t *testing.T) {
 	c.Start()
 	defer c.Stop()
 
-	err := c.WaitForHeight(5, 1*time.Minute)
+	err := c.WaitForHeight(5, 1*time.Minute, []string{"A_2", "A_3"})
 
 	for _, n := range c.Nodes() {
 		log.Printf("Node: %v, running: %v, locked: %v, height: %v, proposal: %v\n", n.GetName(), n.IsRunning(), n.IsLocked(), n.GetNodeHeight(), n.GetProposal())
