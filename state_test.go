@@ -321,10 +321,11 @@ func TestState_getCommittedSeals(t *testing.T) {
 	committedSeals := s.getCommittedSeals()
 
 	assert.Len(t, committedSeals, 3)
-	processed := map[NodeID]bool{}
+	processed := map[NodeID]struct{}{}
 	for _, commSeal := range committedSeals {
-		assert.False(t, processed[commSeal.NodeID]) // all entries in committedSeals should be different
-		processed[commSeal.NodeID] = true
+		_, exists := processed[commSeal.NodeID]
+		assert.False(t, exists) // all entries in committedSeals should be different
+		processed[commSeal.NodeID] = struct{}{}
 		el := s.committed[commSeal.NodeID]
 		assert.NotNil(t, el)                                     // there should be entry in currentState.committed...
 		assert.True(t, bytes.Equal(commSeal.Signature, el.Seal)) // ...and signatures should match

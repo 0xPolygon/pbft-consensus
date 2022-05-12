@@ -246,7 +246,7 @@ func (c *currentState) GetSequence() uint64 {
 }
 
 func (c *currentState) getCommittedSeals() []CommittedSeal {
-	var committedSeals []CommittedSeal
+	committedSeals := make([]CommittedSeal, 0, len(c.committed))
 	for nodeId, commit := range c.committed {
 		committedSeals = append(committedSeals, CommittedSeal{Signature: commit.Seal, NodeID: nodeId})
 	}
