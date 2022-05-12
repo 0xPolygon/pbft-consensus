@@ -181,6 +181,14 @@ func (p *Proposal) Copy() *Proposal {
 	return pp
 }
 
+type CommitedSeal struct {
+	// Signature value
+	Signature []byte
+
+	// Node that signed
+	NodeID NodeID
+}
+
 // currentState defines the current state object in PBFT
 type currentState struct {
 	// validators represent the current validator set
@@ -237,10 +245,10 @@ func (c *currentState) GetSequence() uint64 {
 	return c.view.Sequence
 }
 
-func (c *currentState) getCommittedSeals() [][]byte {
-	committedSeals := [][]byte{}
-	for _, commit := range c.committed {
-		committedSeals = append(committedSeals, commit.Seal)
+func (c *currentState) getCommittedSeals() []CommitedSeal {
+	var committedSeals []CommitedSeal
+	for nodeId, commit := range c.committed {
+		committedSeals = append(committedSeals, CommitedSeal{Signature: commit.Seal, NodeID: nodeId})
 	}
 	return committedSeals
 }
