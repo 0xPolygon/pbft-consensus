@@ -181,7 +181,7 @@ func (p *Proposal) Copy() *Proposal {
 	return pp
 }
 
-type CommitedSeal struct {
+type CommittedSeal struct {
 	// Signature value
 	Signature []byte
 
@@ -245,10 +245,10 @@ func (c *currentState) GetSequence() uint64 {
 	return c.view.Sequence
 }
 
-func (c *currentState) getCommittedSeals() []CommitedSeal {
-	var committedSeals []CommitedSeal
+func (c *currentState) getCommittedSeals() []CommittedSeal {
+	var committedSeals []CommittedSeal
 	for nodeId, commit := range c.committed {
-		committedSeals = append(committedSeals, CommitedSeal{Signature: commit.Seal, NodeID: nodeId})
+		committedSeals = append(committedSeals, CommittedSeal{Signature: commit.Seal, NodeID: nodeId})
 	}
 	return committedSeals
 }
