@@ -1,12 +1,12 @@
 package pbft
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	crand "crypto/rand"
 	"fmt"
 	mrand "math/rand"
-	"reflect"
 	"strconv"
 	"testing"
 	"time"
@@ -310,35 +310,27 @@ func TestState_GetSequence(t *testing.T) {
 
 func TestState_getCommittedSeals(t *testing.T) {
 	pool := newTesterAccountPool()
-	pool.add("A", "B", "C", "D")
+	pool.add("A", "B", "C", "D", "E")
 
 	s := newState()
 	s.validators = pool.validatorSet()
 
 	s.addCommitted(createMessage("A", MessageReq_Commit))
 	s.addCommitted(createMessage("B", MessageReq_Commit))
+	s.addCommitted(createMessage("C", MessageReq_Commit))
 	committedSeals := s.getCommittedSeals()
 
-	assert.Len(t, committedSeals, 2)
-	assert.True(t, &committedSeals[0] != &s.committed["A"].Seal)
-	foundSeal := false
-	for _, seal := range committedSeals {
-		if reflect.DeepEqual(seal, s.committed["A"].Seal) {
-			foundSeal = true
-		}
+	assert.Len(t, committedSeals, 3)
+	processed := map[NodeID]struct{}{}
+	for _, commSeal := range committedSeals {
+		_, exists := processed[commSeal.NodeID]
+		assert.False(t, exists) // all entries in committedSeals should be different
+		processed[commSeal.NodeID] = struct{}{}
+		el := s.committed[commSeal.NodeID]
+		assert.NotNil(t, el)                                     // there should be entry in currentState.committed...
+		assert.True(t, bytes.Equal(commSeal.Signature, el.Seal)) // ...and signatures should match
+		assert.True(t, &commSeal.Signature != &el.Seal)
 	}
-	assert.True(t, &committedSeals[0] != &s.committed["A"].Seal)
-	assert.True(t, foundSeal)
-
-	foundSeal = false
-	for _, seal := range committedSeals {
-		if reflect.DeepEqual(seal, s.committed["B"].Seal) {
-			foundSeal = true
-		}
-	}
-
-	assert.True(t, &committedSeals[1] != &s.committed["B"].Seal)
-	assert.True(t, foundSeal)
 }
 
 func TestMsgType_ToString(t *testing.T) {
