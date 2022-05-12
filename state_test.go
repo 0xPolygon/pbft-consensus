@@ -1,12 +1,12 @@
 package pbft
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	crand "crypto/rand"
 	"fmt"
 	mrand "math/rand"
-	"reflect"
 	"strconv"
 	"testing"
 	"time"
@@ -326,8 +326,8 @@ func TestState_getCommittedSeals(t *testing.T) {
 		assert.False(t, processed[commSeal.NodeID]) // all entries in committedSeals should be different
 		processed[commSeal.NodeID] = true
 		el := s.committed[commSeal.NodeID]
-		assert.NotNil(t, el)                                           // there should be entry in currentState.committed...
-		assert.True(t, reflect.DeepEqual(commSeal.Signature, el.Seal)) // ...and there signature should match
+		assert.NotNil(t, el)                                     // there should be entry in currentState.committed...
+		assert.True(t, bytes.Equal(commSeal.Signature, el.Seal)) // ...and signatures should match
 		assert.True(t, &commSeal.Signature != &el.Seal)
 	}
 }
