@@ -381,6 +381,12 @@ func (c *currentState) numPrepared() int {
 func (c *currentState) numCommitted() int {
 	return len(c.committed)
 }
+func (c *currentState) GetCurrentRound() uint64 {
+	return atomic.LoadUint64(&c.view.Round)
+}
+func (c *currentState) SetCurrentRound(round uint64) {
+	atomic.StoreUint64(&c.view.Round, round)
+}
 
 type ValidatorSet interface {
 	CalcProposer(round uint64) NodeID
