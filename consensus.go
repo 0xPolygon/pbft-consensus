@@ -753,7 +753,7 @@ func (p *Pbft) gossip(msgType MsgType) {
 	// add View
 	msg.View = p.state.view.Copy()
 
-	// if we are sending a preprepare or commit message we need to include the proposal
+	// if we are sending a preprepare message we need to include the proposal
 	if msg.Type == MessageReq_Preprepare {
 		msg.SetProposal(p.state.proposal.Data)
 	}
