@@ -204,7 +204,7 @@ func TestState_MaxRound_NotFound(t *testing.T) {
 	s.addMessage(createMessage(validatorIds[0], MessageReq_Preprepare))
 
 	maxRound, found := s.maxRound()
-	assert.Equal(t, maxRound, uint64(uint64(0)))
+	assert.Equal(t, maxRound, uint64(0))
 	assert.Equal(t, found, false)
 
 	// Seed insufficient "RoundChange" messages count, so that maxRound isn't going to be found
