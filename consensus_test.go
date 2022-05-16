@@ -903,7 +903,7 @@ type expectResult struct {
 
 // expect is a test helper function
 // printed information from this one will be skipped
-// may be called from simultaneosly from multiple gorutines
+// may be called from simultaneously from multiple gorutines
 func (m *mockPbft) expect(res expectResult) {
 	m.t.Helper()
 

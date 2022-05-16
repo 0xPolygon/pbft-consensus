@@ -1,6 +1,26 @@
-name: Unit tests
+name: CI
 on: [ pull_request ]
+
+concurrency:
+  group: build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  lints:
+      runs-on: ubuntu-latest
+      name: Go test
+      env:
+        SILENT: true
+      steps:
+        - uses: actions/checkout@v2
+        - name: Setup go
+          uses: actions/setup-go@v1
+          with:
+            go-version: '1.18'
+        - name: Golangci install
+          run: make lintci
+        - name: Lint
+          run: make lint
   build:
     runs-on: ubuntu-latest
     name: Go test
