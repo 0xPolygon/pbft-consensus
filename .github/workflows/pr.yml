@@ -8,7 +8,7 @@ concurrency:
 jobs:
   lints:
       runs-on: ubuntu-latest
-      name: Go test
+      name: Linters
       env:
         SILENT: true
       steps:
