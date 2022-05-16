@@ -9,10 +9,10 @@ fuzz:
 	cd ./e2e && go test -run TestFuzz
 
 lintci:
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $$(go env GOPATH)/bin v1.45.0
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.46.1
 
 lint:
-	golangci-lint run ./...
+	@"$(GOPATH)/bin/golangci-lint" run --config ./.golangci.yml ./...
 
 
 .PHONY: test e2e
