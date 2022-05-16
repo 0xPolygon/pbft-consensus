@@ -244,6 +244,17 @@ func (p *Pbft) Run(ctx context.Context) {
 	}
 }
 
+func (p *Pbft) RunPrepare(ctx context.Context) {
+	p.ctx = ctx
+
+	// the iteration always starts with the AcceptState.
+	// AcceptState stages will reset the rest of the message queues.
+	p.setState(AcceptState)
+}
+func (p *Pbft) RunCycle(ctx context.Context) {
+	p.runCycle(ctx)
+}
+
 // runCycle represents the PBFT state machine loop
 func (p *Pbft) runCycle(ctx context.Context) {
 	// Log to the console
@@ -254,18 +265,23 @@ func (p *Pbft) runCycle(ctx context.Context) {
 	// Based on the current state, execute the corresponding section
 	switch p.getState() {
 	case AcceptState:
+		//fmt.Println("--AcceptState", p.validator)
 		p.runAcceptState(ctx)
 
 	case ValidateState:
+		//fmt.Println("--ValidateState", p.validator)
 		p.runValidateState(ctx)
 
 	case RoundChangeState:
+		//fmt.Println("--RoundChangeState", p.validator)
 		p.runRoundChangeState(ctx)
 
 	case CommitState:
+		//fmt.Println("--CommitState", p.validator)
 		p.runCommitState(ctx)
 
 	case DoneState:
+		//fmt.Println("--DoneState", p.validator)
 		panic("BUG: We cannot iterate on DoneState")
 	}
 }
@@ -283,6 +299,9 @@ func (p *Pbft) setRound(round uint64) {
 	// reset current timeout and start a new one
 	timeout := p.roundTimeout(round)
 	p.state.timeout = time.NewTimer(timeout)
+}
+func (p *Pbft) Print() {
+	fmt.Println(p.validator, p.GetState().String(), p.state.view.Round)
 }
 
 // runAcceptState runs the Accept state loop
@@ -332,6 +351,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 			p.state.proposal, err = p.backend.BuildProposal()
 			if err != nil {
 				p.logger.Printf("[ERROR] failed to build proposal: %v", err)
+				fmt.Println("consensus.go:354 RoundChangeState", err)
 				p.setState(RoundChangeState)
 				return
 			}
@@ -372,6 +392,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 			return
 		}
 		if msg == nil {
+			fmt.Println("consensus.go:395 RoundChangeState")
 			p.setState(RoundChangeState)
 			continue
 		}
@@ -389,6 +410,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 		}
 		if err := p.backend.Validate(proposal); err != nil {
 			p.logger.Printf("[ERROR] failed to validate proposal. Error message: %v", err)
+			fmt.Println("consensus.go:413 RoundChangeState", err)
 			p.setState(RoundChangeState)
 			return
 		}
@@ -442,6 +464,7 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 			return
 		}
 		if msg == nil {
+			fmt.Println("consensus.go:464 RoundChangeState")
 			// timeout
 			p.setState(RoundChangeState)
 			span.End()
@@ -547,6 +570,7 @@ func (p *Pbft) runCommitState(ctx context.Context) {
 		p.logger.Printf("[ERROR] failed to insert proposal. Error message: %v", err)
 		p.handleStateErr(errFailedToInsertProposal)
 	} else {
+		//fmt.Println("consensus.go:573 p.setState(DoneState)", p.validator)
 		// move to done state to finish the current iteration of the state machine
 		p.setState(DoneState)
 	}
@@ -560,6 +584,7 @@ var (
 
 func (p *Pbft) handleStateErr(err error) {
 	p.state.err = err
+	fmt.Println("consensus.go:585 RoundChangeState handleStateErr ", err)
 	p.setState(RoundChangeState)
 }
 
@@ -612,6 +637,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 			p.logger.Printf("[DEBUG] round change, max round=%d", maxRound)
 			sendRoundChange(maxRound)
 		} else {
+			fmt.Println("consensus.go:637 checkTimeout. maxRound", maxRound)
 			// otherwise, do your best to sync up
 			checkTimeout()
 		}
@@ -632,6 +658,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 
 			// checkTimeout will either produce a sync event and exit
 			// or restart the timeout
+			fmt.Println("consensus.go:658 checkTimeout")
 			checkTimeout()
 			span.End()
 			continue
@@ -780,6 +807,7 @@ func (p *Pbft) getNextMessage(span trace.Span) (*MessageReq, bool) {
 		// someone closes the stopCh (i.e. timeout for round change)
 		select {
 		case <-p.state.timeout.C:
+			fmt.Println("consensus.go:811 p.state.timeout")
 			span.AddEvent("Timeout")
 			p.notifier.HandleTimeout(p.validator.NodeID(), stateToMsg(p.getState()), &View{
 				Round:    p.state.GetCurrentRound(),
@@ -788,6 +816,7 @@ func (p *Pbft) getNextMessage(span trace.Span) (*MessageReq, bool) {
 			p.logger.Printf("[TRACE] Message read timeout occurred")
 			return nil, true
 		case <-p.ctx.Done():
+			fmt.Println("consensus.go:819 p.ctx.Done()")
 			return nil, false
 		case <-p.updateCh:
 		}

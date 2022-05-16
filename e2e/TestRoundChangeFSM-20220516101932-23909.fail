@@ -1,0 +1,34 @@
+# TestRoundChangeFSM 2022/05/16 10:19:32 [rapid] draw num of nodes: 4
+# TestRoundChangeFSM 2022/05/16 10:19:32 [rapid] draw a: map[int]int{0:-13592, 1:5, 2:347}
+# TestRoundChangeFSM 2022/05/16 10:19:32 [rapid] draw action: "CreateBlock"
+# TestRoundChangeFSM 2022/05/16 10:19:35 IsStuck 0
+# 
+v0.4.6#5467464368188817409
+0x0
+0x0
+0x0
+0x0
+0x17afe6ac4832d5
+0x1854c80fb50d27
+0x0
+0x111936234e0fb9
+0x119191ae062f6c
+0x3517
+0xa
+0xbfde6dc91177d
+0x3c2f8252c764e
+0x2
+0xb042ca32da740
+0xd7571386542fd
+0x15b
+0x1752e2bc7c793d
+0x107be05705fab0
+0x6b7
+0x1
+0xc7a91745b08ff
+0x1d8606c7bebe9d
+0x5
+0x7b64c24326864
+0x1f7ddebd300d29
+0x1fffffffffffff
+0x73b10c7ed92f9
