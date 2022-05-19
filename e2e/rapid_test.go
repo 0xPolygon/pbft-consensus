@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"pgregory.net/rapid"
+	"sort"
 	"strconv"
 	"sync"
 	"testing"
@@ -128,6 +129,7 @@ type BackendFake struct {
 	lastProposer pbft.NodeID
 	ProposalTime time.Duration
 	nodeId       int
+	IsStuckMock  func(num uint64) (uint64, bool)
 }
 
 func (bf *BackendFake) BuildProposal() (*pbft.Proposal, error) {
@@ -147,7 +149,7 @@ func (bf *BackendFake) Validate(proposal *pbft.Proposal) error {
 func (bf *BackendFake) Insert(p *pbft.SealedProposal) error {
 	//TODO implement me
 	//panic("implement me")
-	//fmt.Println(bf.nodeId, "inserted", p.Number, p.Proposer, p.Proposal.Data)
+	fmt.Println(bf.nodeId, "inserted", p.Number, p.Proposer)
 	return nil
 }
 
@@ -171,10 +173,10 @@ func (bf *BackendFake) Init(info *pbft.RoundInfo) {
 }
 
 func (bf *BackendFake) IsStuck(num uint64) (uint64, bool) {
-	//TODO implement me
-	fmt.Println("IsStuck", bf.height, num)
+	if bf.IsStuckMock != nil {
+		return bf.IsStuckMock(num)
+	}
 	panic("IsStuck " + strconv.Itoa(int(num)))
-	//return 0, false
 }
 
 func (bf *BackendFake) ValidateCommit(from pbft.NodeID, seal []byte) error {
@@ -452,12 +454,15 @@ func TestSuccess(t *testing.T) {
 func TestCheckMajorityProperty(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		//init
-		numOfNodes := rapid.IntRange(4, 7).Draw(t, "num of nodes").(int)
+		numOfNodes := rapid.IntRange(4, 4).Draw(t, "num of nodes").(int)
 		acc := rapid.MapOfN(
 			rapid.IntRange(0, numOfNodes-1),
 			rapid.IntRange(0, numOfNodes-1),
+			//numOfNodes/2,
 			numOfNodes*2/3+1,
 			numOfNodes).Filter(func(m map[int]int) bool {
+			return true
+
 			from := map[int]struct{}{}
 			to := map[int]struct{}{}
 			for k, v := range m {
@@ -465,7 +470,7 @@ func TestCheckMajorityProperty(t *testing.T) {
 				to[v] = struct{}{}
 			}
 			//check 2/3+1 property
-			if len(from) >= numOfNodes*2/3+1 && len(to) >= numOfNodes*2/3+1 {
+			if len(from) >= numOfNodes*2/3 && len(to) >= numOfNodes*2/3+1 {
 				return true
 			}
 			return false
@@ -474,18 +479,32 @@ func TestCheckMajorityProperty(t *testing.T) {
 		for i, _ := range acc {
 			acceptedNodes = append(acceptedNodes, i)
 		}
-		fmt.Println("Flow map", numOfNodes, len(acceptedNodes), acc)
-		//fmt.Println(, , acceptedNodes)
-		//acceptedNodes := rapid.SliceOfNDistinct(, numOfNodes*2/3+1, numOfNodes).
-		//	Draw(t, "generate >2/3+1 connections").([]int)
-
+		acceptedNodesMap := map[pbft.NodeID]struct{}{}
+		for i := range acc {
+			acceptedNodesMap[key(strconv.Itoa(i)).NodeID()] = struct{}{}
+		}
+		accLock := sync.RWMutex{}
+		sort.Ints(acceptedNodes)
+		fmt.Println("Flow map", numOfNodes, acceptedNodes)
 		ft := &fakeTransport{
 			GossipFunc: func(ft *fakeTransport, msg *pbft.MessageReq) error {
-				//ids := rapid.SliceOfN(rapid.IntRange(0, numOfNodes-1), 1, numOfNodes*3/2).Draw(t, "").([]int)
-
-				for _, id := range acceptedNodes {
-					ft.nodes[id].PushMessage(msg.Copy())
+				if msg.Type == pbft.MessageReq_RoundChange {
+					fmt.Println("e2e/rapid_test.go:493 Round change", msg.From)
 				}
+				//ids := rapid.SliceOfN(rapid.IntRange(0, numOfNodes-1), 1, numOfNodes*3/2).Draw(t, "").([]int)
+				for _, node := range ft.nodes {
+					accLock.RLock()
+					_, okReceiver := acceptedNodesMap[node.GetValidatorId()]
+					_, okSender := acceptedNodesMap[msg.From]
+					if okSender && okReceiver {
+						node.PushMessage(msg.Copy())
+					}
+					accLock.RUnlock()
+					//node.PushMessage(msg)
+				}
+				//for _, id := range acceptedNodes {
+				//	ft.nodes[id].PushMessage(msg.Copy())
+				//}
 				return nil
 			},
 		}
@@ -493,7 +512,11 @@ func TestCheckMajorityProperty(t *testing.T) {
 		createNode := func(name string) *pbft.Pbft {
 			node := pbft.New(key(name), ft,
 				pbft.WithTracer(trace.NewNoopTracerProvider().Tracer("")),
-				func(config *pbft.Config) {},
+				func(config *pbft.Config) {
+					config.RoundTimeout = func(u uint64) time.Duration {
+						return time.Millisecond * 100
+					}
+				},
 				pbft.WithLogger(log.New(io.Discard, "", 0)),
 			)
 			nodes = append(nodes, name)
@@ -506,7 +529,14 @@ func TestCheckMajorityProperty(t *testing.T) {
 			cluster[i] = createNode(strconv.Itoa(i))
 		}
 		for i, node := range cluster {
-			node.SetBackend(&BackendFake{nodes: nodes, ProposalTime: time.Millisecond, nodeId: i})
+			node.SetBackend(&BackendFake{nodes: nodes, ProposalTime: time.Millisecond, nodeId: i, IsStuckMock: func(num uint64) (uint64, bool) {
+				fmt.Println("e2e/rapid_test.go:527 is Stuck")
+				if _, ok := acceptedNodesMap[node.GetValidatorId()]; !ok {
+					return 0, true
+				}
+				//t.Error(i, num, acceptedNodesMap)
+				return 0, false
+			}})
 		}
 		for i := range cluster {
 			cluster[i].RunPrepare(context.Background())
@@ -514,26 +544,37 @@ func TestCheckMajorityProperty(t *testing.T) {
 
 		//act
 
+		//stuck := time.After(time.Second)
 		done := make([]bool, len(cluster))
+		mutexes := make([]sync.Mutex, len(cluster))
 		for {
+			//select {
+			//case <-stuck:
+			//	t.Fatal("stuck")
+			//default:
+			//
+			//}
 			wg := errgroup.Group{}
 			for i := range cluster {
 				state := cluster[i].GetState()
-				if state == pbft.DoneState || state == pbft.SyncState {
+				if state == pbft.DoneState {
 					done[i] = true
 				} else {
 					i := i
 					wg.Go(func() (err1 error) {
-
-						defer func() {
-							if err := recover(); err != nil {
-								if _, ok := acc[i]; ok {
-									err1 = fmt.Errorf("%v %v", i, err)
-								}
-							}
+						exitCh := make(chan struct{})
+						deadline := time.After(time.Millisecond * 10)
+						go func() {
+							mutexes[i].Lock()
+							cluster[i].RunCycle(context.Background())
+							mutexes[i].Unlock()
+							close(exitCh)
 						}()
-						//tt := time.Now()
-						cluster[i].RunCycle(context.Background())
+						select {
+						case <-exitCh:
+						case <-deadline:
+							done[i] = true
+						}
 						//fmt.Println("=======timing ", state, i, time.Since(tt), err1)
 						return err1
 					})
@@ -546,10 +587,12 @@ func TestCheckMajorityProperty(t *testing.T) {
 			}
 
 			stop := true
-			fmt.Println(done, acceptedNodes)
+			//fmt.Println(done, acceptedNodes)
 			for i, b := range done {
-				_, ok := acc[i]
-				if !b && ok {
+				if _, ok := acceptedNodesMap[key(strconv.Itoa(i)).NodeID()]; !ok {
+					continue
+				}
+				if !b {
 					stop = false
 					break
 				}
@@ -562,11 +605,13 @@ func TestCheckMajorityProperty(t *testing.T) {
 
 		for i := range cluster {
 			state := cluster[i].GetState()
+			if _, ok := acceptedNodesMap[cluster[i].GetValidatorId()]; !ok {
+				continue
+			}
 			if state != pbft.DoneState {
 				t.Error(state, i)
 			}
 		}
-
 	})
 }
 
@@ -594,4 +639,9 @@ func ExampleCheck_parseDate() {
 	rapid.Check(t, testParseDate)
 }
 
+*/
+
+/*
+-run="TestCheckMajorityProperty" -rapid.failfile="TestCheckMajorityProperty-20220518111648-39801.fail" (or -rapid.seed=13626184930866566722)
+        Traceback (<nil>):
 */

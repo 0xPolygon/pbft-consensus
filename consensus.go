@@ -327,7 +327,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 	p.state.CalcProposer()
 
 	isProposer := p.state.proposer == p.validator.NodeID()
-
+	//fmt.Println("consensus.go:330 proposer", isProposer, p.validator.NodeID())
 	p.backend.Init(&RoundInfo{
 		Proposer:   p.state.proposer,
 		IsProposer: isProposer,
@@ -396,6 +396,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 			p.setState(RoundChangeState)
 			continue
 		}
+		//fmt.Println("consensus.go:391 msg accept state ", p.GetValidatorId(), msg.From)
 
 		// TODO: Validate that the fields required for Preprepare are set (Proposal and Hash)
 		if msg.From != p.state.proposer {
@@ -807,7 +808,7 @@ func (p *Pbft) getNextMessage(span trace.Span) (*MessageReq, bool) {
 		// someone closes the stopCh (i.e. timeout for round change)
 		select {
 		case <-p.state.timeout.C:
-			fmt.Println("consensus.go:811 p.state.timeout")
+			fmt.Println("consensus.go:811 p.state.timeout", p.GetValidatorId())
 			span.AddEvent("Timeout")
 			p.notifier.HandleTimeout(p.validator.NodeID(), stateToMsg(p.getState()), &View{
 				Round:    p.state.GetCurrentRound(),
