@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/0xPolygon/pbft-consensus"
+	"github.com/0xPolygon/pbft-consensus/debug"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/goleak"
 	"golang.org/x/sync/errgroup"
@@ -149,7 +150,7 @@ func (bf *BackendFake) Validate(proposal *pbft.Proposal) error {
 func (bf *BackendFake) Insert(p *pbft.SealedProposal) error {
 	//TODO implement me
 	//panic("implement me")
-	fmt.Println(bf.nodeId, "inserted", p.Number, p.Proposer)
+	fmt.Println(debug.Line(), bf.nodeId, "inserted", p.Number, p.Proposer)
 	return nil
 }
 
@@ -452,6 +453,11 @@ func TestSuccess(t *testing.T) {
 }
 
 func TestCheckMajorityProperty(t *testing.T) {
+	//params
+	roundTimeout := time.Millisecond * 5000
+	proposalTime := time.Duration(0)
+
+	maxCycles := 30
 	rapid.Check(t, func(t *rapid.T) {
 		//init
 		numOfNodes := rapid.IntRange(4, 4).Draw(t, "num of nodes").(int)
@@ -461,13 +467,17 @@ func TestCheckMajorityProperty(t *testing.T) {
 			//numOfNodes/2,
 			numOfNodes*2/3+1,
 			numOfNodes).Filter(func(m map[int]int) bool {
-			return true
 
 			from := map[int]struct{}{}
 			to := map[int]struct{}{}
 			for k, v := range m {
 				from[k] = struct{}{}
 				to[v] = struct{}{}
+			}
+
+			//check that 0 is exsist. tmp solution
+			if _, ok := from[0]; !ok {
+				return false
 			}
 			//check 2/3+1 property
 			if len(from) >= numOfNodes*2/3 && len(to) >= numOfNodes*2/3+1 {
@@ -489,22 +499,21 @@ func TestCheckMajorityProperty(t *testing.T) {
 		ft := &fakeTransport{
 			GossipFunc: func(ft *fakeTransport, msg *pbft.MessageReq) error {
 				if msg.Type == pbft.MessageReq_RoundChange {
-					fmt.Println("e2e/rapid_test.go:493 Round change", msg.From)
+					//fmt.Println(debug.Line(), "Round change", msg.From)
 				}
-				//ids := rapid.SliceOfN(rapid.IntRange(0, numOfNodes-1), 1, numOfNodes*3/2).Draw(t, "").([]int)
+
 				for _, node := range ft.nodes {
 					accLock.RLock()
 					_, okReceiver := acceptedNodesMap[node.GetValidatorId()]
 					_, okSender := acceptedNodesMap[msg.From]
+					//fmt.Println(debug.Line(), "send ", msg.Type.String(), " from ", msg.From, "to", node.GetValidatorId(), okSender && okReceiver && node.GetValidatorId() != msg.From)
+					//fmt.Println(debug.Line(), "send ", msg.Type.String(), " from ", msg.From, "to", node.GetValidatorId(), okSender && okReceiver)
+					//if okSender && okReceiver && node.GetValidatorId() != msg.From {
 					if okSender && okReceiver {
 						node.PushMessage(msg.Copy())
 					}
 					accLock.RUnlock()
-					//node.PushMessage(msg)
 				}
-				//for _, id := range acceptedNodes {
-				//	ft.nodes[id].PushMessage(msg.Copy())
-				//}
 				return nil
 			},
 		}
@@ -514,11 +523,15 @@ func TestCheckMajorityProperty(t *testing.T) {
 				pbft.WithTracer(trace.NewNoopTracerProvider().Tracer("")),
 				func(config *pbft.Config) {
 					config.RoundTimeout = func(u uint64) time.Duration {
-						return time.Millisecond * 100
+						return roundTimeout
 					}
 				},
 				pbft.WithLogger(log.New(io.Discard, "", 0)),
 			)
+			// round timeout mock
+			node.SetRoundTimeoutFunction(func() <-chan time.Time {
+				return make(<-chan time.Time)
+			})
 			nodes = append(nodes, name)
 			ft.nodes = append(ft.nodes, node)
 			return node
@@ -528,9 +541,12 @@ func TestCheckMajorityProperty(t *testing.T) {
 		for i := 0; i < numOfNodes; i++ {
 			cluster[i] = createNode(strconv.Itoa(i))
 		}
+		stuckList := make([]bool, len(cluster))
 		for i, node := range cluster {
-			node.SetBackend(&BackendFake{nodes: nodes, ProposalTime: time.Millisecond, nodeId: i, IsStuckMock: func(num uint64) (uint64, bool) {
-				fmt.Println("e2e/rapid_test.go:527 is Stuck")
+			i := i
+			node := node
+			node.SetBackend(&BackendFake{nodes: nodes, ProposalTime: proposalTime, nodeId: i, IsStuckMock: func(num uint64) (uint64, bool) {
+				fmt.Println(debug.Line(), "is Stuck", i)
 				if _, ok := acceptedNodesMap[node.GetValidatorId()]; !ok {
 					return 0, true
 				}
@@ -546,8 +562,9 @@ func TestCheckMajorityProperty(t *testing.T) {
 
 		//stuck := time.After(time.Second)
 		done := make([]bool, len(cluster))
-		mutexes := make([]sync.Mutex, len(cluster))
+		numOfCycles := 0
 		for {
+			numOfCycles++
 			//select {
 			//case <-stuck:
 			//	t.Fatal("stuck")
@@ -562,28 +579,37 @@ func TestCheckMajorityProperty(t *testing.T) {
 				} else {
 					i := i
 					wg.Go(func() (err1 error) {
+						wgTime := time.Now()
 						exitCh := make(chan struct{})
-						deadline := time.After(time.Millisecond * 10)
+						deadline := time.After(time.Millisecond * 500)
+						//fmt.Println(debug.Line(), "wg GetState", i, cluster[i].GetState())
+						if stuckList[i] {
+							fmt.Println(debug.Line(), "node", i, "stucked", cluster[i].GetState())
+							return nil
+						}
 						go func() {
-							mutexes[i].Lock()
 							cluster[i].RunCycle(context.Background())
-							mutexes[i].Unlock()
 							close(exitCh)
 						}()
 						select {
 						case <-exitCh:
 						case <-deadline:
-							done[i] = true
+							stuckList[i] = true
 						}
-						//fmt.Println("=======timing ", state, i, time.Since(tt), err1)
+
+						if time.Since(wgTime).Milliseconds() > 400 {
+							fmt.Println(debug.Line(), "wgitme ", state, i, time.Since(wgTime), err1)
+						}
+
 						return err1
 					})
 				}
 			}
+			fmt.Println(debug.Line(), "wg.Wait()")
 			if err := wg.Wait(); err != nil {
 				fmt.Println("Err, wg.Wait", err)
-				t.Error(err)
-				return
+				t.Error("wg wain", err)
+				//return
 			}
 
 			stop := true
@@ -598,11 +624,37 @@ func TestCheckMajorityProperty(t *testing.T) {
 				}
 			}
 
+			numOfRoundChange := 0
+			listOfRoundChangeState := []int{}
+			for i, node := range cluster {
+				if node.GetState() == pbft.RoundChangeState {
+					numOfRoundChange++
+					listOfRoundChangeState = append(listOfRoundChangeState, i)
+				}
+			}
+			if checkNumTrue(stuckList, 3) {
+				fmt.Println(debug.Line(), "stucked", stuckList)
+				t.Error("stucked", stuckList)
+				stop = true
+
+			}
+			if numOfRoundChange >= numOfNodes*2/3 {
+				t.Error(listOfRoundChangeState)
+				fmt.Println(numOfRoundChange, numOfNodes, numOfNodes/3*2)
+				stop = true
+			}
+
+			if numOfCycles > maxCycles {
+				t.Error("Max cycles run")
+				stop = true
+			}
 			if stop {
+				fmt.Println(debug.Line(), "stop", done, checkNumTrue(stuckList, 3), numOfRoundChange >= numOfNodes*2/3)
 				break
 			}
 		}
 
+		fmt.Println(debug.Line(), "NumOfCycles", numOfCycles)
 		for i := range cluster {
 			state := cluster[i].GetState()
 			if _, ok := acceptedNodesMap[cluster[i].GetValidatorId()]; !ok {
@@ -613,6 +665,18 @@ func TestCheckMajorityProperty(t *testing.T) {
 			}
 		}
 	})
+}
+
+func checkNumTrue(b []bool, num int) bool {
+	nm := 0
+	fmt.Println(b)
+	for _, v := range b {
+		if v {
+			nm++
+		}
+	}
+	fmt.Println(debug.Line(), "checkNumTrue", b, num, nm)
+	return nm >= num
 }
 
 /*

@@ -1,0 +1,33 @@
+# TestCheckMajorityProperty 2022/05/19 15:28:00 [rapid] draw num of nodes: 4
+# TestCheckMajorityProperty 2022/05/19 15:28:00 [rapid] draw Generate flow map: map[int]int{0:1, 1:0, 3:3}
+# TestCheckMajorityProperty 2022/05/19 15:28:05 [1 2 3]
+# TestCheckMajorityProperty 2022/05/19 15:28:05 CommitState 0
+# TestCheckMajorityProperty 2022/05/19 15:28:05 RoundChangeState 1
+# TestCheckMajorityProperty 2022/05/19 15:28:05 RoundChangeState 3
+# 
+v0.4.6#7424564725981118465
+0x0
+0x0
+0x0
+0x844eb1edcc649
+0x14d9b6dc7cc793
+0x110c33b48058b3
+0x1
+0x14142b5c91ddf3
+0x5f36b91a0efac
+0x0
+0x8922bf150c60f
+0x715900cc49484
+0xffd1711f52e35
+0x3
+0x1b9fa41a0c6eb0
+0x1b838666891475
+0x3
+0xfc71214bc881
+0x3b912ec5d11c2
+0x28f6f6bb9869d
+0x0
+0x1e882445ad0530
+0x2780dcb8639fc
+0x1
+0x104fd1d0555c3b
