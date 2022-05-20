@@ -666,7 +666,7 @@ func newSealedProposal(proposalData []byte, proposer pbft.NodeID, number uint64)
 func (f *Fsm) Init(*pbft.RoundInfo) {
 }
 
-func (f *Fsm) ValidateCommit(node pbft.NodeID, seal []byte) error {
+func (f *Fsm) ValidateCommit(node pbft.NodeID, seal []byte, msgHash []byte) error {
 	return nil
 }
 
