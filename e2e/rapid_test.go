@@ -462,7 +462,8 @@ func TestCheckMajorityProperty(t *testing.T) {
 	maxCycles := 30
 	rapid.Check(t, func(t *rapid.T) {
 		//init
-		numOfNodes := rapid.IntRange(4, 4).Draw(t, "num of nodes").(int)
+		//changing to 10 make test fail.
+		numOfNodes := rapid.IntRange(4, 9).Draw(t, "num of nodes").(int)
 		acc := rapid.MapOfN(
 			rapid.IntRange(0, numOfNodes-1),
 			rapid.IntRange(0, numOfNodes-1),
