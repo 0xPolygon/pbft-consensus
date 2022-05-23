@@ -3,6 +3,7 @@ package pbft
 import (
 	"bytes"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -107,7 +108,8 @@ type View struct {
 
 func (v *View) Copy() *View {
 	vv := new(View)
-	*vv = *v
+	vv.Sequence = v.Sequence
+	vv.Round = v.Round
 	return vv
 }
 
@@ -215,6 +217,8 @@ type currentState struct {
 
 	// Describes whether there has been an error during the computation
 	err error
+
+	Mtx sync.RWMutex
 }
 
 // newState creates a new state with reset round messages
@@ -326,7 +330,9 @@ func (c *currentState) AddRoundMessage(msg *MessageReq) int {
 	if msg.Type != MessageReq_RoundChange {
 		return 0
 	}
+	c.Mtx.Lock()
 	c.addMessage(msg)
+	c.Mtx.Unlock()
 
 	return len(c.roundMessages[msg.View.Round])
 }
