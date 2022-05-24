@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/0xPolygon/pbft-consensus/debug"
 	"log"
 	"os"
 	"time"
+
+	"github.com/0xPolygon/pbft-consensus/debug"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -327,7 +328,7 @@ func (p *Pbft) setRound(round uint64) {
 }
 func (p *Pbft) Print() {
 	fmt.Println(debug.Line(), "validator", p.validator, "state", p.GetState().String())
-	fmt.Println(debug.Line(), "commited", len(p.state.committed), p.state.committed)
+	fmt.Println(debug.Line(), "committed", len(p.state.committed), p.state.committed)
 	fmt.Println(debug.Line(), "prepared", len(p.state.prepared), p.state.prepared)
 }
 
@@ -522,11 +523,11 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 				continue
 			}
 			p.state.addCommitted(msg)
-			res := "Commited:"
-			for nid := range p.state.committed {
-				res = res + string(nid) + " "
-			}
-			//fmt.Println(debug.Line(), "add commited", p.validator.NodeID(), msg.From, res)
+			//res := "Committed:"
+			//for nid := range p.state.committed {
+			//	res = res + string(nid) + " "
+			//}
+			//fmt.Println(debug.Line(), "add committed", p.validator.NodeID(), msg.From, res)
 
 		default:
 			panic(fmt.Errorf("BUG: Unexpected message type: %s in %s", msg.Type, p.getState()))
@@ -538,7 +539,7 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 			sendCommit(span)
 		}
 
-		//fmt.Println(debug.Line(), "numCommitted>NumValid", "node:", p.validator.NodeID(), "num commited", p.state.numCommitted(), "num valid", p.state.NumValid())
+		//fmt.Println(debug.Line(), "numCommitted>NumValid", "node:", p.validator.NodeID(), "num committed", p.state.numCommitted(), "num valid", p.state.NumValid())
 		if p.state.numCommitted() > p.state.NumValid() {
 			//fmt.Println(debug.Line(), "setState(CommitState)", p.validator.NodeID())
 			// we have received enough commit messages

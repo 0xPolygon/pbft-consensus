@@ -269,7 +269,7 @@ func TestCheckMajorityProperty(t *testing.T) {
 			return false
 		}).Draw(t, "Generate flow map").(map[int]int)
 		acceptedNodes := []int{}
-		for i, _ := range acc {
+		for i := range acc {
 			acceptedNodes = append(acceptedNodes, i)
 		}
 		acceptedNodesMap := map[pbft.NodeID]struct{}{}
