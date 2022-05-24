@@ -183,6 +183,14 @@ func (p *Proposal) Copy() *Proposal {
 	return pp
 }
 
+type CommittedSeal struct {
+	// Signature value
+	Signature []byte
+
+	// Node that signed
+	NodeID NodeID
+}
+
 // currentState defines the current state object in PBFT
 type currentState struct {
 	// validators represent the current validator set
@@ -241,24 +249,24 @@ func (c *currentState) GetSequence() uint64 {
 	return c.view.Sequence
 }
 
-func (c *currentState) getCommittedSeals() [][]byte {
-	committedSeals := [][]byte{}
-	for _, commit := range c.committed {
-		committedSeals = append(committedSeals, commit.Seal)
+func (c *currentState) getCommittedSeals() []CommittedSeal {
+	committedSeals := make([]CommittedSeal, 0, len(c.committed))
+	for nodeId, commit := range c.committed {
+		committedSeals = append(committedSeals, CommittedSeal{Signature: commit.Seal, NodeID: nodeId})
 	}
 	return committedSeals
 }
 
 // getState returns the current state
 func (c *currentState) getState() PbftState {
-	stateAddr := (*uint64)(&c.state)
+	stateAddr := &c.state
 
 	return PbftState(atomic.LoadUint64(stateAddr))
 }
 
 // setState sets the current state
 func (c *currentState) setState(s PbftState) {
-	stateAddr := (*uint64)(&c.state)
+	stateAddr := &c.state
 
 	atomic.StoreUint64(stateAddr, uint64(s))
 }
@@ -354,7 +362,7 @@ func (c *currentState) addCommitted(msg *MessageReq) {
 
 // addMessage adds a new message to one of the following message lists: committed, prepared, roundMessages
 func (c *currentState) addMessage(msg *MessageReq) {
-	addr := NodeID(msg.From)
+	addr := msg.From
 	if !c.validators.Includes(addr) {
 		// only include messages from validators
 		return
@@ -399,7 +407,7 @@ type ValidatorSet interface {
 
 // StateNotifier enables custom logic encapsulation related to internal triggers within PBFT state machine (namely receiving timeouts).
 type StateNotifier interface {
-	// HandleTimeout notifies that a timeout occured while getting next message
+	// HandleTimeout notifies that a timeout occurred while getting next message
 	HandleTimeout(to NodeID, msgType MsgType, view *View)
 	// ReadNextMessage reads the next message from message queue of the state machine
 	ReadNextMessage(p *Pbft) (*MessageReq, []*MessageReq)

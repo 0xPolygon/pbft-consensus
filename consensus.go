@@ -104,7 +104,7 @@ func (c *Config) ApplyOps(opts ...ConfigOption) {
 
 type SealedProposal struct {
 	Proposal       *Proposal
-	CommittedSeals [][]byte
+	CommittedSeals []CommittedSeal
 	Proposer       NodeID
 	Number         uint64
 }
