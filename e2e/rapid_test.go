@@ -456,7 +456,7 @@ func checkNumTrue(b []bool, num int) bool {
 }
 
 func TestCheckLivenessBugProperty(t *testing.T) {
-	t.Skip()
+	//t.Skip()
 	//params
 	roundTimeout := time.Millisecond * 5000
 	proposalTime := time.Duration(0)
@@ -466,34 +466,39 @@ func TestCheckLivenessBugProperty(t *testing.T) {
 		//init
 		//changing to 10 make test fail.
 		numOfNodes := rapid.IntRange(5, 5).Draw(t, "num of nodes").(int)
-		rounds := map[uint64]roundMetadata{
+		rounds := map[uint64]map[int][]int{
 			0: {
-				round: 0,
-				routingMap: map[sender]receivers{
-					"A_0": {"A_0", "A_1", "A_2"},
-					"A_1": {"A_0"},
-					"A_2": {"A_0", "A_3"},
-					"A_3": {"A_0"},
-				},
+				0: {0, 1, 2},
+				1: {0},
+				2: {0, 3},
+				3: {0},
 			},
 			1: {
-				round: 1,
-				routingMap: map[sender]receivers{
-					"A_0": {"A_1"},
-					"A_1": {"A_1", "A_2", "A_3"},
-					"A_2": {"A_1"},
-					"A_3": {"A_1"},
-				},
+				0: {1},
+				1: {1, 2, 3},
+				2: {1},
+				3: {1},
 			},
 		}
 
 		ft := &fakeTransport{
 			GossipFunc: func(ft *fakeTransport, msg *pbft.MessageReq) error {
 				//todo add routing
-				_ = rounds
+				routing := rounds[msg.View.Round]
+				//todo hack
+				from, err := strconv.Atoi(string(msg.From))
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, nodeId := range routing[from] {
+					fmt.Println(debug.Line(), "Push", msg.Type, "round", msg.View.Round, "from", msg.From, "to", nodeId)
+					ft.nodes[nodeId].PushMessage(msg)
+				}
 				return nil
 			},
 		}
+
+		timeoutsChan := make([]chan time.Time, numOfNodes)
 		nodes := []string{}
 		createNode := func(name string) *pbft.Pbft {
 			node := pbft.New(key(name), ft,
@@ -507,6 +512,7 @@ func TestCheckLivenessBugProperty(t *testing.T) {
 			)
 			// round timeout mock
 			node.SetRoundTimeoutFunction(func() <-chan time.Time {
+
 				return make(<-chan time.Time)
 			})
 			nodes = append(nodes, name)
@@ -596,10 +602,19 @@ func TestCheckLivenessBugProperty(t *testing.T) {
 					listOfRoundChangeState = append(listOfRoundChangeState, i)
 				}
 			}
-			if checkNumTrue(stuckList, 3) {
-				fmt.Println(debug.Line(), "stucked", stuckList)
-				t.Error("stucked", stuckList)
-				stop = true
+			if checkNumTrue(stuckList, numOfNodes) {
+				fmt.Println(debug.Line(), "stucked push round timeout")
+				for i := range timeoutsChan {
+					fmt.Println(debug.Line(), i)
+					i := i
+					go func() {
+						timeoutsChan[i] <- time.Now()
+					}()
+
+				}
+				//fmt.Println(debug.Line(), "stucked", stuckList)
+				//t.Error("stucked", stuckList)
+				//stop = true
 
 			}
 			if numOfRoundChange >= numOfNodes*2/3 {
