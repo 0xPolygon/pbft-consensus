@@ -16,7 +16,7 @@ func TestE2E_NoIssue(t *testing.T) {
 		RoundTimeout: GetPredefinedTimeout(2 * time.Second),
 	}
 
-	c := NewPBFTCluster(t, config, newRandomTransport(5*time.Millisecond))
+	c := NewPBFTCluster(t, config, newRandomTransport(50*time.Millisecond))
 	c.Start()
 	defer c.Stop()
 

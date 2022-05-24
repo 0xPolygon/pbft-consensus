@@ -12,6 +12,7 @@ func Line() string {
 
 func LineN(n int) string {
 	_, file, line, _ := runtime.Caller(n + 1)
+	//todo fix
 	file = strings.TrimPrefix(file, "/Users/boris/go/src/github.com/0xPolygon/pbft-consensus/")
 	file = strings.TrimPrefix(file, "e2e/")
 	return fmt.Sprintf("%s:%d", file, line)
