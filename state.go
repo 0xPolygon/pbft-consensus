@@ -330,10 +330,7 @@ func (c *currentState) AddRoundMessage(msg *MessageReq) int {
 	if msg.Type != MessageReq_RoundChange {
 		return 0
 	}
-	c.Mtx.Lock()
 	c.addMessage(msg)
-	c.Mtx.Unlock()
-
 	return len(c.roundMessages[msg.View.Round])
 }
 

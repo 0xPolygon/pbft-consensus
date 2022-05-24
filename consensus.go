@@ -327,8 +327,6 @@ func (p *Pbft) setRound(round uint64) {
 }
 func (p *Pbft) Print() {
 	fmt.Println(debug.Line(), "validator", p.validator, "state", p.GetState().String())
-	p.state.Mtx.RLock()
-	defer p.state.Mtx.RUnlock()
 	fmt.Println(debug.Line(), "commited", len(p.state.committed), p.state.committed)
 	fmt.Println(debug.Line(), "prepared", len(p.state.prepared), p.state.prepared)
 }
