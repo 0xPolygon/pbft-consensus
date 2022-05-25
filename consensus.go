@@ -456,6 +456,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 				p.sendCommitMsg()
 				p.setState(ValidateState)
 			} else {
+				fmt.Println(debug.Line(), "handleStateErr", errIncorrectLockedProposal)
 				p.handleStateErr(errIncorrectLockedProposal)
 			}
 		} else {
@@ -615,6 +616,7 @@ func (p *Pbft) runCommitState(ctx context.Context) {
 		// start a new round with the state unlocked since we need to
 		// be able to propose/validate a different proposal
 		p.logger.Printf("[ERROR] failed to insert proposal. Error message: %v", err)
+		fmt.Println(debug.Line(), "handleStateErr", errFailedToInsertProposal)
 		p.handleStateErr(errFailedToInsertProposal)
 	} else {
 		//fmt.Println(debug.Line(), "p.setState(DoneState)", p.validator)
@@ -631,7 +633,6 @@ var (
 
 func (p *Pbft) handleStateErr(err error) {
 	p.state.err = err
-	fmt.Println(debug.Line(), "RoundChangeState handleStateErr ", err)
 	p.setState(RoundChangeState)
 }
 

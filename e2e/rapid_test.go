@@ -759,271 +759,301 @@ func TestCheckLivenessBugPropertyDebug(t *testing.T) {
 		cluster[i].RunPrepare(context.Background())
 	}
 
-	callNumber := 1
-	wg := errgroup.Group{}
-	for i := range cluster {
-		i := i
-		state := cluster[i].GetState()
-		wg.Go(func() (err1 error) {
-			fmt.Println(debug.Line(), callNumber, "started", i, state)
-			defer func() {
-				fmt.Println(debug.Line(), callNumber, "finished", i, state)
-			}()
+	stuckListMtx := sync.RWMutex{}
+	for callNumber := 1; callNumber < 10; callNumber++ {
+		fmt.Println(debug.Line(), "call", callNumber, " -----------------------------------", stuckList)
+		wg := errgroup.Group{}
+		for i := range cluster {
+			i := i
+			state := cluster[i].GetState()
+			wg.Go(func() (err1 error) {
+				fmt.Println(debug.Line(), callNumber, "started", i, state)
+				defer func() {
+					fmt.Println(debug.Line(), callNumber, "finished", i, state)
+				}()
 
-			wgTime := time.Now()
-			exitCh := make(chan struct{})
-			deadlineTimeout := time.Millisecond * 50
-			deadline := time.After(deadlineTimeout)
-			go func() {
-				cluster[i].RunCycle(context.Background())
-				close(exitCh)
-			}()
-			select {
-			case <-exitCh:
-			case <-deadline:
-				stuckList[i] = true
-			}
+				wgTime := time.Now()
+				exitCh := make(chan struct{})
+				deadlineTimeout := time.Millisecond * 50
+				deadline := time.After(deadlineTimeout)
+				stuckListMtx.Lock()
+				if stuckList[i] {
+					stuckListMtx.Unlock()
+					return nil
+				}
+				stuckListMtx.Unlock()
 
-			if time.Since(wgTime).Milliseconds() > 400 {
-				fmt.Println(debug.Line(), "wgitme ", state, i, time.Since(wgTime), err1)
-				cluster[i].Print()
-			}
+				go func() {
+					stuckListMtx.Lock()
+					stuckList[i] = true
+					stuckListMtx.Unlock()
+					defer func() {
+						stuckListMtx.Lock()
+						stuckList[i] = false
+						stuckListMtx.Unlock()
 
-			return err1
-		})
-	}
+					}()
+					cluster[i].RunCycle(context.Background())
+					close(exitCh)
+				}()
+				select {
+				case <-exitCh:
+				case <-deadline:
+				}
 
-	fmt.Println(debug.Line(), "Wait", callNumber, stuckList)
-	if err := wg.Wait(); err != nil {
-		fmt.Println("Err, wg.Wait", err)
-		t.Error("wg wain", err)
-	}
+				if time.Since(wgTime).Milliseconds() > 400 {
+					fmt.Println(debug.Line(), "wgitme ", state, i, time.Since(wgTime), err1)
+					cluster[i].Print()
+				}
 
-	for i, node := range cluster {
-		fmt.Println(debug.Line(), node.GetState(), "validator", i)
-	}
-
-	callNumber++
-	fmt.Println(debug.Line(), "call", callNumber, " -----------------------------------", stuckList)
-	wg = errgroup.Group{}
-	for i := range cluster {
-		i := i
-		state := cluster[i].GetState()
-		wg.Go(func() (err1 error) {
-			fmt.Println(debug.Line(), callNumber, "started", i, state)
-			defer func() {
-				fmt.Println(debug.Line(), callNumber, "finished", i, state)
-			}()
-
-			wgTime := time.Now()
-			exitCh := make(chan struct{})
-			deadlineTimeout := time.Millisecond * 50
-			deadline := time.After(deadlineTimeout)
-			if stuckList[i] {
-				return nil
-			}
-			go func() {
-				cluster[i].RunCycle(context.Background())
-				close(exitCh)
-			}()
-			select {
-			case <-exitCh:
-			case <-deadline:
-				stuckList[i] = true
-			}
-
-			if time.Since(wgTime).Milliseconds() > 400 {
-				fmt.Println(debug.Line(), "wgitme ", state, i, time.Since(wgTime), err1)
-				cluster[i].Print()
-			}
-
-			return err1
-		})
-	}
-
-	fmt.Println(debug.Line(), "Wait", stuckList)
-	if err := wg.Wait(); err != nil {
-		fmt.Println("Err, wg.Wait", err)
-		t.Error("wg wain", err)
-	}
-
-	for i, node := range cluster {
-		fmt.Println(debug.Line(), node.GetState(), "validator", i)
-	}
-
-	callNumber++
-	fmt.Println(debug.Line(), callNumber, "stucked list", stuckList)
-
-	if checkNumTrue(stuckList, len(stuckList)) {
-		fmt.Println(debug.Line(), "send timeout")
-		for i := range timeoutsChan {
-			timeoutsChan[i] <- time.Now()
+				return err1
+			})
 		}
-		for i := range stuckList {
-			stuckList[i] = false
+
+		fmt.Println(debug.Line(), "Wait", callNumber, stuckList)
+		if err := wg.Wait(); err != nil {
+			fmt.Println("Err, wg.Wait", err)
+			t.Error("wg wain", err)
 		}
-	}
-	time.Sleep(time.Second * 3)
-	fmt.Println(debug.Line(), "call2.1 -----------------------------------")
-	wg = errgroup.Group{}
-	for i := range cluster {
-		i := i
-		state := cluster[i].GetState()
-		wg.Go(func() (err1 error) {
-			fmt.Println(debug.Line(), "started", i, state)
-			defer func() {
-				fmt.Println(debug.Line(), "finished", i, state)
-			}()
-			wgTime := time.Now()
-			exitCh := make(chan struct{})
-			deadlineTimeout := time.Millisecond * 50
-			deadline := time.After(deadlineTimeout)
-			go func() {
-				cluster[i].RunCycle(context.Background())
-				close(exitCh)
-			}()
-			select {
-			case <-exitCh:
-			case <-deadline:
-				stuckList[i] = true
+
+		for i, node := range cluster {
+			fmt.Println(debug.Line(), node.GetState(), "validator", i)
+		}
+
+		stuckListMtx.Lock()
+		b := checkNumTrue(stuckList, len(stuckList))
+		stuckListMtx.Unlock()
+		if b {
+			fmt.Println(debug.Line(), "send timeout")
+			for i := range timeoutsChan {
+				timeoutsChan[i] <- time.Now()
 			}
+			//for i := range stuckList {
+			//	stuckList[i] = false
+			//}
+		}
 
-			if time.Since(wgTime).Milliseconds() > 400 {
-				fmt.Println(debug.Line(), "wgitme ", state, i, time.Since(wgTime), err1)
-				cluster[i].Print()
-			}
-
-			return err1
-		})
-	}
-	fmt.Println(debug.Line(), "Wait", callNumber, stuckList)
-	if err := wg.Wait(); err != nil {
-		fmt.Println("Err, wg.Wait", err)
-		t.Error("wg wain", err)
 	}
 
-	for i, node := range cluster {
-		fmt.Println(debug.Line(), node.GetState(), "validator", i)
-	}
-
-	fmt.Println(debug.Line(), "call3 -----------------------------------", stuckList)
-	wg = errgroup.Group{}
-	for i := range cluster {
-		i := i
-		state := cluster[i].GetState()
-		wg.Go(func() (err1 error) {
-			wgTime := time.Now()
-			exitCh := make(chan struct{})
-			deadlineTimeout := time.Millisecond * 50
-			deadline := time.After(deadlineTimeout)
-			if stuckList[i] {
-				return nil
-			}
-			go func() {
-				cluster[i].RunCycle(context.Background())
-				close(exitCh)
-			}()
-			select {
-			case <-exitCh:
-			case <-deadline:
-				stuckList[i] = true
-			}
-
-			if time.Since(wgTime).Milliseconds() > 400 {
-				fmt.Println(debug.Line(), "wgitme ", state, i, time.Since(wgTime), err1)
-				cluster[i].Print()
-			}
-
-			return err1
-		})
-	}
-
-	fmt.Println(debug.Line(), "Wait", callNumber, stuckList)
-	if err := wg.Wait(); err != nil {
-		fmt.Println("Err, wg.Wait", err)
-		t.Error("wg wain", err)
-	}
-	time.Sleep(time.Second)
-	for i, node := range cluster {
-		fmt.Println(debug.Line(), node.GetState(), "validator", i)
-	}
-	fmt.Println(debug.Line(), "stuck list", stuckList)
-	fmt.Println(debug.Line(), "call4 -----------------------------------", stuckList)
-	wg = errgroup.Group{}
-	for i := range cluster {
-		i := i
-		state := cluster[i].GetState()
-		wg.Go(func() (err1 error) {
-			wgTime := time.Now()
-			exitCh := make(chan struct{})
-			deadlineTimeout := time.Millisecond * 50
-			deadline := time.After(deadlineTimeout)
-			go func() {
-				cluster[i].RunCycle(context.Background())
-				close(exitCh)
-			}()
-			select {
-			case <-exitCh:
-			case <-deadline:
-				//stuckList[i] = true
-			}
-
-			if time.Since(wgTime).Milliseconds() > 400 {
-				fmt.Println(debug.Line(), "wgitme ", state, i, time.Since(wgTime), err1)
-				cluster[i].Print()
-			}
-
-			return err1
-		})
-	}
-
-	fmt.Println(debug.Line(), "Wait", stuckList)
-	if err := wg.Wait(); err != nil {
-		fmt.Println("Err, wg.Wait", err)
-		t.Error("wg wain", err)
-	}
-	time.Sleep(time.Second)
-	for i, node := range cluster {
-		fmt.Println(debug.Line(), node.GetState(), "validator", i)
-	}
+	//wg = errgroup.Group{}
+	//for i := range cluster {
+	//	i := i
+	//	state := cluster[i].GetState()
+	//	wg.Go(func() (err1 error) {
+	//		fmt.Println(debug.Line(), callNumber, "started", i, state)
+	//		defer func() {
+	//			fmt.Println(debug.Line(), callNumber, "finished", i, state)
+	//		}()
 	//
-	//for num := 4; num <= 7; num++ {
-	//	fmt.Println(debug.Line(), "call", num, " -----------------------------------")
-	//	wg = errgroup.Group{}
-	//	for i := range cluster {
-	//		i := i
-	//		state := cluster[i].GetState()
-	//		wg.Go(func() (err1 error) {
-	//			wgTime := time.Now()
-	//			exitCh := make(chan struct{})
-	//			deadlineTimeout := time.Millisecond * 50
-	//			deadline := time.After(deadlineTimeout)
-	//			go func() {
-	//				cluster[i].RunCycle(context.Background())
-	//				close(exitCh)
-	//			}()
-	//			select {
-	//			case <-exitCh:
-	//			case <-deadline:
-	//				//stuckList[i] = true
-	//			}
+	//		wgTime := time.Now()
+	//		exitCh := make(chan struct{})
+	//		deadlineTimeout := time.Millisecond * 50
+	//		deadline := time.After(deadlineTimeout)
+	//		if stuckList[i] {
+	//			return nil
+	//		}
+	//		go func() {
+	//			cluster[i].RunCycle(context.Background())
+	//			close(exitCh)
+	//		}()
+	//		select {
+	//		case <-exitCh:
+	//		case <-deadline:
+	//			stuckList[i] = true
+	//		}
 	//
-	//			if time.Since(wgTime).Milliseconds() > 400 {
-	//				fmt.Println(debug.Line(), "wgitme ", state, i, time.Since(wgTime), err1)
-	//				cluster[i].Print()
-	//			}
+	//		if time.Since(wgTime).Milliseconds() > 400 {
+	//			fmt.Println(debug.Line(), "wgitme ", state, i, time.Since(wgTime), err1)
+	//			cluster[i].Print()
+	//		}
 	//
-	//			return err1
-	//		})
+	//		return err1
+	//	})
+	//}
+	//
+	//fmt.Println(debug.Line(), "Wait", stuckList)
+	//if err := wg.Wait(); err != nil {
+	//	fmt.Println("Err, wg.Wait", err)
+	//	t.Error("wg wain", err)
+	//}
+	//
+	//for i, node := range cluster {
+	//	fmt.Println(debug.Line(), node.GetState(), "validator", i)
+	//}
+	//
+	//callNumber++
+	//fmt.Println(debug.Line(), callNumber, "stucked list", stuckList)
+	//
+	//if checkNumTrue(stuckList, len(stuckList)) {
+	//	fmt.Println(debug.Line(), "send timeout")
+	//	for i := range timeoutsChan {
+	//		timeoutsChan[i] <- time.Now()
 	//	}
-	//
-	//	if err := wg.Wait(); err != nil {
-	//		fmt.Println("Err, wg.Wait", err)
-	//		t.Error("wg wain", err)
-	//	}
-	//	time.Sleep(time.Second)
-	//	for i, node := range cluster {
-	//		fmt.Println(debug.Line(), node.GetState(), "validator", i)
+	//	for i := range stuckList {
+	//		stuckList[i] = false
 	//	}
 	//}
+	//time.Sleep(time.Second * 3)
+	//fmt.Println(debug.Line(), "call2.1 -----------------------------------")
+	//wg = errgroup.Group{}
+	//for i := range cluster {
+	//	i := i
+	//	state := cluster[i].GetState()
+	//	wg.Go(func() (err1 error) {
+	//		fmt.Println(debug.Line(), "started", i, state)
+	//		defer func() {
+	//			fmt.Println(debug.Line(), "finished", i, state)
+	//		}()
+	//		wgTime := time.Now()
+	//		exitCh := make(chan struct{})
+	//		deadlineTimeout := time.Millisecond * 50
+	//		deadline := time.After(deadlineTimeout)
+	//		go func() {
+	//			cluster[i].RunCycle(context.Background())
+	//			close(exitCh)
+	//		}()
+	//		select {
+	//		case <-exitCh:
+	//		case <-deadline:
+	//			stuckList[i] = true
+	//		}
+	//
+	//		if time.Since(wgTime).Milliseconds() > 400 {
+	//			fmt.Println(debug.Line(), "wgitme ", state, i, time.Since(wgTime), err1)
+	//			cluster[i].Print()
+	//		}
+	//
+	//		return err1
+	//	})
+	//}
+	//fmt.Println(debug.Line(), "Wait", callNumber, stuckList)
+	//if err := wg.Wait(); err != nil {
+	//	fmt.Println("Err, wg.Wait", err)
+	//	t.Error("wg wain", err)
+	//}
+	//
+	//for i, node := range cluster {
+	//	fmt.Println(debug.Line(), node.GetState(), "validator", i)
+	//}
+	//
+	//fmt.Println(debug.Line(), "call3 -----------------------------------", stuckList)
+	//wg = errgroup.Group{}
+	//for i := range cluster {
+	//	i := i
+	//	state := cluster[i].GetState()
+	//	wg.Go(func() (err1 error) {
+	//		wgTime := time.Now()
+	//		exitCh := make(chan struct{})
+	//		deadlineTimeout := time.Millisecond * 50
+	//		deadline := time.After(deadlineTimeout)
+	//		if stuckList[i] {
+	//			return nil
+	//		}
+	//		go func() {
+	//			cluster[i].RunCycle(context.Background())
+	//			close(exitCh)
+	//		}()
+	//		select {
+	//		case <-exitCh:
+	//		case <-deadline:
+	//			stuckList[i] = true
+	//		}
+	//
+	//		if time.Since(wgTime).Milliseconds() > 400 {
+	//			fmt.Println(debug.Line(), "wgitme ", state, i, time.Since(wgTime), err1)
+	//			cluster[i].Print()
+	//		}
+	//
+	//		return err1
+	//	})
+	//}
+	//
+	//fmt.Println(debug.Line(), "Wait", callNumber, stuckList)
+	//if err := wg.Wait(); err != nil {
+	//	fmt.Println("Err, wg.Wait", err)
+	//	t.Error("wg wain", err)
+	//}
+	//time.Sleep(time.Second)
+	//for i, node := range cluster {
+	//	fmt.Println(debug.Line(), node.GetState(), "validator", i)
+	//}
+	//fmt.Println(debug.Line(), "stuck list", stuckList)
+	//fmt.Println(debug.Line(), "call4 -----------------------------------", stuckList)
+	//wg = errgroup.Group{}
+	//for i := range cluster {
+	//	i := i
+	//	state := cluster[i].GetState()
+	//	wg.Go(func() (err1 error) {
+	//		wgTime := time.Now()
+	//		exitCh := make(chan struct{})
+	//		deadlineTimeout := time.Millisecond * 50
+	//		deadline := time.After(deadlineTimeout)
+	//		go func() {
+	//			cluster[i].RunCycle(context.Background())
+	//			close(exitCh)
+	//		}()
+	//		select {
+	//		case <-exitCh:
+	//		case <-deadline:
+	//			//stuckList[i] = true
+	//		}
+	//
+	//		if time.Since(wgTime).Milliseconds() > 400 {
+	//			fmt.Println(debug.Line(), "wgitme ", state, i, time.Since(wgTime), err1)
+	//			cluster[i].Print()
+	//		}
+	//
+	//		return err1
+	//	})
+	//}
+	//
+	//fmt.Println(debug.Line(), "Wait", stuckList)
+	//if err := wg.Wait(); err != nil {
+	//	fmt.Println("Err, wg.Wait", err)
+	//	t.Error("wg wain", err)
+	//}
+	//time.Sleep(time.Second)
+	//for i, node := range cluster {
+	//	fmt.Println(debug.Line(), node.GetState(), "validator", i)
+	//}
+	////
+	////for num := 4; num <= 7; num++ {
+	////	fmt.Println(debug.Line(), "call", num, " -----------------------------------")
+	////	wg = errgroup.Group{}
+	////	for i := range cluster {
+	////		i := i
+	////		state := cluster[i].GetState()
+	////		wg.Go(func() (err1 error) {
+	////			wgTime := time.Now()
+	////			exitCh := make(chan struct{})
+	////			deadlineTimeout := time.Millisecond * 50
+	////			deadline := time.After(deadlineTimeout)
+	////			go func() {
+	////				cluster[i].RunCycle(context.Background())
+	////				close(exitCh)
+	////			}()
+	////			select {
+	////			case <-exitCh:
+	////			case <-deadline:
+	////				//stuckList[i] = true
+	////			}
+	////
+	////			if time.Since(wgTime).Milliseconds() > 400 {
+	////				fmt.Println(debug.Line(), "wgitme ", state, i, time.Since(wgTime), err1)
+	////				cluster[i].Print()
+	////			}
+	////
+	////			return err1
+	////		})
+	////	}
+	////
+	////	if err := wg.Wait(); err != nil {
+	////		fmt.Println("Err, wg.Wait", err)
+	////		t.Error("wg wain", err)
+	////	}
+	////	time.Sleep(time.Second)
+	////	for i, node := range cluster {
+	////		fmt.Println(debug.Line(), node.GetState(), "validator", i)
+	////	}
+	////}
 }
