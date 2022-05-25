@@ -355,7 +355,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 	p.state.CalcProposer()
 
 	isProposer := p.state.proposer == p.validator.NodeID()
-	//fmt.Println(debug.Line(), "proposer", isProposer, p.validator.NodeID())
+	fmt.Println(debug.Line(), "proposer", p.state.proposer, isProposer, "validator", p.validator.NodeID())
 	p.backend.Init(&RoundInfo{
 		Proposer:   p.state.proposer,
 		IsProposer: isProposer,

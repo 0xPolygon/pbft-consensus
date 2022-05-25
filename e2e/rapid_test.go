@@ -100,20 +100,14 @@ func TestCreateTwoSequentialBlocks_Success(t *testing.T) {
 	creatBlock()
 }
 
-type fakeTracer struct {
-}
-
-func (a *fakeTracer) Start(ctx context.Context, spanName string, opts ...trace.SpanStartOption) (context.Context, trace.Span) {
-	return context.TODO(), nil
-}
-
 type BackendFake struct {
-	nodes  []string
-	height uint64
-	//lastProposer pbft.NodeID
-	ProposalTime time.Duration
-	nodeId       int
-	IsStuckMock  func(num uint64) (uint64, bool)
+	nodes            []string
+	height           uint64
+	ProposalTime     time.Duration
+	nodeId           int
+	IsStuckMock      func(num uint64) (uint64, bool)
+	ValidatorSetList pbft.ValidatorSet
+	ValidatorSetMock func(fake *BackendFake) pbft.ValidatorSet
 }
 
 func (bf *BackendFake) BuildProposal() (*pbft.Proposal, error) {
@@ -141,13 +135,15 @@ func (bf *BackendFake) Height() uint64 {
 }
 
 func (bf *BackendFake) ValidatorSet() pbft.ValidatorSet {
+	if bf.ValidatorSetMock != nil {
+		return bf.ValidatorSetMock(bf)
+	}
 	valsAsNode := []pbft.NodeID{}
 	for _, i := range bf.nodes {
 		valsAsNode = append(valsAsNode, pbft.NodeID(i))
 	}
 	vv := valString{
 		nodes: valsAsNode,
-		//lastProposer: bf.lastProposer,
 	}
 	return &vv
 }
@@ -666,7 +662,8 @@ func TestCheckLivenessBugPropertyDebug(t *testing.T) {
 	roundTimeout := time.Millisecond * 5000
 	proposalTime := time.Duration(0)
 
-	numOfNodes := 4
+	numOfNodes := 5
+
 	rounds := map[uint64]map[int][]int{
 		0: {
 			0: {0, 1, 2},
@@ -684,16 +681,24 @@ func TestCheckLivenessBugPropertyDebug(t *testing.T) {
 
 	ft := &fakeTransport{
 		GossipFunc: func(ft *fakeTransport, msg *pbft.MessageReq) error {
-			routing := rounds[msg.View.Round]
-			//todo hack
-			from, err := strconv.Atoi(string(msg.From))
-			if err != nil {
-				t.Fatal(err)
+			routing, changed := rounds[msg.View.Round]
+			if changed {
+				//todo hack
+				from, err := strconv.Atoi(string(msg.From))
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, nodeId := range routing[from] {
+					fmt.Println(debug.Line(), "Push", msg.Type, "round", msg.View.Round, "from", msg.From, "to", nodeId)
+					ft.nodes[nodeId].PushMessage(msg)
+				}
+			} else {
+				for i := range ft.nodes {
+					ft.nodes[i].PushMessage(msg)
+				}
+
 			}
-			for _, nodeId := range routing[from] {
-				fmt.Println(debug.Line(), "Push", msg.Type, "round", msg.View.Round, "from", msg.From, "to", nodeId)
-				ft.nodes[nodeId].PushMessage(msg)
-			}
+
 			return nil
 		},
 	}
@@ -725,24 +730,46 @@ func TestCheckLivenessBugPropertyDebug(t *testing.T) {
 	for i := 0; i < numOfNodes; i++ {
 		cluster[i] = createNode(strconv.Itoa(i))
 	}
+
 	stuckList := make([]bool, len(cluster))
 	for i, node := range cluster {
 		i := i
 		node := node
-		node.SetBackend(&BackendFake{nodes: nodes, ProposalTime: proposalTime, nodeId: i, IsStuckMock: func(num uint64) (uint64, bool) {
-			fmt.Println(debug.Line(), "check is Stuck", i)
-			return 0, false
-		}})
+
+		valsAsNode := []pbft.NodeID{}
+		for _, i := range nodes {
+			valsAsNode = append(valsAsNode, pbft.NodeID(i))
+		}
+		vv := valString{
+			nodes: valsAsNode,
+		}
+
+		node.SetBackend(&BackendFake{
+			nodes:        nodes,
+			ProposalTime: proposalTime,
+			nodeId:       i,
+			IsStuckMock: func(num uint64) (uint64, bool) {
+				fmt.Println(debug.Line(), "check is Stuck", i)
+				return 0, false
+			},
+			ValidatorSetList: &vv,
+		})
 	}
 	for i := range cluster {
 		cluster[i].RunPrepare(context.Background())
 	}
 
+	callNumber := 1
 	wg := errgroup.Group{}
 	for i := range cluster {
 		i := i
 		state := cluster[i].GetState()
 		wg.Go(func() (err1 error) {
+			fmt.Println(debug.Line(), callNumber, "started", i, state)
+			defer func() {
+				fmt.Println(debug.Line(), callNumber, "finished", i, state)
+			}()
+
 			wgTime := time.Now()
 			exitCh := make(chan struct{})
 			deadlineTimeout := time.Millisecond * 50
@@ -766,6 +793,7 @@ func TestCheckLivenessBugPropertyDebug(t *testing.T) {
 		})
 	}
 
+	fmt.Println(debug.Line(), "Wait", callNumber, stuckList)
 	if err := wg.Wait(); err != nil {
 		fmt.Println("Err, wg.Wait", err)
 		t.Error("wg wain", err)
@@ -775,16 +803,25 @@ func TestCheckLivenessBugPropertyDebug(t *testing.T) {
 		fmt.Println(debug.Line(), node.GetState(), "validator", i)
 	}
 
-	fmt.Println(debug.Line(), "second call -----------------------------------")
+	callNumber++
+	fmt.Println(debug.Line(), "call", callNumber, " -----------------------------------", stuckList)
 	wg = errgroup.Group{}
 	for i := range cluster {
 		i := i
 		state := cluster[i].GetState()
 		wg.Go(func() (err1 error) {
+			fmt.Println(debug.Line(), callNumber, "started", i, state)
+			defer func() {
+				fmt.Println(debug.Line(), callNumber, "finished", i, state)
+			}()
+
 			wgTime := time.Now()
 			exitCh := make(chan struct{})
 			deadlineTimeout := time.Millisecond * 50
 			deadline := time.After(deadlineTimeout)
+			if stuckList[i] {
+				return nil
+			}
 			go func() {
 				cluster[i].RunCycle(context.Background())
 				close(exitCh)
@@ -804,6 +841,7 @@ func TestCheckLivenessBugPropertyDebug(t *testing.T) {
 		})
 	}
 
+	fmt.Println(debug.Line(), "Wait", stuckList)
 	if err := wg.Wait(); err != nil {
 		fmt.Println("Err, wg.Wait", err)
 		t.Error("wg wain", err)
@@ -813,21 +851,29 @@ func TestCheckLivenessBugPropertyDebug(t *testing.T) {
 		fmt.Println(debug.Line(), node.GetState(), "validator", i)
 	}
 
-	for i := range timeoutsChan {
-		timeoutsChan[i] <- time.Now()
-	}
-	fmt.Println("After sleep")
-	time.Sleep(time.Second * 2)
-	for i, node := range cluster {
-		fmt.Println(debug.Line(), node.GetState(), "validator", i)
-	}
+	callNumber++
+	fmt.Println(debug.Line(), callNumber, "stucked list", stuckList)
 
-	fmt.Println(debug.Line(), "")
+	if checkNumTrue(stuckList, len(stuckList)) {
+		fmt.Println(debug.Line(), "send timeout")
+		for i := range timeoutsChan {
+			timeoutsChan[i] <- time.Now()
+		}
+		for i := range stuckList {
+			stuckList[i] = false
+		}
+	}
+	time.Sleep(time.Second * 3)
+	fmt.Println(debug.Line(), "call2.1 -----------------------------------")
 	wg = errgroup.Group{}
 	for i := range cluster {
 		i := i
 		state := cluster[i].GetState()
 		wg.Go(func() (err1 error) {
+			fmt.Println(debug.Line(), "started", i, state)
+			defer func() {
+				fmt.Println(debug.Line(), "finished", i, state)
+			}()
 			wgTime := time.Now()
 			exitCh := make(chan struct{})
 			deadlineTimeout := time.Millisecond * 50
@@ -850,7 +896,49 @@ func TestCheckLivenessBugPropertyDebug(t *testing.T) {
 			return err1
 		})
 	}
+	fmt.Println(debug.Line(), "Wait", callNumber, stuckList)
+	if err := wg.Wait(); err != nil {
+		fmt.Println("Err, wg.Wait", err)
+		t.Error("wg wain", err)
+	}
 
+	for i, node := range cluster {
+		fmt.Println(debug.Line(), node.GetState(), "validator", i)
+	}
+
+	fmt.Println(debug.Line(), "call3 -----------------------------------", stuckList)
+	wg = errgroup.Group{}
+	for i := range cluster {
+		i := i
+		state := cluster[i].GetState()
+		wg.Go(func() (err1 error) {
+			wgTime := time.Now()
+			exitCh := make(chan struct{})
+			deadlineTimeout := time.Millisecond * 50
+			deadline := time.After(deadlineTimeout)
+			if stuckList[i] {
+				return nil
+			}
+			go func() {
+				cluster[i].RunCycle(context.Background())
+				close(exitCh)
+			}()
+			select {
+			case <-exitCh:
+			case <-deadline:
+				stuckList[i] = true
+			}
+
+			if time.Since(wgTime).Milliseconds() > 400 {
+				fmt.Println(debug.Line(), "wgitme ", state, i, time.Since(wgTime), err1)
+				cluster[i].Print()
+			}
+
+			return err1
+		})
+	}
+
+	fmt.Println(debug.Line(), "Wait", callNumber, stuckList)
 	if err := wg.Wait(); err != nil {
 		fmt.Println("Err, wg.Wait", err)
 		t.Error("wg wain", err)
@@ -859,7 +947,8 @@ func TestCheckLivenessBugPropertyDebug(t *testing.T) {
 	for i, node := range cluster {
 		fmt.Println(debug.Line(), node.GetState(), "validator", i)
 	}
-
+	fmt.Println(debug.Line(), "stuck list", stuckList)
+	fmt.Println(debug.Line(), "call4 -----------------------------------", stuckList)
 	wg = errgroup.Group{}
 	for i := range cluster {
 		i := i
@@ -876,7 +965,7 @@ func TestCheckLivenessBugPropertyDebug(t *testing.T) {
 			select {
 			case <-exitCh:
 			case <-deadline:
-				stuckList[i] = true
+				//stuckList[i] = true
 			}
 
 			if time.Since(wgTime).Milliseconds() > 400 {
@@ -888,6 +977,7 @@ func TestCheckLivenessBugPropertyDebug(t *testing.T) {
 		})
 	}
 
+	fmt.Println(debug.Line(), "Wait", stuckList)
 	if err := wg.Wait(); err != nil {
 		fmt.Println("Err, wg.Wait", err)
 		t.Error("wg wain", err)
@@ -896,5 +986,44 @@ func TestCheckLivenessBugPropertyDebug(t *testing.T) {
 	for i, node := range cluster {
 		fmt.Println(debug.Line(), node.GetState(), "validator", i)
 	}
-
+	//
+	//for num := 4; num <= 7; num++ {
+	//	fmt.Println(debug.Line(), "call", num, " -----------------------------------")
+	//	wg = errgroup.Group{}
+	//	for i := range cluster {
+	//		i := i
+	//		state := cluster[i].GetState()
+	//		wg.Go(func() (err1 error) {
+	//			wgTime := time.Now()
+	//			exitCh := make(chan struct{})
+	//			deadlineTimeout := time.Millisecond * 50
+	//			deadline := time.After(deadlineTimeout)
+	//			go func() {
+	//				cluster[i].RunCycle(context.Background())
+	//				close(exitCh)
+	//			}()
+	//			select {
+	//			case <-exitCh:
+	//			case <-deadline:
+	//				//stuckList[i] = true
+	//			}
+	//
+	//			if time.Since(wgTime).Milliseconds() > 400 {
+	//				fmt.Println(debug.Line(), "wgitme ", state, i, time.Since(wgTime), err1)
+	//				cluster[i].Print()
+	//			}
+	//
+	//			return err1
+	//		})
+	//	}
+	//
+	//	if err := wg.Wait(); err != nil {
+	//		fmt.Println("Err, wg.Wait", err)
+	//		t.Error("wg wain", err)
+	//	}
+	//	time.Sleep(time.Second)
+	//	for i, node := range cluster {
+	//		fmt.Println(debug.Line(), node.GetState(), "validator", i)
+	//	}
+	//}
 }
