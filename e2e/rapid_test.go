@@ -731,7 +731,6 @@ func TestCheckLivenessBugPropertyDebug(t *testing.T) {
 		cluster[i] = createNode(strconv.Itoa(i))
 	}
 
-	stuckList := make([]bool, len(cluster))
 	for i, node := range cluster {
 		i := i
 		node := node
@@ -759,8 +758,12 @@ func TestCheckLivenessBugPropertyDebug(t *testing.T) {
 		cluster[i].RunPrepare(context.Background())
 	}
 
+	stuckList := make([]bool, len(cluster))
 	stuckListMtx := sync.RWMutex{}
-	for callNumber := 1; callNumber < 10; callNumber++ {
+	doneList := make([]bool, len(cluster))
+	doneListMtx := sync.RWMutex{}
+
+	for callNumber := 1; callNumber < 30; callNumber++ {
 		fmt.Println(debug.Line(), "call", callNumber, " -----------------------------------", stuckList)
 		wg := errgroup.Group{}
 		for i := range cluster {
@@ -782,6 +785,13 @@ func TestCheckLivenessBugPropertyDebug(t *testing.T) {
 					return nil
 				}
 				stuckListMtx.Unlock()
+
+				doneListMtx.Lock()
+				if doneList[i] {
+					doneListMtx.Unlock()
+					return nil
+				}
+				doneListMtx.Unlock()
 
 				go func() {
 					stuckListMtx.Lock()
@@ -817,7 +827,13 @@ func TestCheckLivenessBugPropertyDebug(t *testing.T) {
 		}
 
 		for i, node := range cluster {
-			fmt.Println(debug.Line(), node.GetState(), "validator", i)
+			state := node.GetState()
+			fmt.Println(debug.Line(), state, "validator", i)
+			if state == pbft.DoneState {
+				doneListMtx.Lock()
+				doneList[i] = true
+				doneListMtx.Unlock()
+			}
 		}
 
 		stuckListMtx.Lock()
@@ -832,5 +848,6 @@ func TestCheckLivenessBugPropertyDebug(t *testing.T) {
 			//	stuckList[i] = false
 			//}
 		}
+
 	}
 }
