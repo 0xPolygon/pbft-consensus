@@ -781,6 +781,7 @@ func TestCheckLivenessBugPropertyDebug(t *testing.T) {
 				deadline := time.After(deadlineTimeout)
 				stuckListMtx.Lock()
 				if stuckList[i] {
+					fmt.Println(debug.Line(), i, "stucked")
 					stuckListMtx.Unlock()
 					return nil
 				}
@@ -848,6 +849,10 @@ func TestCheckLivenessBugPropertyDebug(t *testing.T) {
 			//	stuckList[i] = false
 			//}
 		}
+	}
 
+	fmt.Println(debug.Line(), "Result------------------------")
+	for i := range cluster {
+		fmt.Println(debug.Line(), i, cluster[i].GetState())
 	}
 }
