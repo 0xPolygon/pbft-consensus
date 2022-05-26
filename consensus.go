@@ -834,6 +834,11 @@ func (p *Pbft) IsLocked() bool {
 	return p.state.locked
 }
 
+// IsLocked returns if the current proposal is locked
+func (p *Pbft) Height() uint64 {
+	return p.state.view.Sequence
+}
+
 // GetProposal returns current proposal in the pbft
 func (p *Pbft) GetProposal() *Proposal {
 	return p.state.proposal

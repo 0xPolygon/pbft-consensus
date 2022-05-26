@@ -662,25 +662,19 @@ func TestCheckLivenessBugPropertyDebug(t *testing.T) {
 	roundTimeout := time.Millisecond * 5000
 	proposalTime := time.Duration(0)
 
-	numOfNodes := 5
+	numOfNodes := 4
 
 	rounds := map[uint64]map[int][]int{
 		0: {
-			0: {0, 1, 2},
-			1: {0},
-			2: {0, 3},
-			3: {0},
-		},
-		1: {
-			0: {1},
-			1: {1, 2, 3},
-			2: {1},
-			3: {1},
+			0: {0, 1, 3, 2},
+			1: {0, 1, 3},
+			2: {0, 1, 2, 3},
 		},
 	}
-
+	countPrepare := 0
 	ft := &fakeTransport{
 		GossipFunc: func(ft *fakeTransport, msg *pbft.MessageReq) error {
+			fmt.Println("Round ", msg.View.Round)
 			routing, changed := rounds[msg.View.Round]
 			if changed {
 				//todo hack
@@ -689,12 +683,31 @@ func TestCheckLivenessBugPropertyDebug(t *testing.T) {
 					t.Fatal(err)
 				}
 				for _, nodeId := range routing[from] {
+					// restrict prepare messages to node 3 in round 0
+					if msg.Type == pbft.MessageReq_Prepare && nodeId == 3 {
+						countPrepare++
+						if countPrepare == 3 {
+							fmt.Println("Ignoring prepare 3")
+							continue
+						}
+					}
+					// do not send commit for round 0
+					if msg.Type == pbft.MessageReq_Commit {
+						continue
+					}
+
 					fmt.Println(debug.Line(), "Push", msg.Type, "round", msg.View.Round, "from", msg.From, "to", nodeId)
 					ft.nodes[nodeId].PushMessage(msg)
 				}
 			} else {
 				for i := range ft.nodes {
-					ft.nodes[i].PushMessage(msg)
+					from, _ := strconv.Atoi(string(msg.From))
+					// for rounds >0 do not send messages to/from node 3
+					if i == 3 || from == 3 {
+						fmt.Println(debug.Line(), "Node 3 ignored")
+					} else {
+						ft.nodes[i].PushMessage(msg)
+					}
 				}
 
 			}
@@ -829,6 +842,8 @@ func TestCheckLivenessBugPropertyDebug(t *testing.T) {
 		for i, node := range cluster {
 			state := node.GetState()
 			fmt.Println(debug.Line(), state, "validator", i)
+			fmt.Println(debug.Line(), "isLocked", node.IsLocked())
+			fmt.Println(debug.Line(), "Sequence", node.Height())
 			if state == pbft.DoneState {
 				doneListMtx.Lock()
 				doneList[i] = true
