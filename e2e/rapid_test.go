@@ -1059,3 +1059,217 @@ func TestCheckLivenessBug2Debug(t *testing.T) {
 
 	}
 }
+
+func TestCheckLivenessPropertyCheck(t *testing.T) {
+	//params
+	roundTimeout := time.Millisecond * 5000
+	proposalTime := time.Duration(0)
+
+	numOfNodes := 4
+
+	rounds := map[uint64]map[int][]int{
+		0: {
+			0: {0, 1, 3, 2},
+			1: {0, 1, 3},
+			2: {0, 1, 2, 3},
+		},
+	}
+
+	countPrepare := 0
+	ft := &fakeTransport{
+		GossipFunc: func(ft *fakeTransport, msg *pbft.MessageReq) error {
+			routing, changed := rounds[msg.View.Round]
+			if changed {
+				//todo hack
+				from, err := strconv.Atoi(string(msg.From))
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, nodeId := range routing[from] {
+					// restrict prepare messages to node 3 in round 0
+					if msg.Type == pbft.MessageReq_Prepare && nodeId == 3 {
+						countPrepare++
+						if countPrepare == 3 {
+							fmt.Println("Ignoring prepare 3")
+							continue
+						}
+					}
+					// do not send commit for round 0
+					if msg.Type == pbft.MessageReq_Commit {
+						continue
+					}
+				}
+			} else {
+				for i := range ft.nodes {
+					from, _ := strconv.Atoi(string(msg.From))
+					// for rounds >0 do not send messages to/from node 3
+					if i == 3 || from == 3 {
+						fmt.Println(debug.Line(), "Node 3 ignored")
+					} else {
+						ft.nodes[i].PushMessage(msg)
+					}
+				}
+			}
+
+			return nil
+		},
+	}
+
+	timeoutsChan := make([]chan time.Time, numOfNodes)
+	nodes := []string{}
+	createNode := func(name string) *pbft.Pbft {
+		node := pbft.New(key(name), ft,
+			pbft.WithTracer(trace.NewNoopTracerProvider().Tracer("")),
+			func(config *pbft.Config) {
+				config.RoundTimeout = func(u uint64) time.Duration {
+					return roundTimeout
+				}
+			},
+			pbft.WithLogger(log.New(io.Discard, "", 0)),
+		)
+		nodeID, _ := strconv.Atoi(name)
+		timeoutsChan[nodeID] = make(chan time.Time)
+		// round timeout mock
+		node.SetRoundTimeoutFunction(func() <-chan time.Time {
+			return timeoutsChan[nodeID]
+		})
+		nodes = append(nodes, name)
+		ft.nodes = append(ft.nodes, node)
+		return node
+	}
+
+	cluster := make([]*pbft.Pbft, numOfNodes)
+	for i := 0; i < numOfNodes; i++ {
+		cluster[i] = createNode(strconv.Itoa(i))
+	}
+
+	for i, node := range cluster {
+		i := i
+		node := node
+
+		valsAsNode := []pbft.NodeID{}
+		for _, i := range nodes {
+			valsAsNode = append(valsAsNode, pbft.NodeID(i))
+		}
+		vv := valString{
+			nodes: valsAsNode,
+		}
+
+		node.SetBackend(&BackendFake{
+			nodes:        nodes,
+			ProposalTime: proposalTime,
+			nodeId:       i,
+			IsStuckMock: func(num uint64) (uint64, bool) {
+				fmt.Println(debug.Line(), "check is Stuck", i)
+				return 0, false
+			},
+			ValidatorSetList: &vv,
+		})
+	}
+	for i := range cluster {
+		cluster[i].RunPrepare(context.Background())
+	}
+
+	stuckList := make([]bool, len(cluster))
+	stuckListMtx := sync.RWMutex{}
+	doneList := make([]bool, len(cluster))
+	doneListMtx := sync.RWMutex{}
+
+	callNumber := 0
+	for {
+		callNumber++
+		fmt.Println(debug.Line(), "call", callNumber, " -----------------------------------", stuckList)
+		wg := errgroup.Group{}
+		for i := range cluster {
+			i := i
+			state := cluster[i].GetState()
+			wg.Go(func() (err1 error) {
+				fmt.Println(debug.Line(), callNumber, "started", i, state)
+				defer func() {
+					fmt.Println(debug.Line(), callNumber, "finished", i, state)
+				}()
+
+				wgTime := time.Now()
+				exitCh := make(chan struct{})
+				deadlineTimeout := time.Millisecond * 50
+				deadline := time.After(deadlineTimeout)
+				stuckListMtx.Lock()
+				isStuck := stuckList[i]
+				stuckListMtx.Unlock()
+				if isStuck {
+					return nil
+				}
+
+				doneListMtx.Lock()
+				isDone := doneList[i]
+				doneListMtx.Unlock()
+				if isDone {
+					return nil
+				}
+
+				go func() {
+					stuckListMtx.Lock()
+					stuckList[i] = true
+					stuckListMtx.Unlock()
+					defer func() {
+						stuckListMtx.Lock()
+						stuckList[i] = false
+						stuckListMtx.Unlock()
+					}()
+					cluster[i].RunCycle(context.Background())
+					close(exitCh)
+				}()
+				select {
+				case <-exitCh:
+				case <-deadline:
+				}
+
+				if time.Since(wgTime).Milliseconds() > 400 {
+					fmt.Println(debug.Line(), "wgitme ", state, i, time.Since(wgTime), err1)
+					cluster[i].Print()
+				}
+
+				return err1
+			})
+		}
+
+		fmt.Println(debug.Line(), "Wait", callNumber, stuckList)
+		if err := wg.Wait(); err != nil {
+			fmt.Println("Err, wg.Wait", err)
+			t.Error("wg wain", err)
+		}
+
+		for i, node := range cluster {
+			state := node.GetState()
+			fmt.Println(debug.Line(), state, "validator", i)
+			fmt.Println(debug.Line(), "isLocked", node.IsLocked())
+			fmt.Println(debug.Line(), "Sequence", node.Height())
+			if state == pbft.DoneState {
+				doneListMtx.Lock()
+				doneList[i] = true
+				doneListMtx.Unlock()
+			}
+		}
+
+		stuckListMtx.Lock()
+		b := checkNumTrue(stuckList, len(stuckList))
+		stuckListMtx.Unlock()
+		if b {
+			fmt.Println(debug.Line(), "send timeout")
+			for i := range timeoutsChan {
+				timeoutsChan[i] <- time.Now()
+				stuckListMtx.Lock()
+				stuckList[i] = false
+				stuckListMtx.Unlock()
+			}
+		}
+
+		doneListMtx.Lock()
+		b = checkNumTrue(doneList, 3)
+		doneListMtx.Unlock()
+		if b {
+			fmt.Println(debug.Line(), "done")
+			return
+		}
+	}
+}
