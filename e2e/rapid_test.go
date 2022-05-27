@@ -848,7 +848,6 @@ func TestCheckLivenessBugPropertyDebug(t *testing.T) {
 			//	stuckList[i] = false
 			//}
 		}
-
 	}
 }
 
@@ -870,7 +869,7 @@ func TestCheckLivenessBug2Debug(t *testing.T) {
 	countPrepare := 0
 	ft := &fakeTransport{
 		GossipFunc: func(ft *fakeTransport, msg *pbft.MessageReq) error {
-			fmt.Println("Round ", msg.View.Round)
+			//fmt.Println("Round ", msg.View.Round)
 			routing, changed := rounds[msg.View.Round]
 			if changed {
 				//todo hack
@@ -891,6 +890,9 @@ func TestCheckLivenessBug2Debug(t *testing.T) {
 					if msg.Type == pbft.MessageReq_Commit {
 						continue
 					}
+
+					fmt.Println(debug.Line(), "Push", msg.Type, "round", msg.View.Round, "from", msg.From, "to", nodeId)
+					ft.nodes[nodeId].PushMessage(msg)
 				}
 			} else {
 				for i := range ft.nodes {
@@ -1061,12 +1063,8 @@ func TestCheckLivenessBug2Debug(t *testing.T) {
 }
 
 func TestCheckLivenessPropertyCheck(t *testing.T) {
-	//params
-	roundTimeout := time.Millisecond * 5000
-	proposalTime := time.Duration(0)
-
-	numOfNodes := 4
-
+	//rapid.Check(t, func(t *rapid.T) {
+	numOfNodes := 4 //rapid.IntRange(4, 4).Draw(t, "number of nodes").(int)
 	rounds := map[uint64]map[int][]int{
 		0: {
 			0: {0, 1, 3, 2},
@@ -1098,6 +1096,10 @@ func TestCheckLivenessPropertyCheck(t *testing.T) {
 					if msg.Type == pbft.MessageReq_Commit {
 						continue
 					}
+
+					fmt.Println(debug.Line(), "Push", msg.Type, "round", msg.View.Round, "from", msg.From, "to", nodeId)
+					ft.nodes[nodeId].PushMessage(msg)
+
 				}
 			} else {
 				for i := range ft.nodes {
@@ -1114,66 +1116,13 @@ func TestCheckLivenessPropertyCheck(t *testing.T) {
 			return nil
 		},
 	}
-
-	timeoutsChan := make([]chan time.Time, numOfNodes)
-	nodes := []string{}
-	createNode := func(name string) *pbft.Pbft {
-		node := pbft.New(key(name), ft,
-			pbft.WithTracer(trace.NewNoopTracerProvider().Tracer("")),
-			func(config *pbft.Config) {
-				config.RoundTimeout = func(u uint64) time.Duration {
-					return roundTimeout
-				}
-			},
-			pbft.WithLogger(log.New(io.Discard, "", 0)),
-		)
-		nodeID, _ := strconv.Atoi(name)
-		timeoutsChan[nodeID] = make(chan time.Time)
-		// round timeout mock
-		node.SetRoundTimeoutFunction(func() <-chan time.Time {
-			return timeoutsChan[nodeID]
-		})
-		nodes = append(nodes, name)
-		ft.nodes = append(ft.nodes, node)
-		return node
-	}
-
-	cluster := make([]*pbft.Pbft, numOfNodes)
-	for i := 0; i < numOfNodes; i++ {
-		cluster[i] = createNode(strconv.Itoa(i))
-	}
-
-	for i, node := range cluster {
-		i := i
-		node := node
-
-		valsAsNode := []pbft.NodeID{}
-		for _, i := range nodes {
-			valsAsNode = append(valsAsNode, pbft.NodeID(i))
-		}
-		vv := valString{
-			nodes: valsAsNode,
-		}
-
-		node.SetBackend(&BackendFake{
-			nodes:        nodes,
-			ProposalTime: proposalTime,
-			nodeId:       i,
-			IsStuckMock: func(num uint64) (uint64, bool) {
-				fmt.Println(debug.Line(), "check is Stuck", i)
-				return 0, false
-			},
-			ValidatorSetList: &vv,
-		})
-	}
+	cluster, timeoutsChan := generateCluster(numOfNodes, ft)
 	for i := range cluster {
 		cluster[i].RunPrepare(context.Background())
 	}
 
-	stuckList := make([]bool, len(cluster))
-	stuckListMtx := sync.RWMutex{}
-	doneList := make([]bool, len(cluster))
-	doneListMtx := sync.RWMutex{}
+	stuckList := NewBoolSlice(len(cluster))
+	doneList := NewBoolSlice(len(cluster))
 
 	callNumber := 0
 	for {
@@ -1193,28 +1142,18 @@ func TestCheckLivenessPropertyCheck(t *testing.T) {
 				exitCh := make(chan struct{})
 				deadlineTimeout := time.Millisecond * 50
 				deadline := time.After(deadlineTimeout)
-				stuckListMtx.Lock()
-				isStuck := stuckList[i]
-				stuckListMtx.Unlock()
-				if isStuck {
+				if stuckList.Get(i) {
 					return nil
 				}
 
-				doneListMtx.Lock()
-				isDone := doneList[i]
-				doneListMtx.Unlock()
-				if isDone {
+				if doneList.Get(i) {
 					return nil
 				}
 
 				go func() {
-					stuckListMtx.Lock()
-					stuckList[i] = true
-					stuckListMtx.Unlock()
+					stuckList.Set(i, true)
 					defer func() {
-						stuckListMtx.Lock()
-						stuckList[i] = false
-						stuckListMtx.Unlock()
+						stuckList.Set(i, false)
 					}()
 					cluster[i].RunCycle(context.Background())
 					close(exitCh)
@@ -1244,32 +1183,132 @@ func TestCheckLivenessPropertyCheck(t *testing.T) {
 			fmt.Println(debug.Line(), state, "validator", i)
 			fmt.Println(debug.Line(), "isLocked", node.IsLocked())
 			fmt.Println(debug.Line(), "Sequence", node.Height())
+			fmt.Println(debug.Line(), "Round", node.Round())
 			if state == pbft.DoneState {
-				doneListMtx.Lock()
-				doneList[i] = true
-				doneListMtx.Unlock()
+				doneList.Set(i, true)
 			}
 		}
 
-		stuckListMtx.Lock()
-		b := checkNumTrue(stuckList, len(stuckList))
-		stuckListMtx.Unlock()
-		if b {
-			fmt.Println(debug.Line(), "send timeout")
+		if stuckList.CalculateNum(true) == numOfNodes {
 			for i := range timeoutsChan {
+				fmt.Println(debug.Line(), "send timeout", i)
 				timeoutsChan[i] <- time.Now()
-				stuckListMtx.Lock()
-				stuckList[i] = false
-				stuckListMtx.Unlock()
+				stuckList.Set(i, false)
 			}
 		}
 
-		doneListMtx.Lock()
-		b = checkNumTrue(doneList, 3)
-		doneListMtx.Unlock()
-		if b {
+		if doneList.CalculateNum(true) >= 3 {
 			fmt.Println(debug.Line(), "done")
 			return
 		}
+		//todo more generalized check
+		for i := range cluster {
+			if cluster[i].Round() > 5 {
+				t.Error("Infinite rounds")
+				return
+			}
+
+		}
 	}
+
+	//})
+}
+
+func NewBoolSlice(ln int) *BoolSlice {
+	return &BoolSlice{
+		slice: make([]bool, ln),
+	}
+}
+
+type BoolSlice struct {
+	slice []bool
+	mtx   sync.RWMutex
+}
+
+func (bs *BoolSlice) Set(i int, b bool) {
+	bs.mtx.Lock()
+	defer bs.mtx.Unlock()
+	bs.slice[i] = b
+}
+func (bs *BoolSlice) Get(i int) bool {
+	bs.mtx.Lock()
+	defer bs.mtx.Unlock()
+	return bs.slice[i]
+}
+
+func (bs *BoolSlice) Iterate(f func(k int, v bool)) {
+	bs.mtx.RUnlock()
+	defer bs.mtx.RUnlock()
+	for k, v := range bs.slice {
+		f(k, v)
+	}
+}
+
+func (bs *BoolSlice) CalculateNum(val bool) int {
+	bs.mtx.RLock()
+	defer bs.mtx.RUnlock()
+	nm := 0
+	for _, v := range bs.slice {
+		if v == val {
+			nm++
+		}
+	}
+	return nm
+}
+
+func (bs *BoolSlice) String() string {
+	bs.mtx.RLock()
+	defer bs.mtx.RUnlock()
+	return fmt.Sprintf("%v", bs.slice)
+}
+
+func generateNode(id int, transport *fakeTransport) (*pbft.Pbft, chan time.Time) {
+	node := pbft.New(key(strconv.Itoa(id)), transport,
+		pbft.WithTracer(trace.NewNoopTracerProvider().Tracer("")),
+		func(config *pbft.Config) {},
+		pbft.WithLogger(log.New(io.Discard, "", 0)),
+	)
+
+	timeoutChan := make(chan time.Time)
+	// round timeout mock
+	node.SetRoundTimeoutFunction(func() <-chan time.Time {
+		return timeoutChan
+	})
+
+	transport.nodes = append(transport.nodes, node)
+	return node, timeoutChan
+}
+
+func generateCluster(numOfNodes int, transport *fakeTransport) ([]*pbft.Pbft, []chan time.Time) {
+	nodes := make([]string, numOfNodes)
+	timeoutsChan := make([]chan time.Time, numOfNodes)
+	cluster := make([]*pbft.Pbft, numOfNodes)
+	for i := 0; i < numOfNodes; i++ {
+		cluster[i], timeoutsChan[i] = generateNode(i, transport)
+		nodes[i] = strconv.Itoa(i)
+	}
+
+	for i, node := range cluster {
+		i := i
+		node := node
+
+		valsAsNode := []pbft.NodeID{}
+		for _, i := range nodes {
+			valsAsNode = append(valsAsNode, pbft.NodeID(i))
+		}
+		vv := valString{
+			nodes: valsAsNode,
+		}
+
+		node.SetBackend(&BackendFake{
+			nodes:  nodes,
+			nodeId: i,
+			IsStuckMock: func(num uint64) (uint64, bool) {
+				fmt.Println(debug.Line(), "check is Stuck", i, num)
+				return 0, false
+			},
+			ValidatorSetList: &vv,
+		})
+	}
+	return cluster, timeoutsChan
 }

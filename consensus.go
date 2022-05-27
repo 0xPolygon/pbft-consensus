@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"github.com/0xPolygon/pbft-consensus/debug"
@@ -359,13 +360,13 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 	p.backend.Init(&RoundInfo{
 		Proposer:   p.state.proposer,
 		IsProposer: isProposer,
-		Locked:     p.state.locked,
+		Locked:     p.state.IsLocked(),
 	})
 
 	// log the current state of this span
 	span.SetAttributes(
 		attribute.Bool("isproposer", isProposer),
-		attribute.Bool("locked", p.state.locked),
+		attribute.Bool("locked", p.state.IsLocked()),
 		attribute.String("proposer", string(p.state.proposer)),
 	)
 
@@ -374,7 +375,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 	if isProposer {
 		p.logger.Printf("[INFO] we are the proposer")
 
-		if !p.state.locked {
+		if !p.state.IsLocked() {
 			// since the state is not locked, we need to build a new proposal
 			p.state.proposal, err = p.backend.BuildProposal()
 			if err != nil {
@@ -447,7 +448,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 			return
 		}
 
-		if p.state.locked {
+		if p.state.IsLocked() {
 			// the state is locked, we need to receive the same proposal
 			fmt.Println(debug.Line(), "send commit", p.state.proposal.Equal(proposal))
 			if p.state.proposal.Equal(proposal) {
@@ -831,7 +832,7 @@ func (p *Pbft) setState(s PbftState) {
 
 // IsLocked returns if the current proposal is locked
 func (p *Pbft) IsLocked() bool {
-	return p.state.locked
+	return atomic.LoadUint64(&p.state.locked) == 1
 }
 
 // GetProposal returns current proposal in the pbft
@@ -842,13 +843,16 @@ func (p *Pbft) GetProposal() *Proposal {
 func (p *Pbft) Height() uint64 {
 	return p.state.view.Sequence
 }
+func (p *Pbft) Round() uint64 {
+	return p.state.view.Round
+}
 
 // getNextMessage reads a new message from the message queue
 func (p *Pbft) getNextMessage(span trace.Span) (*MessageReq, bool) {
 	for {
 		msg, discards := p.notifier.ReadNextMessage(p)
 		// send the discard messages
-		p.logger.Printf("[TRACE] Current state %s, number of prepared messages: %d, number of committed messages %d", PbftState(p.state.state), p.state.numPrepared(), p.state.numCommitted())
+		p.logger.Printf("[TRACE] Current state %s, number of prepared messages: %d, number of committed messages %d", p.getState(), p.state.numPrepared(), p.state.numCommitted())
 
 		for _, msg := range discards {
 			p.logger.Printf("[TRACE] Discarded %s ", msg)

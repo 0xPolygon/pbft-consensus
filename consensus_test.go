@@ -70,7 +70,7 @@ func TestTransition_AcceptState_Proposer_Locked(t *testing.T) {
 	i := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
 	i.setState(AcceptState)
 
-	i.state.locked = true
+	i.state.lock()
 	i.state.proposal = &Proposal{
 		Data: mockProposal,
 		Hash: digest,
@@ -266,7 +266,7 @@ func TestTransition_AcceptState_Validator_LockCorrect(t *testing.T) {
 		Data: proposal,
 		Hash: digest,
 	}
-	i.state.locked = true
+	i.state.lock()
 
 	i.emitMsg(&MessageReq{
 		From:     "A",
