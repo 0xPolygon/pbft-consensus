@@ -2,6 +2,7 @@ package pbft
 
 import (
 	"container/heap"
+	"fmt"
 	"sync"
 )
 
@@ -92,6 +93,20 @@ func (m *msgQueue) getQueue(state PbftState) *msgQueueImpl {
 	}
 }
 
+// iterator fetches corresponding message queue based on pbft state and invokes iteratorLocked method against it.
+func (m *msgQueue) iterator(pbftState PbftState, iterateHandler func(*MessageReq)) error {
+	m.queueLock.Lock()
+	defer m.queueLock.Unlock()
+
+	queueImpl := m.getQueue(pbftState)
+	if queueImpl == nil {
+		return fmt.Errorf("failed to resolve message queue for %s message type", MessageReq_Commit)
+	}
+
+	queueImpl.iteratorLocked(iterateHandler)
+	return nil
+}
+
 // newMsgQueue creates a new message queue structure
 func newMsgQueue() *msgQueue {
 	return &msgQueue{
@@ -175,6 +190,16 @@ func (m *msgQueueImpl) Pop() interface{} {
 	old[n-1] = nil
 	*m = old[0 : n-1]
 	return item
+}
+
+// iteratorLocked is iterator with custom handler which contains some arbitrary logic.
+// It is assumed that method is invoked within the lock.
+func (m *msgQueueImpl) iteratorLocked(iterateHandler func(*MessageReq)) {
+	for _, msg := range *m {
+		if iterateHandler != nil {
+			iterateHandler(msg.Copy())
+		}
+	}
 }
 
 // cmpView compares two proto views.
