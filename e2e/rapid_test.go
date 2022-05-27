@@ -709,7 +709,6 @@ func TestCheckLivenessBugPropertyDebug(t *testing.T) {
 						ft.nodes[i].PushMessage(msg)
 					}
 				}
-
 			}
 
 			return nil
@@ -853,16 +852,17 @@ func TestCheckLivenessBugPropertyDebug(t *testing.T) {
 
 		stuckListMtx.Lock()
 		b := checkNumTrue(stuckList, len(stuckList))
-		stuckListMtx.Unlock()
 		if b {
 			fmt.Println(debug.Line(), "send timeout")
 			for i := range timeoutsChan {
 				timeoutsChan[i] <- time.Now()
+				stuckList[i] = false
 			}
-			//for i := range stuckList {
-			//	stuckList[i] = false
-			//}
 		}
+		stuckListMtx.Unlock()
+	}
 
+	for i := range cluster {
+		fmt.Println(debug.Line(), i, cluster[i].GetState())
 	}
 }
