@@ -839,6 +839,10 @@ func (p *Pbft) GetProposal() *Proposal {
 	return p.state.proposal
 }
 
+func (p *Pbft) Height() uint64 {
+	return p.state.view.Sequence
+}
+
 // getNextMessage reads a new message from the message queue
 func (p *Pbft) getNextMessage(span trace.Span) (*MessageReq, bool) {
 	for {
