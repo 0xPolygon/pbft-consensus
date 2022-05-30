@@ -297,8 +297,9 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 	_, span := p.tracer.Start(ctx, "AcceptState")
 	defer span.End()
 	startTime := time.Now()
-	defer p.stats.AcceptState(startTime)
-
+	defer p.stats.StateDuration(uint32(AcceptState), startTime)
+	// todo backend init?
+	p.stats.SetView(p.state.view.Sequence, p.state.view.Round)
 	p.logger.Printf("[INFO] accept state: sequence %d", p.state.view.Sequence)
 
 	if !p.state.validators.Includes(p.validator.NodeID()) {
@@ -422,7 +423,7 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 	ctx, span := p.tracer.Start(ctx, "ValidateState")
 	defer span.End()
 	startTime := time.Now()
-	defer p.stats.ValidateState(startTime)
+	defer p.stats.StateDuration(uint32(AcceptState), startTime)
 
 	hasCommitted := false
 	sendCommit := func(span trace.Span) {
@@ -535,7 +536,7 @@ func (p *Pbft) runCommitState(ctx context.Context) {
 	_, span := p.tracer.Start(ctx, "CommitState")
 	defer span.End()
 	startTime := time.Now()
-	defer p.stats.CommitState(startTime)
+	defer p.stats.StateDuration(uint32(CommitState), startTime)
 
 	committedSeals := p.state.getCommittedSeals()
 	proposal := p.state.proposal.Copy()
@@ -558,6 +559,8 @@ func (p *Pbft) runCommitState(ctx context.Context) {
 	} else {
 		// move to done state to finish the current iteration of the state machine
 		p.setState(DoneState)
+		// todo reset stats?
+		//	p.stats.Clear()
 	}
 }
 
@@ -576,7 +579,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 	ctx, span := p.tracer.Start(ctx, "RoundChange")
 	defer span.End()
 	startTime := time.Now()
-	defer p.stats.RoundChangeState(startTime)
+	defer p.stats.StateDuration(uint32(RoundChangeState), startTime)
 
 	sendRoundChange := func(round uint64) {
 		p.logger.Printf("[DEBUG] local round change: round=%d", round)
@@ -782,7 +785,7 @@ func (p *Pbft) getNextMessage(span trace.Span) (*MessageReq, bool) {
 		}
 		if msg != nil {
 			// add the event to the span
-			p.CountMsgType(msg.Type)
+			p.stats.IncrMsgCount(uint64(msg.Type))
 			spanAddEventMessage("message", span, msg)
 			p.logger.Printf("[TRACE] Received %s", msg)
 			return msg, true
@@ -830,21 +833,7 @@ func (p *Pbft) ReadMessageWithDiscards() (*MessageReq, []*MessageReq) {
 	return p.msgQueue.readMessageWithDiscards(p.getState(), p.state.view)
 }
 
-func (p *Pbft) CountMsgType(msgType MsgType) {
-	switch msgType {
-	case MessageReq_Preprepare:
-		p.stats.IncrPrePrepareMsgCount()
-	case MessageReq_Prepare:
-		p.stats.IncrPrepareMsgCount()
-	case MessageReq_Commit:
-		p.stats.IncrCommitMsgCount()
-	case MessageReq_RoundChange:
-		p.stats.IncrRoundChangeMsgCount()
-	}
-
-}
-
-func (p *Pbft) GetStats() *stats.Stats {
+func (p *Pbft) GetStats() stats.Stats {
 	return p.stats.Stats()
 }
 

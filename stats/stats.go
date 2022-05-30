@@ -9,95 +9,61 @@ type Stats struct {
 	// todo atomic instead of lock?
 	lock *sync.Mutex
 
-	numPrePrepareMsg  uint64
-	numPrepareMsg     uint64
-	numCommitMsg      uint64
-	numRoundChangeMsg uint64
+	round    uint64
+	sequence uint64
 
-	//TODO: duration between states?
-	acceptStateDuration      time.Duration
-	validateStateDuration    time.Duration
-	commitStateDuration      time.Duration
-	roundChangeStateDuration time.Duration
+	msgCount      map[uint64]uint64
+	stateDuration map[uint32]time.Duration
 }
 
 func NewStats() *Stats {
 	return &Stats{
-		lock: &sync.Mutex{},
+		lock:          &sync.Mutex{},
+		msgCount:      make(map[uint64]uint64),
+		stateDuration: make(map[uint32]time.Duration),
 	}
 }
 
-func (s *Stats) IncrRoundChangeMsgCount() {
+func (s *Stats) SetView(sequence uint64, round uint64) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	s.numRoundChangeMsg++
+	s.sequence = sequence
+	s.round = round
 }
-
-func (s *Stats) IncrPrePrepareMsgCount() {
+func (s *Stats) IncrMsgCount(msgType uint64) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	s.numPrePrepareMsg++
+	s.msgCount[msgType]++
 }
 
-func (s *Stats) IncrPrepareMsgCount() {
+func (s *Stats) StateDuration(msgType uint32, t time.Time) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	s.numPrepareMsg++
+	s.stateDuration[msgType] = time.Since(t)
 }
 
-func (s *Stats) IncrCommitMsgCount() {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	s.numCommitMsg++
-}
-
-func (s *Stats) AcceptState(t time.Time) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	s.acceptStateDuration = time.Since(t)
-}
-
-func (s *Stats) ValidateState(t time.Time) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	s.validateStateDuration = time.Since(t)
-}
-
-func (s *Stats) RoundChangeState(t time.Time) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	s.roundChangeStateDuration = time.Since(t)
-}
-
-func (s *Stats) CommitState(t time.Time) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	s.commitStateDuration = time.Since(t)
-}
-
-func (s *Stats) Stats() *Stats {
+func (s *Stats) Stats() Stats {
 	// Allocate a new stats struct
-	stats := Stats{}
+	stats := NewStats()
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	// Copy all the stats
-	stats.numPrePrepareMsg = s.numPrePrepareMsg
-	stats.numPrepareMsg = s.numPrepareMsg
-	stats.numCommitMsg = s.numCommitMsg
-	stats.numRoundChangeMsg = s.numRoundChangeMsg
+	for msgType, count := range s.msgCount {
+		stats.msgCount[msgType] = count
+	}
 
-	stats.acceptStateDuration = s.acceptStateDuration
-	stats.validateStateDuration = s.validateStateDuration
-	stats.commitStateDuration = s.commitStateDuration
-	stats.roundChangeStateDuration = s.roundChangeStateDuration
+	for msgType, duration := range s.stateDuration {
+		stats.stateDuration[msgType] = duration
+	}
 
-	return &stats
+	return *stats
 }
 
 // todo reset?
 // todo stats per round?
-
-//func (s *Stats) Reset() {
-//
-//}
+func (s *Stats) Reset() {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	s.msgCount = make(map[uint64]uint64)
+	s.stateDuration = make(map[uint32]time.Duration)
+}
