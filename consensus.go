@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/0xPolygon/pbft-consensus/stats"
 	"log"
 	"os"
 	"time"
@@ -178,6 +179,8 @@ type Pbft struct {
 
 	// notifier is a reference to the struct which encapsulates handling messages and timeouts
 	notifier StateNotifier
+
+	stats *stats.Stats
 }
 
 type SignKey interface {
@@ -201,6 +204,7 @@ func New(validator SignKey, transport Transport, opts ...ConfigOption) *Pbft {
 		tracer:       config.Tracer,
 		roundTimeout: config.RoundTimeout,
 		notifier:     config.Notifier,
+		stats:        stats.NewStats(),
 	}
 
 	p.logger.Printf("[INFO] validator key: addr=%s\n", p.validator.NodeID())
@@ -250,7 +254,6 @@ func (p *Pbft) runCycle(ctx context.Context) {
 	if p.state.view != nil {
 		p.logger.Printf("[DEBUG] cycle: state=%s, sequence=%d, round=%d", p.getState(), p.state.view.Sequence, p.state.GetCurrentRound())
 	}
-
 	// Based on the current state, execute the corresponding section
 	switch p.getState() {
 	case AcceptState:
@@ -293,6 +296,8 @@ func (p *Pbft) setRound(round uint64) {
 func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 	_, span := p.tracer.Start(ctx, "AcceptState")
 	defer span.End()
+	startTime := time.Now()
+	defer p.stats.AcceptState(startTime)
 
 	p.logger.Printf("[INFO] accept state: sequence %d", p.state.view.Sequence)
 
@@ -416,6 +421,8 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 	ctx, span := p.tracer.Start(ctx, "ValidateState")
 	defer span.End()
+	startTime := time.Now()
+	defer p.stats.ValidateState(startTime)
 
 	hasCommitted := false
 	sendCommit := func(span trace.Span) {
@@ -527,6 +534,8 @@ func (p *Pbft) setStateSpanAttributes(span trace.Span) {
 func (p *Pbft) runCommitState(ctx context.Context) {
 	_, span := p.tracer.Start(ctx, "CommitState")
 	defer span.End()
+	startTime := time.Now()
+	defer p.stats.CommitState(startTime)
 
 	committedSeals := p.state.getCommittedSeals()
 	proposal := p.state.proposal.Copy()
@@ -566,6 +575,8 @@ func (p *Pbft) handleStateErr(err error) {
 func (p *Pbft) runRoundChangeState(ctx context.Context) {
 	ctx, span := p.tracer.Start(ctx, "RoundChange")
 	defer span.End()
+	startTime := time.Now()
+	defer p.stats.RoundChangeState(startTime)
 
 	sendRoundChange := func(round uint64) {
 		p.logger.Printf("[DEBUG] local round change: round=%d", round)
@@ -771,6 +782,7 @@ func (p *Pbft) getNextMessage(span trace.Span) (*MessageReq, bool) {
 		}
 		if msg != nil {
 			// add the event to the span
+			p.CountMsgType(msg.Type)
 			spanAddEventMessage("message", span, msg)
 			p.logger.Printf("[TRACE] Received %s", msg)
 			return msg, true
@@ -816,6 +828,24 @@ func (p *Pbft) PushMessage(msg *MessageReq) {
 // Reads next message with discards from message queue based on current state, sequence and round
 func (p *Pbft) ReadMessageWithDiscards() (*MessageReq, []*MessageReq) {
 	return p.msgQueue.readMessageWithDiscards(p.getState(), p.state.view)
+}
+
+func (p *Pbft) CountMsgType(msgType MsgType) {
+	switch msgType {
+	case MessageReq_Preprepare:
+		p.stats.IncrPrePrepareMsgCount()
+	case MessageReq_Prepare:
+		p.stats.IncrPrepareMsgCount()
+	case MessageReq_Commit:
+		p.stats.IncrCommitMsgCount()
+	case MessageReq_RoundChange:
+		p.stats.IncrRoundChangeMsgCount()
+	}
+
+}
+
+func (p *Pbft) GetStats() *stats.Stats {
+	return p.stats.Stats()
 }
 
 // --- package-level helper functions ---
