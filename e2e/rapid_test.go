@@ -1139,6 +1139,131 @@ func TestCheckLivenessPropertyCheck(t *testing.T) {
 	//})
 }
 
+func TestCheckLivenessPropertyCheck2(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		numOfNodes := rapid.IntRange(4, 9).Draw(t, "number of nodes").(int)
+		//rounds := map[uint64]map[uint64][]uint64{
+		//	0: {
+		//		0: {0, 1, 3, 2},
+		//		1: {0, 1, 3},
+		//		2: {0, 1, 2, 3},
+		//	},
+		//}
+
+		rounds := generateRoutesMap(t, uint64(numOfNodes)).Draw(t, "generate routes").(map[uint64]map[uint64][]uint64)
+		fmt.Println(debug.Line(), "----------------------------------------")
+		fmt.Println(debug.Line(), numOfNodes, rounds)
+		fmt.Println(debug.Line(), "----------------------------------------")
+		countPrepare := 0
+		ft := &fakeTransport{
+			GossipFunc: func(ft *fakeTransport, msg *pbft.MessageReq) error {
+				routing, changed := rounds[msg.View.Round]
+				if changed {
+					//todo hack
+					from, err := strconv.ParseUint(string(msg.From), 10, 64)
+					if err != nil {
+						t.Fatal(err)
+					}
+					for _, nodeId := range routing[from] {
+						// restrict prepare messages to node 3 in round 0
+						if msg.Type == pbft.MessageReq_Prepare && nodeId == 3 {
+							countPrepare++
+							if countPrepare == 3 {
+								fmt.Println("Ignoring prepare 3")
+								continue
+							}
+						}
+						// do not send commit for round 0
+						if msg.Type == pbft.MessageReq_Commit {
+							continue
+						}
+
+						//fmt.Println(debug.Line(), "Push", msg.Type, "round", msg.View.Round, "from", msg.From, "to", nodeId)
+						ft.nodes[nodeId].PushMessage(msg)
+					}
+				} else {
+					for i := range ft.nodes {
+						//from, _ := strconv.Atoi(string(msg.From))
+						//// for rounds >0 do not send messages to/from node 3
+						//if i == 3 || from == 3 {
+						//	fmt.Println(debug.Line(), "Node 3 ignored")
+						//} else {
+						ft.nodes[i].PushMessage(msg)
+						//}
+					}
+				}
+
+				return nil
+			},
+		}
+		cluster, timeoutsChan := generateCluster(numOfNodes, ft)
+		for i := range cluster {
+			cluster[i].RunPrepare(context.Background())
+		}
+
+		stuckList := NewBoolSlice(len(cluster))
+		doneList := NewBoolSlice(len(cluster))
+
+		callNumber := 0
+		for {
+			callNumber++
+			//fmt.Println(debug.Line(), "call", callNumber, " -----------------------------------", stuckList)
+			err := runClusterCycle(cluster, callNumber, stuckList, doneList)
+			if err != nil {
+				t.Error(err)
+			}
+
+			setDoneOnDoneState(cluster, doneList)
+			if stuckList.CalculateNum(true) == numOfNodes {
+				for i := range timeoutsChan {
+					fmt.Println(debug.Line(), "+send timeout", i, cluster[i].GetState())
+					select {
+					case timeoutsChan[i] <- time.Now():
+					default:
+						fmt.Println(debug.Line(), "timeout havent send")
+					}
+					fmt.Println(debug.Line(), "-sent timeout", i)
+				}
+
+				fmt.Println("wait unstuck", stuckList)
+				i := 0
+				for {
+					if stuckList.CalculateNum(true) == 0 {
+						break
+					}
+					if i%10 == 0 {
+						fmt.Println("stucked", stuckList)
+						for j := range cluster {
+							fmt.Println(debug.Line(), cluster[j].GetState())
+						}
+						time.Sleep(time.Millisecond * 50)
+					}
+					if i > 50 {
+						t.Error("stucked")
+						return
+					}
+					i++
+
+				}
+			}
+
+			//
+			if doneList.CalculateNum(true) >= 3 {
+				fmt.Println(debug.Line(), "done")
+				return
+			}
+			//todo more generalized check
+			for i := range cluster {
+				if cluster[i].Round() > maxPredefinedRound(rounds)+2 {
+					t.Error("Infinite rounds")
+					return
+				}
+
+			}
+		}
+
+	})
+}
 func NewBoolSlice(ln int) *BoolSlice {
 	return &BoolSlice{
 		slice: make([]bool, ln),
@@ -1229,7 +1354,7 @@ func generateCluster(numOfNodes int, transport *fakeTransport) ([]*pbft.Pbft, []
 			nodes:  nodes,
 			nodeId: i,
 			IsStuckMock: func(num uint64) (uint64, bool) {
-				fmt.Println(debug.Line(), "check is Stuck", i, num)
+				//fmt.Println(debug.Line(), "check is Stuck", i, num)
 				return 0, false
 			},
 			ValidatorSetList: &vv,
@@ -1244,10 +1369,10 @@ func runClusterCycle(cluster []*pbft.Pbft, callNumber int, stuckList, doneList *
 		i := i
 		state := cluster[i].GetState()
 		wg.Go(func() (err1 error) {
-			fmt.Println(debug.Line(), callNumber, "started", i, state)
-			defer func() {
-				fmt.Println(debug.Line(), callNumber, "finished", i, state)
-			}()
+			//fmt.Println(debug.Line(), callNumber, "started", i, state)
+			//defer func() {
+			//	fmt.Println(debug.Line(), callNumber, "finished", i, state)
+			//}()
 
 			wgTime := time.Now()
 			exitCh := make(chan struct{})
@@ -1283,20 +1408,65 @@ func runClusterCycle(cluster []*pbft.Pbft, callNumber int, stuckList, doneList *
 		})
 	}
 
-	fmt.Println(debug.Line(), "Wait", callNumber, stuckList)
+	//fmt.Println(debug.Line(), "Wait", callNumber, stuckList)
 	return wg.Wait()
 }
 
 func setDoneOnDoneState(cluster []*pbft.Pbft, doneList *BoolSlice) {
 	for i, node := range cluster {
 		state := node.GetState()
-		fmt.Println(debug.Line(), state, "validator", i)
-		fmt.Println(debug.Line(), "isLocked", node.IsLocked())
-		fmt.Println(debug.Line(), "Sequence", node.Height())
-		fmt.Println(debug.Line(), "Round", node.Round())
+		//fmt.Println(debug.Line(), state, "validator", i)
+		//fmt.Println(debug.Line(), "isLocked", node.IsLocked())
+		//fmt.Println(debug.Line(), "Sequence", node.Height())
+		//fmt.Println(debug.Line(), "Round", node.Round())
 		if state == pbft.DoneState {
 			doneList.Set(i, true)
 		}
 	}
-
 }
+
+func maxPredefinedRound(mp map[uint64]map[uint64][]uint64) uint64 {
+	var max uint64
+	for i := range mp {
+		if i > max {
+			max = i
+		}
+	}
+	return max
+}
+
+func generateRoutesMap(t *rapid.T, numOfNodes uint64) *rapid.Generator {
+	maxNodeID := numOfNodes - 1
+	return rapid.MapOfN(
+		//round number
+		rapid.Uint64Range(0, 10),
+		//validator routing
+		rapid.MapOfN(
+			//nodes from
+			rapid.Uint64Range(0, maxNodeID),
+			//nodes to
+			rapid.SliceOfNDistinct(rapid.Uint64Range(0, maxNodeID),
+				0,
+				int(maxNodeID),
+				nil,
+			),
+			//min number of connections
+			0,
+			//numOfConnections
+			int(maxNodeID),
+		),
+		//min num of rounds
+		1,
+		//max num of rounds
+		10)
+}
+
+//func TestGenerateRouting(t *testing.T) {
+//	rapid.Check(t, func(t *rapid.T) {
+//		numOfNodes := rapid.IntRange(4, 10).Draw(t, "number of nodes").(int)
+//		//fmt.Println(rapid.SliceOfNDistinct(rapid.IntRange(4, numOfNodes), 0, 5, nil).Draw(t, ""))
+//
+//		//route := generateRoutesMap(t, numOfNodes).Draw(t, "routes")
+//		//fmt.Println(route)
+//	})
+//}

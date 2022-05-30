@@ -292,19 +292,19 @@ func (p *Pbft) runCycle(ctx context.Context) {
 	// Based on the current state, execute the corresponding section
 	switch p.getState() {
 	case AcceptState:
-		fmt.Println(debug.Line(), "AcceptState", p.validator)
+		//fmt.Println(debug.Line(), "AcceptState", p.validator)
 		p.runAcceptState(ctx)
 
 	case ValidateState:
-		fmt.Println(debug.Line(), "ValidateState", p.validator)
+		//fmt.Println(debug.Line(), "ValidateState", p.validator)
 		p.runValidateState(ctx)
 
 	case RoundChangeState:
-		fmt.Println(debug.Line(), "RoundChangeState", p.validator)
+		//fmt.Println(debug.Line(), "RoundChangeState", p.validator)
 		p.runRoundChangeState(ctx)
 
 	case CommitState:
-		fmt.Println(debug.Line(), "CommitState", p.validator)
+		//fmt.Println(debug.Line(), "CommitState", p.validator)
 		p.runCommitState(ctx)
 
 	case DoneState:
@@ -356,7 +356,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 	p.state.CalcProposer()
 
 	isProposer := p.state.proposer == p.validator.NodeID()
-	fmt.Println(debug.Line(), "proposer", p.state.proposer, isProposer, "validator", p.validator.NodeID())
+	//fmt.Println(debug.Line(), "proposer", p.state.proposer, isProposer, "validator", p.validator.NodeID())
 	p.backend.Init(&RoundInfo{
 		Proposer:   p.state.proposer,
 		IsProposer: isProposer,
@@ -415,21 +415,21 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 	// We only need to wait here for one type of message, the Prepare message from the proposer.
 	// However, since we can receive bad Prepare messages we have to wait (or timeout) until
 	// we get the message from the correct proposer.
-	fmt.Println(debug.Line(), "validator AcceptState cycle", p.validator.NodeID())
+	//fmt.Println(debug.Line(), "validator AcceptState cycle", p.validator.NodeID())
 	for p.getState() == AcceptState {
 		msg, ok := p.getNextMessage(span)
-		fmt.Println(debug.Line(), "get message", p.validator)
+		//fmt.Println(debug.Line(), "get message", p.validator)
 		if !ok {
 			return
 		}
 		if msg == nil {
-			fmt.Println(debug.Line(), "setState(RoundChangeState)", p.validator)
+			//fmt.Println(debug.Line(), "setState(RoundChangeState)", p.validator)
 			p.setState(RoundChangeState)
 			continue
 		}
 		//fmt.Println("debug.Line(), "msg accept state ", p.GetValidatorId(), msg.From)
 
-		fmt.Println(debug.Line(), "Proposer", p.state.proposer, p.validator.NodeID())
+		//fmt.Println(debug.Line(), "Proposer", p.state.proposer, p.validator.NodeID())
 		// TODO: Validate that the fields required for Preprepare are set (Proposal and Hash)
 		if msg.From != p.state.proposer {
 			p.logger.Printf("[ERROR] msg received from wrong proposer: expected=%s, found=%s", p.state.proposer, msg.From)
@@ -450,7 +450,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 
 		if p.state.IsLocked() {
 			// the state is locked, we need to receive the same proposal
-			fmt.Println(debug.Line(), "send commit", p.state.proposal.Equal(proposal))
+			//fmt.Println(debug.Line(), "send commit", p.state.proposal.Equal(proposal))
 			if p.state.proposal.Equal(proposal) {
 
 				// fast-track and send a commit message and wait for validations
@@ -479,7 +479,7 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 	sendCommit := func(span trace.Span) {
 		// at this point either we have enough prepare messages
 		// or commit messages so we can lock the proposal
-		fmt.Println(debug.Line(), "lock", p.validator.NodeID())
+		//fmt.Println(debug.Line(), "lock", p.validator.NodeID())
 		p.state.lock()
 
 		if !hasCommitted {
@@ -503,7 +503,7 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 			return
 		}
 		if msg == nil {
-			fmt.Println(debug.Line(), "From Validate to RoundChangeState (msg==nil)", p.validator.NodeID())
+			//fmt.Println(debug.Line(), "From Validate to RoundChangeState (msg==nil)", p.validator.NodeID())
 			// timeout
 			p.setState(RoundChangeState)
 			span.End()
@@ -604,7 +604,7 @@ func (p *Pbft) runCommitState(ctx context.Context) {
 
 	// at this point either if it works or not we need to unlock the state
 	// to allow for other proposals to be produced if it insertion fails
-	fmt.Println(debug.Line(), "unlock", p.validator.NodeID())
+	//fmt.Println(debug.Line(), "unlock", p.validator.NodeID())
 	p.state.unlock()
 
 	pp := &SealedProposal{
@@ -684,10 +684,10 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 		// First, we try to sync up with any max round already available
 		if maxRound, ok := p.state.maxRound(); ok {
 			p.logger.Printf("[DEBUG] round change, max round=%d", maxRound)
-			fmt.Println(debug.Line(), "Send round change", maxRound)
+			//fmt.Println(debug.Line(), "Send round change", maxRound)
 			sendRoundChange(maxRound)
 		} else {
-			fmt.Println(debug.Line(), "checkTimeout. maxRound", maxRound, "validator", p.validator)
+			//fmt.Println(debug.Line(), "checkTimeout. maxRound", maxRound, "validator", p.validator)
 			// otherwise, do your best to sync up
 			checkTimeout()
 		}
@@ -708,7 +708,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 
 			// checkTimeout will either produce a sync event and exit
 			// or restart the timeout
-			fmt.Println(debug.Line(), "checkTimeout")
+			//fmt.Println(debug.Line(), "checkTimeout")
 			checkTimeout()
 			span.End()
 			continue
@@ -717,11 +717,11 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 		// we only expect RoundChange messages right now
 		num := p.state.AddRoundMessage(msg)
 
-		fmt.Println(debug.Line(), "AddRoundMessage", num, "validator", p.validator.NodeID())
+		//fmt.Println(debug.Line(), "AddRoundMessage", num, "validator", p.validator.NodeID())
 		if num == p.state.NumValid() {
 			// start a new round inmediatly
 			p.state.SetCurrentRound(msg.View.Round)
-			fmt.Println(debug.Line(), "setState AcceptState")
+			//fmt.Println(debug.Line(), "setState AcceptState")
 			p.setState(AcceptState)
 		} else if num == p.state.MaxFaultyNodes()+1 {
 			// weak certificate, try to catch up if our round number is smaller
@@ -844,7 +844,7 @@ func (p *Pbft) Height() uint64 {
 	return p.state.view.Sequence
 }
 func (p *Pbft) Round() uint64 {
-	return p.state.view.Round
+	return atomic.LoadUint64(&p.state.view.Round)
 }
 
 // getNextMessage reads a new message from the message queue
@@ -870,7 +870,7 @@ func (p *Pbft) getNextMessage(span trace.Span) (*MessageReq, bool) {
 		select {
 		//case <-p.state.timeout.C:
 		case <-p.GetRoundTimeout():
-			fmt.Println(debug.Line(), "getNextMessage timeout", p.GetValidatorId())
+			//fmt.Println(debug.Line(), "getNextMessage timeout", p.GetValidatorId())
 			span.AddEvent("Timeout")
 			p.notifier.HandleTimeout(p.validator.NodeID(), stateToMsg(p.getState()), &View{
 				Round:    p.state.GetCurrentRound(),
