@@ -102,7 +102,7 @@ func TestSuccess(t *testing.T) {
 		ft := &fakeTransport{}
 		cluster, timeoutsChan := generateCluster(numOfNodes, ft)
 		for i := range cluster {
-			cluster[i].RunPrepare(context.Background())
+			cluster[i].SetInitialState(context.Background())
 		}
 
 		stuckList := NewBoolSlice(len(cluster))
@@ -175,7 +175,7 @@ func TestSeveralNodesCanSwitchToDoneState(t *testing.T) {
 		}
 		cluster, timeoutsChan := generateCluster(numOfNodes, ft)
 		for i := range cluster {
-			cluster[i].RunPrepare(context.Background())
+			cluster[i].SetInitialState(context.Background())
 		}
 
 		stuckList := NewBoolSlice(len(cluster))
@@ -268,7 +268,7 @@ func TestCheckLivenessIssueCheck(t *testing.T) {
 	}
 	cluster, timeoutsChan := generateCluster(numOfNodes, ft)
 	for i := range cluster {
-		cluster[i].RunPrepare(context.Background())
+		cluster[i].SetInitialState(context.Background())
 	}
 
 	stuckList := NewBoolSlice(len(cluster))
@@ -339,7 +339,7 @@ func TestCheckLivenessIssue2Check(t *testing.T) {
 	}
 	cluster, timeoutsChan := generateCluster(numOfNodes, ft)
 	for i := range cluster {
-		cluster[i].RunPrepare(context.Background())
+		cluster[i].SetInitialState(context.Background())
 	}
 
 	stuckList := NewBoolSlice(len(cluster))
@@ -516,7 +516,7 @@ func runClusterCycle(cluster []*pbft.Pbft, callNumber int, stuckList, doneList *
 			//useful for debug
 			_, _, _ = state, wgTime, isLocked
 			//if time.Since(wgTime) > waitDuration {
-			//	fmt.Println(pbft.Line(), "wgitme ", state, i, callNumber, time.Since(wgTime), err1, isLocked)
+			//	fmt.Println("wgitme ", state, i, callNumber, time.Since(wgTime), err1, isLocked)
 			//}
 
 			return err1

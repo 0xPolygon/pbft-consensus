@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"runtime"
 	"sync/atomic"
 	"time"
 
@@ -244,7 +243,7 @@ func (p *Pbft) SetBackend(backend Backend) error {
 
 // start starts the PBFT consensus state machine
 func (p *Pbft) Run(ctx context.Context) {
-	p.RunPrepare(ctx)
+	p.SetInitialState(ctx)
 
 	// start the trace span
 	spanCtx, span := p.tracer.Start(context.Background(), fmt.Sprintf("Sequence-%d", p.state.view.Sequence))
@@ -263,7 +262,7 @@ func (p *Pbft) Run(ctx context.Context) {
 	}
 }
 
-func (p *Pbft) RunPrepare(ctx context.Context) {
+func (p *Pbft) SetInitialState(ctx context.Context) {
 	p.ctx = ctx
 
 	// the iteration always starts with the AcceptState.
@@ -779,9 +778,6 @@ func (p *Pbft) GetProposal() *Proposal {
 	return p.state.proposal
 }
 
-func (p *Pbft) Height() uint64 {
-	return p.state.view.Sequence
-}
 func (p *Pbft) Round() uint64 {
 	return atomic.LoadUint64(&p.state.view.Round)
 }
@@ -885,14 +881,4 @@ func MaxFaultyNodes(nodesCount int) int {
 // 2 * F + 1, where F denotes maximum count of faulty nodes in order to have Byzantine fault tollerant property satisfied.
 func QuorumSize(nodesCount int) int {
 	return 2*MaxFaultyNodes(nodesCount) + 1
-}
-
-//Line - returns line of code where it is called
-func Line() string {
-	return LineN(1)
-}
-func LineN(n int) string {
-	_, file, line, _ := runtime.Caller(n + 1)
-	return fmt.Sprintf("%s:%d", file, line)
-
 }
