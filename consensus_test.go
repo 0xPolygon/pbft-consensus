@@ -81,7 +81,7 @@ func TestTransition_AcceptState_Proposer_Locked(t *testing.T) {
 	i.expect(expectResult{
 		sequence: 1,
 		state:    ValidateState,
-		locked:   true,
+		locked:   1,
 		outgoing: 2, // preprepare and prepare
 	})
 	assert.Equal(t, i.state.proposal.Data, mockProposal)
@@ -249,7 +249,7 @@ func TestTransition_AcceptState_Validator_LockWrong(t *testing.T) {
 	i.expect(expectResult{
 		sequence: 1,
 		state:    RoundChangeState,
-		locked:   true,
+		locked:   1,
 		err:      errIncorrectLockedProposal,
 	})
 }
@@ -280,7 +280,7 @@ func TestTransition_AcceptState_Validator_LockCorrect(t *testing.T) {
 	i.expect(expectResult{
 		sequence: 1,
 		state:    ValidateState,
-		locked:   true,
+		locked:   1,
 		outgoing: 1, // prepare message
 	})
 }
@@ -562,7 +562,7 @@ func TestTransition_ValidateState_MoveToCommitState(t *testing.T) {
 		state:       CommitState,
 		prepareMsgs: 3,
 		commitMsgs:  3, // Commit messages (A proposer sent commit via state machine loop, C and D sent commit via emit message)
-		locked:      true,
+		locked:      1,
 		outgoing:    1, // A commit message
 	})
 }
@@ -890,7 +890,7 @@ type expectResult struct {
 	state    PbftState
 	sequence uint64
 	round    uint64
-	locked   bool
+	locked   uint64
 	err      error
 
 	// num of messages

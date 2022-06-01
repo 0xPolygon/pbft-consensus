@@ -271,10 +271,6 @@ func TestCheckMajorityProperty(t *testing.T) {
 			}
 
 			//something went wrong.
-			if callNumber == 100 {
-				fmt.Println(debug.Line(), "max round", getMaxClusterRound(cluster))
-			}
-
 			if getMaxClusterRound(cluster) > 10 {
 				t.Error("Infinite rounds")
 				fmt.Println(debug.Line(), "getMaxClusterRound exit")
@@ -404,7 +400,6 @@ func TestCheckLivenessIssue2Check(t *testing.T) {
 					t.Fatal(err)
 				}
 				for _, nodeId := range routing[from] {
-					fmt.Println(debug.Line(), "Push", msg.Type, "round", msg.View.Round, "from", msg.From, "to", nodeId)
 					ft.nodes[nodeId].PushMessage(msg)
 				}
 			} else {
@@ -440,7 +435,6 @@ func TestCheckLivenessIssue2Check(t *testing.T) {
 
 		//check that 3 node switched to done state
 		if doneList.CalculateNum(true) >= 3 {
-			fmt.Println(debug.Line(), "done")
 			return
 		}
 
@@ -566,6 +560,7 @@ func runClusterCycle(cluster []*pbft.Pbft, callNumber int, stuckList, doneList *
 	for i := range cluster {
 		i := i
 		state := cluster[i].GetState()
+		isLocked := cluster[i].IsLocked()
 		wg.Go(func() (err1 error) {
 			wgTime := time.Now()
 			exitCh := make(chan struct{})
@@ -593,9 +588,9 @@ func runClusterCycle(cluster []*pbft.Pbft, callNumber int, stuckList, doneList *
 			}
 
 			//useful for debug
-			_, _ = state, wgTime
+			_, _, _ = state, wgTime, isLocked
 			//if time.Since(wgTime) > waitDuration {
-			//	fmt.Println(debug.Line(), "wgitme ", state, i, callNumber, time.Since(wgTime), err1)
+			//	fmt.Println(debug.Line(), "wgitme ", state, i, callNumber, time.Since(wgTime), err1, isLocked)
 			//}
 
 			return err1

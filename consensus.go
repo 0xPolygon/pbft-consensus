@@ -185,9 +185,6 @@ type Pbft struct {
 	proposalDelayFunc func(ctx context.Context, delay time.Duration)
 }
 
-/*
-
- */
 type SignKey interface {
 	NodeID() NodeID
 	Sign(b []byte) ([]byte, error)
@@ -370,12 +367,6 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 			// calculate how much time do we have to wait to gossip the proposal
 			delay := time.Until(p.state.proposal.Time)
 			p.proposalDelayFunc(p.ctx, delay)
-			//select {
-			//case <-time.After(delay):
-			//case <-p.ctx.Done():
-			//	return
-			//}
-
 		}
 
 		// send the preprepare message

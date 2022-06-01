@@ -107,8 +107,7 @@ type View struct {
 
 func (v *View) Copy() *View {
 	vv := new(View)
-	vv.Sequence = v.Sequence
-	vv.Round = v.Round
+	*vv = *v
 	return vv
 }
 
