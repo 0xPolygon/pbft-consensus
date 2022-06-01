@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/0xPolygon/pbft-consensus"
 	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/goleak"
 	"golang.org/x/sync/errgroup"
 	"io"
 	"log"
@@ -34,69 +33,6 @@ func (ft *fakeTransport) Gossip(msg *pbft.MessageReq) error {
 		}
 	}
 	return nil
-}
-
-//todo Remove it?
-func TestCreateTwoSequentialBlocks_Success(t *testing.T) {
-	defer goleak.VerifyNone(t)
-
-	ft := &fakeTransport{}
-	nodes := []string{}
-	createNode := func(name string) *pbft.Pbft {
-		node := pbft.New(key(name), ft, pbft.WithTracer(trace.NewNoopTracerProvider().Tracer("")), func(config *pbft.Config) {})
-		nodes = append(nodes, name)
-		ft.nodes = append(ft.nodes, node)
-		return node
-	}
-	numOfNodes := 10
-	cluster := make([]*pbft.Pbft, numOfNodes)
-	for i := 0; i < numOfNodes; i++ {
-		cluster[i] = createNode(strconv.Itoa(i))
-	}
-	for i, node := range cluster {
-		node.SetBackend(&BackendFake{nodes: nodes, ProposalTime: time.Millisecond, nodeId: i})
-	}
-	for i := range cluster {
-		cluster[i].RunPrepare(context.Background())
-	}
-
-	done := make([]bool, len(cluster))
-	creatBlock := func() {
-		for {
-			st := []string{}
-			wg := sync.WaitGroup{}
-			for i := range cluster {
-				state := cluster[i].GetState()
-				if state == pbft.DoneState || state == pbft.SyncState {
-					done[i] = true
-				} else {
-					wg.Add(1)
-					go func(i int) {
-						defer wg.Done()
-						cluster[i].RunCycle(context.Background())
-					}(i)
-				}
-			}
-			wg.Wait()
-			for i := range cluster {
-				state := cluster[i].GetState()
-				st = append(st, state.String())
-			}
-
-			stop := true
-			for _, b := range done {
-				if !b {
-					stop = false
-					break
-				}
-			}
-			if stop {
-				break
-			}
-		}
-	}
-	creatBlock()
-	creatBlock()
 }
 
 type BackendFake struct {
@@ -161,7 +97,7 @@ func (bf *BackendFake) ValidateCommit(from pbft.NodeID, seal []byte) error {
 
 func TestSuccess(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		defer goleak.VerifyNone(t)
+
 		numOfNodes := rapid.IntRange(4, 30).Draw(t, "num of nodes").(int)
 		ft := &fakeTransport{}
 		cluster, timeoutsChan := generateCluster(numOfNodes, ft)
