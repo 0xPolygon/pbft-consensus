@@ -451,186 +451,6 @@ func TestCheckLivenessIssue2Check(t *testing.T) {
 	}
 }
 
-/*
-func TestCheckLivenessBugPropertyDebug(t *testing.T) {
-	//params
-	roundTimeout := time.Millisecond * 5000
-	proposalTime := time.Duration(0)
-
-	numOfNodes := 5
-
-	ft := &fakeTransport{
-		GossipFunc: func(ft *fakeTransport, msg *pbft.MessageReq) error {
-			routing, changed := rounds[msg.View.Round]
-			if changed {
-				//todo hack
-				from, err := strconv.Atoi(string(msg.From))
-				if err != nil {
-					t.Fatal(err)
-				}
-				for _, nodeId := range routing[from] {
-					fmt.Println(debug.Line(), "Push", msg.Type, "round", msg.View.Round, "from", msg.From, "to", nodeId)
-					ft.nodes[nodeId].PushMessage(msg)
-				}
-			} else {
-				for i := range ft.nodes {
-					ft.nodes[i].PushMessage(msg)
-				}
-
-			}
-
-			return nil
-		},
-	}
-
-	timeoutsChan := make([]chan time.Time, numOfNodes)
-	nodes := []string{}
-	createNode := func(name string) *pbft.Pbft {
-		node := pbft.New(key(name), ft,
-			pbft.WithTracer(trace.NewNoopTracerProvider().Tracer("")),
-			func(config *pbft.Config) {
-				config.RoundTimeout = func(u uint64) time.Duration {
-					return roundTimeout
-				}
-			},
-			pbft.WithLogger(log.New(io.Discard, "", 0)),
-		)
-		nodeID, _ := strconv.Atoi(name)
-		timeoutsChan[nodeID] = make(chan time.Time)
-		// round timeout mock
-		node.SetRoundTimeoutFunction(func() <-chan time.Time {
-			return timeoutsChan[nodeID]
-		})
-		nodes = append(nodes, name)
-		ft.nodes = append(ft.nodes, node)
-		return node
-	}
-
-	cluster := make([]*pbft.Pbft, numOfNodes)
-	for i := 0; i < numOfNodes; i++ {
-		cluster[i] = createNode(strconv.Itoa(i))
-	}
-
-	for i, node := range cluster {
-		i := i
-		node := node
-
-		valsAsNode := []pbft.NodeID{}
-		for _, i := range nodes {
-			valsAsNode = append(valsAsNode, pbft.NodeID(i))
-		}
-		vv := valString{
-			nodes: valsAsNode,
-		}
-
-		node.SetBackend(&BackendFake{
-			nodes:        nodes,
-			ProposalTime: proposalTime,
-			nodeId:       i,
-			IsStuckMock: func(num uint64) (uint64, bool) {
-				fmt.Println(debug.Line(), "check is Stuck", i)
-				return 0, false
-			},
-			ValidatorSetList: &vv,
-		})
-	}
-	for i := range cluster {
-		cluster[i].RunPrepare(context.Background())
-	}
-
-	stuckList := make([]bool, len(cluster))
-	stuckListMtx := sync.RWMutex{}
-	doneList := make([]bool, len(cluster))
-	doneListMtx := sync.RWMutex{}
-
-	for callNumber := 1; callNumber < 30; callNumber++ {
-		fmt.Println(debug.Line(), "call", callNumber, " -----------------------------------", stuckList)
-		wg := errgroup.Group{}
-		for i := range cluster {
-			i := i
-			state := cluster[i].GetState()
-			wg.Go(func() (err1 error) {
-				fmt.Println(debug.Line(), callNumber, "started", i, state)
-				defer func() {
-					fmt.Println(debug.Line(), callNumber, "finished", i, state)
-				}()
-
-				wgTime := time.Now()
-				exitCh := make(chan struct{})
-				deadlineTimeout := time.Millisecond * 50
-				deadline := time.After(deadlineTimeout)
-				stuckListMtx.Lock()
-				if stuckList[i] {
-					stuckListMtx.Unlock()
-					return nil
-				}
-				stuckListMtx.Unlock()
-
-				doneListMtx.Lock()
-				if doneList[i] {
-					doneListMtx.Unlock()
-					return nil
-				}
-				doneListMtx.Unlock()
-
-				go func() {
-					stuckListMtx.Lock()
-					stuckList[i] = true
-					stuckListMtx.Unlock()
-					defer func() {
-						stuckListMtx.Lock()
-						stuckList[i] = false
-						stuckListMtx.Unlock()
-
-					}()
-					cluster[i].RunCycle(context.Background())
-					close(exitCh)
-				}()
-				select {
-				case <-exitCh:
-				case <-deadline:
-				}
-
-				if time.Since(wgTime).Milliseconds() > 400 {
-					fmt.Println(debug.Line(), "wgitme ", state, i, time.Since(wgTime), err1)
-					cluster[i].Print()
-				}
-
-				return err1
-			})
-		}
-
-		fmt.Println(debug.Line(), "Wait", callNumber, stuckList)
-		if err := wg.Wait(); err != nil {
-			fmt.Println("Err, wg.Wait", err)
-			t.Error("wg wain", err)
-		}
-
-		for i, node := range cluster {
-			state := node.GetState()
-			fmt.Println(debug.Line(), state, "validator", i)
-			if state == pbft.DoneState {
-				doneListMtx.Lock()
-				doneList[i] = true
-				doneListMtx.Unlock()
-			}
-		}
-
-		stuckListMtx.Lock()
-		b := checkNumTrue(stuckList, len(stuckList))
-		stuckListMtx.Unlock()
-		if b {
-			fmt.Println(debug.Line(), "send timeout")
-			for i := range timeoutsChan {
-				timeoutsChan[i] <- time.Now()
-			}
-			//for i := range stuckList {
-			//	stuckList[i] = false
-			//}
-		}
-	}
-}
-*/
 func getMaxClusterRound(cluster []*pbft.Pbft) uint64 {
 	var maxRound uint64
 	for i := range cluster {
@@ -772,16 +592,16 @@ func runClusterCycle(cluster []*pbft.Pbft, callNumber int, stuckList, doneList *
 			case <-deadline:
 			}
 
-			if time.Since(wgTime) > waitDuration {
-				fmt.Println(debug.Line(), "wgitme ", state, i, callNumber, time.Since(wgTime), err1)
-				//cluster[i].Print()
-			}
+			//useful for debug
+			_, _ = state, wgTime
+			//if time.Since(wgTime) > waitDuration {
+			//	fmt.Println(debug.Line(), "wgitme ", state, i, callNumber, time.Since(wgTime), err1)
+			//}
 
 			return err1
 		})
 	}
 
-	//fmt.Println(debug.Line(), "Wait", callNumber, stuckList)
 	return wg.Wait()
 }
 
