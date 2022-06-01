@@ -868,7 +868,6 @@ func (p *Pbft) getNextMessage(span trace.Span) (*MessageReq, bool) {
 		// wait until there is a new message or
 		// someone closes the stopCh (i.e. timeout for round change)
 		select {
-		//case <-p.state.timeout.C:
 		case <-p.GetRoundTimeout():
 			//fmt.Println(debug.Line(), "getNextMessage timeout", p.GetValidatorId())
 			span.AddEvent("Timeout")
