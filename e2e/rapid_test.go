@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"github.com/0xPolygon/pbft-consensus"
-	"github.com/0xPolygon/pbft-consensus/debug"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/goleak"
 	"golang.org/x/sync/errgroup"
@@ -31,7 +30,6 @@ func (ft *fakeTransport) Gossip(msg *pbft.MessageReq) error {
 
 	for _, node := range ft.nodes {
 		if msg.From != node.GetValidatorId() {
-			//fmt.Println(debug.Line(), msg.Type, msg.From, node.GetValidatorId())
 			node.PushMessage(msg.Copy())
 		}
 	}
@@ -121,13 +119,11 @@ func (bf *BackendFake) BuildProposal() (*pbft.Proposal, error) {
 }
 
 func (bf *BackendFake) Validate(proposal *pbft.Proposal) error {
-	//fmt.Println(debug.Line(), "Validate", proposal.Hash)
 	return nil
 }
 
 func (bf *BackendFake) Insert(p *pbft.SealedProposal) error {
 	//TODO implement me
-	//	fmt.Println(debug.Line(), bf.nodeId, "inserted", p.Number, p.Proposer)
 	return nil
 }
 
@@ -207,9 +203,9 @@ func TestSuccess(t *testing.T) {
 
 }
 
-func TestCheckMajorityProperty(t *testing.T) {
+func TestSeveralNodesCanSwitchToDoneState(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		numOfNodes := rapid.IntRange(4, 4).Draw(t, "num of nodes").(int)
+		numOfNodes := rapid.IntRange(4, 9).Draw(t, "num of nodes").(int)
 		routingMapGenerator := rapid.MapOfN(
 			rapid.Uint64Range(0, uint64(numOfNodes)-1),
 			rapid.Bool(),
@@ -273,11 +269,9 @@ func TestCheckMajorityProperty(t *testing.T) {
 			//something went wrong.
 			if getMaxClusterRound(cluster) > 10 {
 				t.Error("Infinite rounds")
-				fmt.Println(debug.Line(), "getMaxClusterRound exit")
 				return
 			}
 			if callNumber > 100 {
-				fmt.Println(debug.Line(), "callNumber exit")
 				t.Error("stucked")
 				return
 			}
@@ -319,9 +313,7 @@ func TestCheckLivenessIssueCheck(t *testing.T) {
 						continue
 					}
 
-					//fmt.Println(debug.Line(), "Push", msg.Type, "round", msg.View.Round, "from", msg.From, "to", nodeId)
 					ft.nodes[nodeId].PushMessage(msg)
-
 				}
 			} else {
 				for i := range ft.nodes {
@@ -363,7 +355,6 @@ func TestCheckLivenessIssueCheck(t *testing.T) {
 
 		//check that 3 node switched to done state
 		if doneList.CalculateNum(true) >= 3 {
-			fmt.Println(debug.Line(), "done")
 			return
 		}
 
@@ -546,7 +537,6 @@ func generateCluster(numOfNodes int, transport *fakeTransport) ([]*pbft.Pbft, []
 			nodes:  nodes,
 			nodeId: i,
 			IsStuckMock: func(num uint64) (uint64, bool) {
-				//fmt.Println(debug.Line(), "check is Stuck", i, num)
 				return 0, false
 			},
 			ValidatorSetList: &vv,
@@ -590,7 +580,7 @@ func runClusterCycle(cluster []*pbft.Pbft, callNumber int, stuckList, doneList *
 			//useful for debug
 			_, _, _ = state, wgTime, isLocked
 			//if time.Since(wgTime) > waitDuration {
-			//	fmt.Println(debug.Line(), "wgitme ", state, i, callNumber, time.Since(wgTime), err1, isLocked)
+			//	fmt.Println(pbft.Line(), "wgitme ", state, i, callNumber, time.Since(wgTime), err1, isLocked)
 			//}
 
 			return err1
@@ -649,117 +639,4 @@ func generateRoutingMap(numberOfNode uint64, minNumberOfConnections int) *rapid.
 		//numOfConnections
 		int(maxNodeID),
 	)
-}
-
-func TestCheckLivenessPropertyCheckGeneratedRouting(t *testing.T) {
-	//todo not ready
-	rapid.Check(t, func(t *rapid.T) {
-		numOfNodes := rapid.IntRange(4, 5).Draw(t, "number of nodes").(int)
-		rounds := generateRoundsRoutingMap(uint64(numOfNodes)).Draw(t, "generate routes").(map[uint64]map[uint64][]uint64)
-		countPrepare := 0
-		ft := &fakeTransport{
-			GossipFunc: func(ft *fakeTransport, msg *pbft.MessageReq) error {
-				routing, changed := rounds[msg.View.Round]
-				if changed {
-					//todo hack
-					from, err := strconv.ParseUint(string(msg.From), 10, 64)
-					if err != nil {
-						t.Fatal(err)
-					}
-					for _, nodeId := range routing[from] {
-						// restrict prepare messages to node 3 in round 0
-						if msg.Type == pbft.MessageReq_Prepare && nodeId == 3 {
-							countPrepare++
-							if countPrepare == 3 {
-								fmt.Println("Ignoring prepare 3")
-								continue
-							}
-						}
-						// do not send commit for round 0
-						if msg.Type == pbft.MessageReq_Commit {
-							continue
-						}
-
-						//fmt.Println(debug.Line(), "Push", msg.Type, "round", msg.View.Round, "from", msg.From, "to", nodeId)
-						ft.nodes[nodeId].PushMessage(msg)
-					}
-				} else {
-					for i := range ft.nodes {
-						//from, _ := strconv.Atoi(string(msg.From))
-						//// for rounds >0 do not send messages to/from node 3
-						//if i == 3 || from == 3 {
-						//	fmt.Println(debug.Line(), "Node 3 ignored")
-						//} else {
-						ft.nodes[i].PushMessage(msg)
-						//}
-					}
-				}
-
-				return nil
-			},
-		}
-		cluster, timeoutsChan := generateCluster(numOfNodes, ft)
-		for i := range cluster {
-			cluster[i].RunPrepare(context.Background())
-		}
-
-		stuckList := NewBoolSlice(len(cluster))
-		doneList := NewBoolSlice(len(cluster))
-
-		callNumber := 0
-		for {
-			callNumber++
-			//fmt.Println(debug.Line(), "call", callNumber, " -----------------------------------", stuckList)
-			err := runClusterCycle(cluster, callNumber, stuckList, doneList)
-			if err != nil {
-				t.Error(err)
-			}
-
-			setDoneOnDoneState(cluster, doneList)
-			if stuckList.CalculateNum(true) == numOfNodes {
-				for i := range timeoutsChan {
-					fmt.Println(debug.Line(), "+send timeout", i, cluster[i].GetState())
-					select {
-					case timeoutsChan[i] <- time.Now():
-					default:
-						fmt.Println(debug.Line(), "timeout havent send")
-					}
-					fmt.Println(debug.Line(), "-sent timeout", i)
-				}
-
-				fmt.Println("wait unstuck", stuckList)
-				i := 0
-				for {
-					if stuckList.CalculateNum(true) == 0 {
-						break
-					}
-					if i%10 == 0 {
-						fmt.Println("stucked", stuckList)
-						for j := range cluster {
-							fmt.Println(debug.Line(), cluster[j].GetState())
-						}
-						time.Sleep(time.Millisecond * 50)
-					}
-					if i > 50 {
-						t.Error("stucked")
-						return
-					}
-					i++
-
-				}
-			}
-
-			//check that majority switched to done state
-			if doneList.CalculateNum(true) >= 3 {
-				fmt.Println(debug.Line(), "done")
-				return
-			}
-
-			//check that we dont stuck after routing rounds
-			if getMaxClusterRound(cluster) > maxPredefinedRound(rounds)+2 {
-				t.Error("Infinite rounds")
-				return
-			}
-		}
-	})
 }

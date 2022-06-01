@@ -6,7 +6,6 @@ import (
 	"crypto/elliptic"
 	crand "crypto/rand"
 	"fmt"
-	"github.com/0xPolygon/pbft-consensus/debug"
 	mrand "math/rand"
 	"strconv"
 	"testing"
@@ -287,7 +286,6 @@ func TestState_Copy(t *testing.T) {
 }
 
 func TestState_Lock_Unlock(t *testing.T) {
-	fmt.Println(debug.Line(), "1")
 	s := newState()
 	proposalData := make([]byte, 2)
 	mrand.Read(proposalData)
