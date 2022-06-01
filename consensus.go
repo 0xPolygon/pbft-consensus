@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"runtime"
 	"sync/atomic"
 	"time"
 
@@ -884,4 +885,14 @@ func MaxFaultyNodes(nodesCount int) int {
 // 2 * F + 1, where F denotes maximum count of faulty nodes in order to have Byzantine fault tollerant property satisfied.
 func QuorumSize(nodesCount int) int {
 	return 2*MaxFaultyNodes(nodesCount) + 1
+}
+
+//Line - returns line of code where it is called
+func Line() string {
+	return LineN(1)
+}
+func LineN(n int) string {
+	_, file, line, _ := runtime.Caller(n + 1)
+	return fmt.Sprintf("%s:%d", file, line)
+
 }
