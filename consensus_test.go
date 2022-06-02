@@ -82,7 +82,7 @@ func TestTransition_AcceptState_Proposer_Locked(t *testing.T) {
 		sequence: 1,
 		state:    ValidateState,
 		locked:   true,
-		outgoing: 2, // preprepare and prepare
+		outgoing: 3, // preprepare, prepare and commit
 	})
 	assert.Equal(t, i.state.proposal.Data, mockProposal)
 }
