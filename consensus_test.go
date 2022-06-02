@@ -282,7 +282,7 @@ func TestTransition_AcceptState_Validator_LockCorrect(t *testing.T) {
 		sequence: 1,
 		state:    ValidateState,
 		locked:   true,
-		outgoing: 1, // prepare message
+		outgoing: 2, // prepare message
 	})
 }
 
