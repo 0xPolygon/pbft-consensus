@@ -351,6 +351,11 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 
 		// send the prepare message since we are ready to move the state
 		p.sendPrepareMsg()
+
+		if p.state.IsLocked() {
+			p.sendCommitMsg()
+		}
+
 		// move to validation state for new prepare messages
 		p.setState(ValidateState)
 		return
