@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"crypto/sha1"
 	"errors"
 	"fmt"
 	"github.com/0xPolygon/pbft-consensus"
@@ -37,13 +38,14 @@ func (ft *fakeTransport) Gossip(msg *pbft.MessageReq) error {
 }
 
 type BackendFake struct {
-	nodes            []string
-	height           uint64
-	ProposalTime     time.Duration
-	nodeId           int
-	IsStuckMock      func(num uint64) (uint64, bool)
-	ValidatorSetList pbft.ValidatorSet
-	ValidatorSetMock func(fake *BackendFake) pbft.ValidatorSet
+	nodes                []string
+	height               uint64
+	ProposalTime         time.Duration
+	nodeId               int
+	IsStuckMock          func(num uint64) (uint64, bool)
+	ValidatorSetList     pbft.ValidatorSet
+	ValidatorSetMock     func(fake *BackendFake) pbft.ValidatorSet
+	finalProposalsInsert *insertProposal
 }
 
 func (bf *BackendFake) BuildProposal() (*pbft.Proposal, error) {
@@ -60,7 +62,7 @@ func (bf *BackendFake) Validate(proposal *pbft.Proposal) error {
 }
 
 func (bf *BackendFake) Insert(p *pbft.SealedProposal) error {
-	//TODO implement me
+	bf.finalProposalsInsert.Put(bf.nodeId, *p)
 	return nil
 }
 
@@ -409,6 +411,11 @@ func generateNode(id int, transport *fakeTransport) (*pbft.Pbft, chan time.Time)
 }
 
 func generateCluster(numOfNodes int, transport *fakeTransport) ([]*pbft.Pbft, []chan time.Time) {
+	var ip = &insertProposal{
+		lock: sync.Mutex{},
+		bc:   make(map[uint64]pbft.Proposal),
+	}
+
 	nodes := make([]string, numOfNodes)
 	timeoutsChan := make([]chan time.Time, numOfNodes)
 	cluster := make([]*pbft.Pbft, numOfNodes)
@@ -430,8 +437,9 @@ func generateCluster(numOfNodes int, transport *fakeTransport) ([]*pbft.Pbft, []
 		}
 
 		node.SetBackend(&BackendFake{
-			nodes:  nodes,
-			nodeId: i,
+			finalProposalsInsert: ip,
+			nodes:                nodes,
+			nodeId:               i,
 			IsStuckMock: func(num uint64) (uint64, bool) {
 				return 0, false
 			},
@@ -570,4 +578,146 @@ func runCluster(ctx context.Context,
 
 		}
 	}
+}
+
+//generateRoundsRoutingMap generator for routing map
+//map[uint64]map[uint64][]uint64
+func generateRoundsRoutingMap(numOfNodes uint64) *rapid.Generator {
+	return rapid.MapOfN(
+		//round number
+		rapid.Uint64Range(0, 3),
+		//validator routing
+		generateRoutingMap(numOfNodes, 0),
+		//min num of rounds
+		1,
+		//max num of rounds
+		10)
+}
+
+func generateRoutingMap(numberOfNode uint64, minNumberOfConnections int) *rapid.Generator {
+	maxNodeID := numberOfNode - 1
+	return rapid.MapOfN(
+		//nodes from
+		rapid.Uint64Range(uint64(minNumberOfConnections)-1, maxNodeID),
+		//nodes to
+		rapid.SliceOfNDistinct(rapid.Uint64Range(uint64(minNumberOfConnections)-1, maxNodeID),
+			minNumberOfConnections,
+			int(maxNodeID),
+			nil,
+		),
+		//min number of connections
+		minNumberOfConnections,
+		//numOfConnections
+		int(maxNodeID),
+	)
+}
+
+func (i *insertProposal) Put(nodeID int, proposal pbft.SealedProposal) {
+	i.lock.Lock()
+	defer i.lock.Unlock()
+	fmt.Printf("Node: %v Inserting: %v hash: %v\n", nodeID, proposal.Number, proposal.Proposal.Hash)
+	//for k, v := range i.bc {
+	//	fmt.Printf("Current: height:%v hash: %v\n", k, v.Hash)
+	//}
+
+	if p, ok := i.bc[proposal.Number]; ok {
+		if !p.Equal(proposal.Proposal) {
+			panic("Wrong proposal inserted!")
+		}
+
+	} else {
+		i.bc[proposal.Number] = *proposal.Proposal
+	}
+}
+
+// insertProposal struct contains inserted final proposals for the node
+type insertProposal struct {
+	lock sync.Mutex
+	bc   map[uint64]pbft.Proposal
+}
+
+func TestDoubleSigning(t *testing.T) {
+
+	//rapid.Check(t, func(t *rapid.T) {
+	numOfNodes := 5 //rapid.IntRange(5, 5).Draw(t, "num of nodes").(int)
+
+	ft := &fakeTransport{
+		GossipFunc: func(ft *fakeTransport, msg *pbft.MessageReq) error {
+			// malicious node needs to send different proposals
+			// 0 -> 1,2
+			// 0 -> 3,4
+			// 0,1,2 x
+			// 0,3,4 x
+
+			//fmt.Printf("Received %v proposal hash:%v from node %v sending to all nodes", msg.Type, msg.Proposal, msg.From)
+
+			for to := range ft.nodes {
+				msg1 := msg.Copy()
+
+				// message from nodes 0 to nodes 3 and 4 gets overwritten to different proposal
+				if msg1.From == pbft.NodeID(strconv.Itoa(0)) {
+					if to == 3 || to == 4 {
+						msg1.Proposal = []byte{110, 89, 24, 11}
+						h := sha1.New()
+						h.Write(msg1.Proposal)
+						msg1.Hash = h.Sum(nil) // hash is [55 127 129 232 88...]
+						//fmt.Printf("From %v to %v Modify %v %v\n", msg.From, to, msg.Proposal, msg.Hash)
+					} else {
+						// do not modify message
+						//msg.Proposal = []byte{82, 253, 252, 7}
+						//h := sha1.New()
+						//h.Write(msg.Proposal)
+						//msg.Hash = h.Sum(nil)
+					}
+				}
+				//if msg.Type == pbft.MessageReq_Preprepare {
+				fmt.Printf("from: %v to %v PUSHING message %v\n", msg1.From, to, msg1.Proposal)
+				//}
+
+				ft.nodes[to].PushMessage(msg1)
+			}
+
+			return nil
+		},
+	}
+	cluster, timeoutsChan := generateCluster(numOfNodes, ft)
+	for i := range cluster {
+		cluster[i].SetInitialState(context.Background())
+	}
+
+	stuckList := NewBoolSlice(len(cluster))
+	doneList := NewBoolSlice(len(cluster))
+
+	callNumber := 0
+	for {
+		callNumber++
+		err := runClusterCycle(cluster, callNumber, stuckList, doneList)
+		if err != nil {
+			t.Error(err)
+		}
+
+		setDoneOnDoneState(cluster, doneList)
+		if stuckList.CalculateNum(true) == numOfNodes {
+			for i := range timeoutsChan {
+				timeoutsChan[i] <- time.Now()
+			}
+		}
+
+		//check that 3 node switched to done state
+		if doneList.CalculateNum(true) == numOfNodes*2/3+1 {
+			//everything done. Success.
+			return
+		}
+
+		//something went wrong.
+		if getMaxClusterRound(cluster) > 10 {
+			t.Error("Infinite rounds")
+			return
+		}
+		if callNumber > 10 {
+			t.Error("stucked")
+			return
+		}
+	}
+	//})
 }
