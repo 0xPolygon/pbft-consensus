@@ -19,6 +19,8 @@ type Config struct {
 	// from the validator. It defaults to Timeout
 	ProposalTimeout time.Duration
 
+	StatsCallback StatsCallback
+
 	// Timeout is the time to wait for validation and
 	// round change messages
 	Timeout time.Duration
@@ -36,7 +38,15 @@ type Config struct {
 	Notifier StateNotifier
 }
 
+type StatsCallback func(*Stats)
+
 type ConfigOption func(*Config)
+
+func WithStats(s StatsCallback) ConfigOption {
+	return func(c *Config) {
+		c.StatsCallback = s
+	}
+}
 
 func WithTimeout(p time.Duration) ConfigOption {
 	return func(c *Config) {
@@ -178,6 +188,8 @@ type Pbft struct {
 
 	// notifier is a reference to the struct which encapsulates handling messages and timeouts
 	notifier StateNotifier
+
+	stats *Stats
 }
 
 type SignKey interface {
@@ -241,6 +253,17 @@ func (p *Pbft) Run(ctx context.Context) {
 
 		// Start the state machine loop
 		p.runCycle(spanCtx)
+
+		// ... emit only if the round has changed
+		p.emitStats()
+	}
+
+	// emit always at the end?
+}
+
+func (p *Pbft) emitStats() {
+	if p.config.StatsCallback != nil {
+		p.config.StatsCallback(p.stats.Snapshot())
 	}
 }
 
@@ -294,6 +317,8 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 		p.setState(SyncState)
 		return
 	}
+
+	p.stats.round = p.state.view.Round
 
 	// reset round messages
 	p.state.resetRoundMsgs()
@@ -653,6 +678,16 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 		p.setStateSpanAttributes(span)
 		span.End()
 	}
+}
+
+type Stats struct {
+	round    uint64
+	sequence uint64
+}
+
+func (s *Stats) Snapshot() *Stats {
+	// https://github.com/hashicorp/nomad/blob/9d03cd4c705e3a4dc113ede85cdc3e5b2425b795/nomad/eval_broker.go#L811
+	return s
 }
 
 // --- communication wrappers ---
