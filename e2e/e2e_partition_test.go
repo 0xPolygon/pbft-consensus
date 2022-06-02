@@ -259,8 +259,8 @@ func TestE2E_Network_Stuck_Locked_Node_Dropped(t *testing.T) {
 			t.Logf("Node %v, running: %v, isProposalLocked: %v, no proposal set\n", n.name, n.IsRunning(), n.pbft.IsLocked())
 		}
 	}
-	// TODO: Temporary assertion until liveness issue is fixed
-	assert.Error(t, err)
+
+	assert.NoError(t, err)
 }
 
 func TestE2E_Partition_OneMajority(t *testing.T) {
