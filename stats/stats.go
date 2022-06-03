@@ -30,6 +30,7 @@ func (s *Stats) SetView(sequence uint64, round uint64) {
 	s.sequence = sequence
 	s.round = round
 }
+
 func (s *Stats) IncrMsgCount(msgType uint32) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
