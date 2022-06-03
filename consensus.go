@@ -265,7 +265,7 @@ func (p *Pbft) Run(ctx context.Context) {
 func (p *Pbft) emitStats() {
 	if p.config.StatsCallback != nil {
 		p.config.StatsCallback(p.stats.Snapshot())
-		// once emited, reset the Stats
+		// once emitted, reset the Stats
 		p.stats.Reset()
 	}
 }
