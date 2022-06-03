@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/0xPolygon/pbft-consensus/stats"
 	"log"
 	"os"
 	"time"
+
+	"github.com/0xPolygon/pbft-consensus/stats"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -35,9 +36,19 @@ type Config struct {
 
 	// Notifier is a reference to the struct which encapsulates handling messages and timeouts
 	Notifier StateNotifier
+
+	StatsCallback StatsCallback
 }
 
 type ConfigOption func(*Config)
+
+type StatsCallback func(stats.Stats)
+
+func WithStats(s StatsCallback) ConfigOption {
+	return func(c *Config) {
+		c.StatsCallback = s
+	}
+}
 
 func WithTimeout(p time.Duration) ConfigOption {
 	return func(c *Config) {
@@ -245,6 +256,17 @@ func (p *Pbft) Run(ctx context.Context) {
 
 		// Start the state machine loop
 		p.runCycle(spanCtx)
+
+		// emit stats when the round is ended
+		p.emitStats()
+	}
+}
+
+func (p *Pbft) emitStats() {
+	if p.config.StatsCallback != nil {
+		p.config.StatsCallback(p.stats.Snapshot())
+		// once emited, reset the Stats
+		p.stats.Reset()
 	}
 }
 
@@ -785,7 +807,7 @@ func (p *Pbft) getNextMessage(span trace.Span) (*MessageReq, bool) {
 		}
 		if msg != nil {
 			// add the event to the span
-			p.stats.IncrMsgCount(uint64(msg.Type))
+			p.stats.IncrMsgCount(uint32(msg.Type))
 			spanAddEventMessage("message", span, msg)
 			p.logger.Printf("[TRACE] Received %s", msg)
 			return msg, true
@@ -831,10 +853,6 @@ func (p *Pbft) PushMessage(msg *MessageReq) {
 // Reads next message with discards from message queue based on current state, sequence and round
 func (p *Pbft) ReadMessageWithDiscards() (*MessageReq, []*MessageReq) {
 	return p.msgQueue.readMessageWithDiscards(p.getState(), p.state.view)
-}
-
-func (p *Pbft) GetStats() stats.Stats {
-	return p.stats.Stats()
 }
 
 // --- package-level helper functions ---
