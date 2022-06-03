@@ -770,7 +770,6 @@ func (p *Pbft) getNextMessage(span trace.Span) (*MessageReq, bool) {
 		msg, discards := p.notifier.ReadNextMessage(p)
 		// send the discard messages
 		p.logger.Printf("[TRACE] Current state %s, number of prepared messages: %d, number of committed messages %d", p.getState(), p.state.numPrepared(), p.state.numCommitted())
-		//fmt.Printf("[TRACE] Current state(%v) %s, number of prepared messages: %d, number of committed messages %d\n", p.validator, p.getState(), p.state.numPrepared(), p.state.numCommitted())
 
 		for _, msg := range discards {
 			p.logger.Printf("[TRACE] Discarded %s ", msg)
