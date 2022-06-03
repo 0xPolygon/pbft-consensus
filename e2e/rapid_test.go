@@ -342,7 +342,9 @@ func TestNodeDoubleSign(t *testing.T) {
 	maliciousNode := pbft.NodeID("0")
 	// proposal to 1/2 of the nodes
 	maliciousProposal := []byte{110, 89, 24, 11}
-
+	h := sha1.New()
+	h.Write(maliciousProposal)
+	maliciousProposalHash := h.Sum(nil) // hash is [55 127 129 232 88...]
 	ft := &fakeTransport{
 		GossipFunc: func(ft *fakeTransport, msg *pbft.MessageReq) error {
 			for to := range ft.nodes {
@@ -351,9 +353,7 @@ func TestNodeDoubleSign(t *testing.T) {
 				if modifiedMessage.From == maliciousNode {
 					if maliciousMessages < to {
 						modifiedMessage.Proposal = maliciousProposal
-						h := sha1.New()
-						h.Write(modifiedMessage.Proposal)
-						modifiedMessage.Hash = h.Sum(nil) // hash is [55 127 129 232 88...]
+						modifiedMessage.Hash = maliciousProposalHash
 					}
 				}
 
