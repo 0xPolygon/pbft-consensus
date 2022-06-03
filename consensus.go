@@ -406,8 +406,6 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 				p.handleStateErr(errIncorrectLockedProposal)
 			}
 		} else {
-
-			fmt.Printf("Current stat set: %v, hash: %v, msg was: %v %v %v\n", p.validator.NodeID(), proposal.Data, msg.From, msg.Proposal, msg.Type)
 			p.state.proposal = proposal
 			p.sendPrepareMsg()
 			p.setState(ValidateState)

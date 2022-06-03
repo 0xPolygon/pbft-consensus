@@ -38,14 +38,14 @@ func (ft *fakeTransport) Gossip(msg *pbft.MessageReq) error {
 }
 
 type BackendFake struct {
-	nodes                []string
-	height               uint64
-	ProposalTime         time.Duration
-	nodeId               int
-	IsStuckMock          func(num uint64) (uint64, bool)
-	ValidatorSetList     pbft.ValidatorSet
-	ValidatorSetMock     func(fake *BackendFake) pbft.ValidatorSet
-	finalProposalsInsert *insertProposal
+	nodes            []string
+	height           uint64
+	ProposalTime     time.Duration
+	nodeId           int
+	IsStuckMock      func(num uint64) (uint64, bool)
+	ValidatorSetList pbft.ValidatorSet
+	ValidatorSetMock func(fake *BackendFake) pbft.ValidatorSet
+	finalProposals   *finalProposal
 }
 
 func (bf *BackendFake) BuildProposal() (*pbft.Proposal, error) {
@@ -62,8 +62,7 @@ func (bf *BackendFake) Validate(proposal *pbft.Proposal) error {
 }
 
 func (bf *BackendFake) Insert(p *pbft.SealedProposal) error {
-	bf.finalProposalsInsert.Put(bf.nodeId, *p)
-	return nil
+	return bf.finalProposals.Insert(*p)
 }
 
 func (bf *BackendFake) Height() uint64 {
@@ -411,7 +410,7 @@ func generateNode(id int, transport *fakeTransport) (*pbft.Pbft, chan time.Time)
 }
 
 func generateCluster(numOfNodes int, transport *fakeTransport) ([]*pbft.Pbft, []chan time.Time) {
-	var ip = &insertProposal{
+	var ip = &finalProposal{
 		lock: sync.Mutex{},
 		bc:   make(map[uint64]pbft.Proposal),
 	}
@@ -437,9 +436,9 @@ func generateCluster(numOfNodes int, transport *fakeTransport) ([]*pbft.Pbft, []
 		}
 
 		node.SetBackend(&BackendFake{
-			finalProposalsInsert: ip,
-			nodes:                nodes,
-			nodeId:               i,
+			finalProposals: ip,
+			nodes:          nodes,
+			nodeId:         i,
 			IsStuckMock: func(num uint64) (uint64, bool) {
 				return 0, false
 			},
@@ -492,6 +491,76 @@ func runClusterCycle(cluster []*pbft.Pbft, callNumber int, stuckList, doneList *
 	}
 
 	return wg.Wait()
+}
+
+func TestPropertyDoubleSign(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		numOfNodes := rapid.IntRange(4, 9).Draw(t, "num of nodes").(int)
+
+		maliciousNode := pbft.NodeID("0")
+		// proposal to 1/2 of the nodes
+		maliciousProposal := []byte{110, 89, 24, 11}
+
+		ft := &fakeTransport{
+			GossipFunc: func(ft *fakeTransport, msg *pbft.MessageReq) error {
+				for to := range ft.nodes {
+					modifiedMessage := msg.Copy()
+					////faulty node sends one proposal to one half of the nodes and malicious on other half
+					if modifiedMessage.From == maliciousNode {
+						if numOfNodes/2 < to {
+							modifiedMessage.Proposal = maliciousProposal
+							h := sha1.New()
+							h.Write(modifiedMessage.Proposal)
+							modifiedMessage.Hash = h.Sum(nil) // hash is [55 127 129 232 88...]
+						}
+					}
+
+					ft.nodes[to].PushMessage(modifiedMessage)
+				}
+
+				return nil
+			},
+		}
+		cluster, timeoutsChan := generateCluster(numOfNodes, ft)
+		for i := range cluster {
+			cluster[i].SetInitialState(context.Background())
+		}
+
+		stuckList := NewBoolSlice(len(cluster))
+		doneList := NewBoolSlice(len(cluster))
+
+		callNumber := 0
+		for {
+			callNumber++
+			err := runClusterCycle(cluster, callNumber, stuckList, doneList)
+			if err != nil {
+				t.Error(err)
+			}
+
+			setDoneOnDoneState(cluster, doneList)
+			if stuckList.CalculateNum(true) == numOfNodes {
+				for i := range timeoutsChan {
+					timeoutsChan[i] <- time.Now()
+				}
+			}
+
+			//check that 3 node switched to done state
+			if doneList.CalculateNum(true) >= numOfNodes*2/3+1 {
+				//everything done. Success.
+				return
+			}
+
+			//something went wrong.
+			if getMaxClusterRound(cluster) > 10 {
+				t.Error("Infinite rounds")
+				return
+			}
+			if callNumber > 100 {
+				t.Error("stucked")
+				return
+			}
+		}
+	})
 }
 
 func setDoneOnDoneState(cluster []*pbft.Pbft, doneList *BoolSlice) {
@@ -612,112 +681,23 @@ func generateRoutingMap(numberOfNode uint64, minNumberOfConnections int) *rapid.
 	)
 }
 
-func (i *insertProposal) Put(nodeID int, proposal pbft.SealedProposal) {
+func (i *finalProposal) Insert(proposal pbft.SealedProposal) error {
 	i.lock.Lock()
 	defer i.lock.Unlock()
-	fmt.Printf("Node: %v Inserting: %v hash: %v\n", nodeID, proposal.Number, proposal.Proposal.Hash)
-	//for k, v := range i.bc {
-	//	fmt.Printf("Current: height:%v hash: %v\n", k, v.Hash)
-	//}
-
 	if p, ok := i.bc[proposal.Number]; ok {
-		if !p.Equal(proposal.Proposal) {
-			panic("Wrong proposal inserted!")
-		}
+		fmt.Printf("So far inserted:%v, trying: %v\n", p, proposal.Proposal)
 
+		if !p.Equal(proposal.Proposal) {
+			panic("Wrong proposal inserted.")
+		}
 	} else {
 		i.bc[proposal.Number] = *proposal.Proposal
 	}
+	return nil
 }
 
-// insertProposal struct contains inserted final proposals for the node
-type insertProposal struct {
+// finalProposal struct contains inserted final proposals for the node
+type finalProposal struct {
 	lock sync.Mutex
 	bc   map[uint64]pbft.Proposal
-}
-
-func TestDoubleSigning(t *testing.T) {
-
-	//rapid.Check(t, func(t *rapid.T) {
-	numOfNodes := 5 //rapid.IntRange(5, 5).Draw(t, "num of nodes").(int)
-
-	ft := &fakeTransport{
-		GossipFunc: func(ft *fakeTransport, msg *pbft.MessageReq) error {
-			// malicious node needs to send different proposals
-			// 0 -> 1,2
-			// 0 -> 3,4
-			// 0,1,2 x
-			// 0,3,4 x
-
-			//fmt.Printf("Received %v proposal hash:%v from node %v sending to all nodes", msg.Type, msg.Proposal, msg.From)
-
-			for to := range ft.nodes {
-				msg1 := msg.Copy()
-
-				// message from nodes 0 to nodes 3 and 4 gets overwritten to different proposal
-				if msg1.From == pbft.NodeID(strconv.Itoa(0)) {
-					if to == 3 || to == 4 {
-						msg1.Proposal = []byte{110, 89, 24, 11}
-						h := sha1.New()
-						h.Write(msg1.Proposal)
-						msg1.Hash = h.Sum(nil) // hash is [55 127 129 232 88...]
-						//fmt.Printf("From %v to %v Modify %v %v\n", msg.From, to, msg.Proposal, msg.Hash)
-					} else {
-						// do not modify message
-						//msg.Proposal = []byte{82, 253, 252, 7}
-						//h := sha1.New()
-						//h.Write(msg.Proposal)
-						//msg.Hash = h.Sum(nil)
-					}
-				}
-				//if msg.Type == pbft.MessageReq_Preprepare {
-				fmt.Printf("from: %v to %v PUSHING message %v\n", msg1.From, to, msg1.Proposal)
-				//}
-
-				ft.nodes[to].PushMessage(msg1)
-			}
-
-			return nil
-		},
-	}
-	cluster, timeoutsChan := generateCluster(numOfNodes, ft)
-	for i := range cluster {
-		cluster[i].SetInitialState(context.Background())
-	}
-
-	stuckList := NewBoolSlice(len(cluster))
-	doneList := NewBoolSlice(len(cluster))
-
-	callNumber := 0
-	for {
-		callNumber++
-		err := runClusterCycle(cluster, callNumber, stuckList, doneList)
-		if err != nil {
-			t.Error(err)
-		}
-
-		setDoneOnDoneState(cluster, doneList)
-		if stuckList.CalculateNum(true) == numOfNodes {
-			for i := range timeoutsChan {
-				timeoutsChan[i] <- time.Now()
-			}
-		}
-
-		//check that 3 node switched to done state
-		if doneList.CalculateNum(true) == numOfNodes*2/3+1 {
-			//everything done. Success.
-			return
-		}
-
-		//something went wrong.
-		if getMaxClusterRound(cluster) > 10 {
-			t.Error("Infinite rounds")
-			return
-		}
-		if callNumber > 10 {
-			t.Error("stucked")
-			return
-		}
-	}
-	//})
 }
