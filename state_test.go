@@ -294,11 +294,11 @@ func TestState_Lock_Unlock(t *testing.T) {
 		Time: time.Now(),
 	}
 	s.lock()
-	assert.Equal(t, uint64(1), s.locked)
+	assert.True(t, s.IsLocked())
 	assert.NotNil(t, s.proposal)
 
 	s.unlock()
-	assert.Equal(t, uint64(0), s.locked)
+	assert.False(t, s.IsLocked())
 	assert.Nil(t, s.proposal)
 }
 

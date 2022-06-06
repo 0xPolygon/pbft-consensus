@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/0xPolygon/pbft-consensus"
 	"go.opentelemetry.io/otel/trace"
@@ -95,9 +96,8 @@ func (bf *BackendFake) ValidateCommit(from pbft.NodeID, seal []byte) error {
 	return nil
 }
 
-func TestSuccess(t *testing.T) {
+func TestPropertySeveralHonestNodesCanAchiveAgreement(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-
 		numOfNodes := rapid.IntRange(4, 30).Draw(t, "num of nodes").(int)
 		ft := &fakeTransport{}
 		cluster, timeoutsChan := generateCluster(numOfNodes, ft)
@@ -105,45 +105,39 @@ func TestSuccess(t *testing.T) {
 			cluster[i].SetInitialState(context.Background())
 		}
 
-		stuckList := NewBoolSlice(len(cluster))
-		doneList := NewBoolSlice(len(cluster))
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
 
-		callNumber := 0
-		for {
-			callNumber++
-			err := runClusterCycle(cluster, callNumber, stuckList, doneList)
-			if err != nil {
-				t.Error(err)
-			}
-
-			setDoneOnDoneState(cluster, doneList)
-			if stuckList.CalculateNum(true) == numOfNodes {
-				for i := range timeoutsChan {
-					timeoutsChan[i] <- time.Now()
+		err := runCluster(ctx,
+			cluster,
+			sendTimeoutIfNNodesStucked(timeoutsChan, numOfNodes),
+			func(doneList *BoolSlice) bool {
+				//check that 3 node switched to done state
+				if doneList.CalculateNum(true) == numOfNodes {
+					//everything done. Success.
+					return true
 				}
-			}
-
-			//check that 3 node switched to done state
-			if doneList.CalculateNum(true) == numOfNodes {
-				//everything done. Success.
-				return
-			}
-
-			//something went wrong.
-			if getMaxClusterRound(cluster) > 3 {
-				t.Error("Infinite rounds")
-				return
-			}
+				return false
+			}, func(maxRound uint64) bool {
+				//something went wrong.
+				if maxRound > 3 {
+					t.Error("Infinite rounds")
+					return true
+				}
+				return false
+			}, 100)
+		if err != nil {
+			t.Fatal(err)
 		}
 	})
-
 }
 
-func TestSeveralNodesCanSwitchToDoneState(t *testing.T) {
+func TestPropertySeveralNodesCanAchiveAgreementWithFailureNodes(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		numOfNodes := rapid.IntRange(4, 9).Draw(t, "num of nodes").(int)
+		numOfNodes := rapid.IntRange(4, 30).Draw(t, "num of nodes").(int)
 		routingMapGenerator := rapid.MapOfN(
 			rapid.Uint64Range(0, uint64(numOfNodes)-1),
+			//not used
 			rapid.Bool(),
 			2*numOfNodes/3+1,
 			numOfNodes-1,
@@ -153,7 +147,6 @@ func TestSeveralNodesCanSwitchToDoneState(t *testing.T) {
 		})
 
 		routingMap := routingMapGenerator.Draw(t, "generate routing").(map[uint64]bool)
-
 		ft := &fakeTransport{
 			GossipFunc: func(ft *fakeTransport, msg *pbft.MessageReq) error {
 				from, err := strconv.ParseUint(string(msg.From), 10, 64)
@@ -178,44 +171,34 @@ func TestSeveralNodesCanSwitchToDoneState(t *testing.T) {
 			cluster[i].SetInitialState(context.Background())
 		}
 
-		stuckList := NewBoolSlice(len(cluster))
-		doneList := NewBoolSlice(len(cluster))
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
 
-		callNumber := 0
-		for {
-			callNumber++
-			err := runClusterCycle(cluster, callNumber, stuckList, doneList)
-			if err != nil {
-				t.Error(err)
-			}
-
-			setDoneOnDoneState(cluster, doneList)
-			if stuckList.CalculateNum(true) == numOfNodes {
-				for i := range timeoutsChan {
-					timeoutsChan[i] <- time.Now()
+		err := runCluster(ctx,
+			cluster,
+			sendTimeoutIfNNodesStucked(timeoutsChan, numOfNodes),
+			func(doneList *BoolSlice) bool {
+				//check that 3 node switched to done state
+				if doneList.CalculateNum(true) >= numOfNodes*2/3+1 {
+					//everything done. Success.
+					return true
 				}
-			}
-
-			//check that 3 node switched to done state
-			if doneList.CalculateNum(true) >= numOfNodes*2/3+1 {
-				//everything done. Success.
-				return
-			}
-
-			//something went wrong.
-			if getMaxClusterRound(cluster) > 10 {
-				t.Error("Infinite rounds")
-				return
-			}
-			if callNumber > 100 {
-				t.Error("stucked")
-				return
-			}
+				return false
+			}, func(maxRound uint64) bool {
+				if maxRound > 10 {
+					t.Error("Infinite rounds")
+					return true
+				}
+				return false
+			}, 100)
+		if err != nil {
+			t.Fatal(err)
 		}
 	})
 }
 
-func TestCheckLivenessIssueCheck_Fails(t *testing.T) {
+func TestProperty4NodesCanAchiveAgreementIfWeLockButNotCommitProposer_Fails(t *testing.T) {
+	t.Skip("Unskip when fix")
 	numOfNodes := 4
 	rounds := map[uint64]map[int][]int{
 		0: {
@@ -240,7 +223,7 @@ func TestCheckLivenessIssueCheck_Fails(t *testing.T) {
 					if msg.Type == pbft.MessageReq_Prepare && nodeId == 3 {
 						countPrepare++
 						if countPrepare == 3 {
-							fmt.Println("Ignoring prepare 3")
+							//fmt.Println("Ignoring prepare 3")
 							continue
 						}
 					}
@@ -270,39 +253,30 @@ func TestCheckLivenessIssueCheck_Fails(t *testing.T) {
 	for i := range cluster {
 		cluster[i].SetInitialState(context.Background())
 	}
-
-	stuckList := NewBoolSlice(len(cluster))
-	doneList := NewBoolSlice(len(cluster))
-
-	callNumber := 0
-	for {
-		callNumber++
-		err := runClusterCycle(cluster, callNumber, stuckList, doneList)
-		if err != nil {
-			t.Error(err)
-		}
-
-		setDoneOnDoneState(cluster, doneList)
-		if stuckList.CalculateNum(true) == numOfNodes {
-			for i := range timeoutsChan {
-				timeoutsChan[i] <- time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	err := runCluster(ctx,
+		cluster,
+		sendTimeoutIfNNodesStucked(timeoutsChan, numOfNodes),
+		func(doneList *BoolSlice) bool {
+			if doneList.CalculateNum(true) >= 3 {
+				return true
 			}
-		}
-
-		//check that 3 node switched to done state
-		if doneList.CalculateNum(true) >= 3 {
-			return
-		}
-
-		if getMaxClusterRound(cluster) > 5 {
-			//todo remove comment when fix liveness issue
-			//t.Error("Infinite rounds")
-			return
-		}
+			return false
+		}, func(maxRound uint64) bool {
+			if maxRound > 5 {
+				//todo remove comment when fix liveness issue
+				t.Error("Liveness issue")
+				return true
+			}
+			return false
+		}, 50)
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
-func TestCheckLivenessIssue2Check(t *testing.T) {
+func TestFiveNodesCanAchiveAgreementIfWeLockTwoNodesOnDifferentProposals(t *testing.T) {
 	numOfNodes := 5
 	rounds := map[uint64]map[int][]int{
 		0: {
@@ -343,33 +317,22 @@ func TestCheckLivenessIssue2Check(t *testing.T) {
 		cluster[i].SetInitialState(context.Background())
 	}
 
-	stuckList := NewBoolSlice(len(cluster))
-	doneList := NewBoolSlice(len(cluster))
-
-	callNumber := 0
-	for {
-		callNumber++
-		err := runClusterCycle(cluster, callNumber, stuckList, doneList)
-		if err != nil {
-			t.Error(err)
-		}
-
-		setDoneOnDoneState(cluster, doneList)
-		if stuckList.CalculateNum(true) == numOfNodes {
-			for i := range timeoutsChan {
-				timeoutsChan[i] <- time.Now()
+	err := runCluster(context.Background(),
+		cluster,
+		sendTimeoutIfNNodesStucked(timeoutsChan, numOfNodes),
+		func(doneList *BoolSlice) bool {
+			if doneList.CalculateNum(true) > 3 {
+				return true
 			}
-		}
-
-		//check that 3 node switched to done state
-		if doneList.CalculateNum(true) >= 3 {
-			return
-		}
-
-		if getMaxClusterRound(cluster) > 20 {
-			t.Error("Infinite rounds")
-			return
-		}
+			return false
+		}, func(maxNodeRound uint64) bool {
+			if maxNodeRound > 20 {
+				t.Fatal("too many rounds")
+			}
+			return true
+		}, 0)
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -519,7 +482,7 @@ func runClusterCycle(cluster []*pbft.Pbft, callNumber int, stuckList, doneList *
 			//if time.Since(wgTime) > waitDuration {
 			//	fmt.Println("wgitme ", state, i, callNumber, time.Since(wgTime), err1, isLocked)
 			//}
-
+			//
 			return err1
 		})
 	}
@@ -544,6 +507,62 @@ func maxPredefinedRound(mp map[uint64]map[uint64][]uint64) uint64 {
 		}
 	}
 	return max
+}
+
+func sendTimeoutIfNNodesStucked(timeoutsChan []chan time.Time, numOfNodes int) func(stuckList *BoolSlice) bool {
+	return func(stuckList *BoolSlice) bool {
+		if stuckList.CalculateNum(true) == numOfNodes {
+			for i := range timeoutsChan {
+				timeoutsChan[i] <- time.Now()
+			}
+		}
+		return false
+	}
+}
+
+func runCluster(ctx context.Context,
+	cluster []*pbft.Pbft,
+	handleStuckList func(*BoolSlice) bool,
+	handleDoneList func(*BoolSlice) bool,
+	handleMaxRoundNumber func(uint64) bool,
+	limitCallNumber int,
+) error {
+	for i := range cluster {
+		cluster[i].SetInitialState(context.Background())
+	}
+
+	stuckList := NewBoolSlice(len(cluster))
+	doneList := NewBoolSlice(len(cluster))
+
+	callNumber := 0
+	for {
+		callNumber++
+		err := runClusterCycle(cluster, callNumber, stuckList, doneList)
+		if err != nil {
+			return err
+		}
+
+		setDoneOnDoneState(cluster, doneList)
+		if handleStuckList(stuckList) {
+			return nil
+		}
+		if handleDoneList(doneList) {
+			return nil
+		}
+
+		if handleMaxRoundNumber(getMaxClusterRound(cluster)) {
+			return nil
+		}
+		if callNumber > limitCallNumber {
+			return errors.New("callnumber limit")
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+
+		}
+	}
 }
 
 //generateRoundsRoutingMap generator for routing map

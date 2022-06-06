@@ -81,7 +81,7 @@ func TestTransition_AcceptState_Proposer_Locked(t *testing.T) {
 	i.expect(expectResult{
 		sequence: 1,
 		state:    ValidateState,
-		locked:   1,
+		locked:   true,
 		outgoing: 2, // preprepare and prepare
 	})
 	assert.Equal(t, i.state.proposal.Data, mockProposal)
@@ -249,7 +249,7 @@ func TestTransition_AcceptState_Validator_LockWrong(t *testing.T) {
 	i.expect(expectResult{
 		sequence: 1,
 		state:    RoundChangeState,
-		locked:   1,
+		locked:   true,
 		err:      errIncorrectLockedProposal,
 	})
 }
@@ -280,7 +280,7 @@ func TestTransition_AcceptState_Validator_LockCorrect(t *testing.T) {
 	i.expect(expectResult{
 		sequence: 1,
 		state:    ValidateState,
-		locked:   1,
+		locked:   true,
 		outgoing: 1, // prepare message
 	})
 }
@@ -562,7 +562,7 @@ func TestTransition_ValidateState_MoveToCommitState(t *testing.T) {
 		state:       CommitState,
 		prepareMsgs: 3,
 		commitMsgs:  3, // Commit messages (A proposer sent commit via state machine loop, C and D sent commit via emit message)
-		locked:      1,
+		locked:      true,
 		outgoing:    1, // A commit message
 	})
 }
@@ -890,7 +890,7 @@ type expectResult struct {
 	state    PbftState
 	sequence uint64
 	round    uint64
-	locked   uint64
+	locked   bool
 	err      error
 
 	// num of messages
@@ -922,7 +922,7 @@ func (m *mockPbft) expect(res expectResult) {
 	if size := len(m.state.committed); uint64(size) != res.commitMsgs {
 		m.t.Fatalf("incorrect commit messages %d %d", size, res.commitMsgs)
 	}
-	if m.state.locked != res.locked {
+	if m.state.IsLocked() != res.locked {
 		m.t.Fatalf("incorrect locked %v %v", m.state.locked, res.locked)
 	}
 	if size := len(m.respMsg); uint64(size) != res.outgoing {
