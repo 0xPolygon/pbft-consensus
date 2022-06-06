@@ -34,5 +34,5 @@ jobs:
         with:
           go-version: '1.17'
       - name: Go fuzz test
-        timeout-minutes: 10
+        timeout-minutes: 20
         run: make fuzz
