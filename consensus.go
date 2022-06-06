@@ -179,9 +179,6 @@ type Pbft struct {
 
 	// notifier is a reference to the struct which encapsulates handling messages and timeouts
 	notifier StateNotifier
-
-	//for experimenting
-	getRoundTimeoutChan func() <-chan time.Time
 }
 
 type SignKey interface {
