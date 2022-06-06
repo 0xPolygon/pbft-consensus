@@ -112,9 +112,8 @@ func TestPropertySeveralHonestNodesCanAchiveAgreement(t *testing.T) {
 			cluster,
 			sendTimeoutIfNNodesStucked(timeoutsChan, numOfNodes),
 			func(doneList *BoolSlice) bool {
-				//check that 3 node switched to done state
+				//everything done. All nodes in done state
 				if doneList.CalculateNum(true) == numOfNodes {
-					//everything done. Success.
 					return true
 				}
 				return false
@@ -210,10 +209,11 @@ func TestProperty4NodesCanAchiveAgreementIfWeLockButNotCommitProposer_Fails(t *t
 
 	countPrepare := 0
 	ft := &fakeTransport{
+		//for round 0 we have a routing from routing map without commit messages and
+		//for other rounds we dont send messages to node 3
 		GossipFunc: func(ft *fakeTransport, msg *pbft.MessageReq) error {
 			routing, changed := rounds[msg.View.Round]
 			if changed {
-				//todo hack
 				from, err := strconv.Atoi(string(msg.From))
 				if err != nil {
 					t.Fatal(err)
@@ -223,7 +223,7 @@ func TestProperty4NodesCanAchiveAgreementIfWeLockButNotCommitProposer_Fails(t *t
 					if msg.Type == pbft.MessageReq_Prepare && nodeId == 3 {
 						countPrepare++
 						if countPrepare == 3 {
-							//fmt.Println("Ignoring prepare 3")
+							fmt.Println("Ignoring prepare 3")
 							continue
 						}
 					}
