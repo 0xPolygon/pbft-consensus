@@ -399,7 +399,7 @@ func generateNode(id int, transport *fakeTransport) (*pbft.Pbft, chan time.Time)
 	node := pbft.New(key(strconv.Itoa(id)), transport,
 		pbft.WithTracer(trace.NewNoopTracerProvider().Tracer("")),
 		pbft.WithLogger(log.New(io.Discard, "", 0)),
-		pbft.WithRoundTimeoutFunction(func() <-chan time.Time {
+		pbft.WithRoundTimeout(func(_ uint64) <-chan time.Time {
 			return timeoutChan
 		}),
 	)

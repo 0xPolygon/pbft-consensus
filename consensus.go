@@ -13,7 +13,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-type RoundTimeout func(uint64) time.Duration
+type RoundTimeout func(round uint64) <-chan time.Time
 
 type Config struct {
 	// ProposalTimeout is the time to wait for the proposal
@@ -30,9 +30,8 @@ type Config struct {
 	// Tracer is the OpenTelemetry tracer to log traces
 	Tracer trace.Tracer
 
-	// RoundTimeout is a function that calculates timeout based on a round number
-	RoundTimeout     RoundTimeout
-	RoundTimeoutFunc func() <-chan time.Time
+	// RoundTimeoutFunction is a function that calculates timeout based on a round number
+	RoundTimeout RoundTimeout
 
 	// Notifier is a reference to the struct which encapsulates handling messages and timeouts
 	Notifier StateNotifier
@@ -68,14 +67,6 @@ func WithRoundTimeout(roundTimeout RoundTimeout) ConfigOption {
 	return func(c *Config) {
 		if roundTimeout != nil {
 			c.RoundTimeout = roundTimeout
-		}
-	}
-}
-
-func WithRoundTimeoutFunction(roundTimeoutFunc func() <-chan time.Time) ConfigOption {
-	return func(c *Config) {
-		if roundTimeoutFunc() != nil {
-			c.RoundTimeoutFunc = roundTimeoutFunc
 		}
 	}
 }
@@ -215,9 +206,6 @@ func New(validator SignKey, transport Transport, opts ...ConfigOption) *Pbft {
 		roundTimeout: config.RoundTimeout,
 		notifier:     config.Notifier,
 	}
-	p.getRoundTimeoutChan = func() <-chan time.Time {
-		return p.state.timeoutChan
-	}
 
 	p.logger.Printf("[INFO] validator key: addr=%s\n", p.validator.NodeID())
 	return p
@@ -304,8 +292,7 @@ func (p *Pbft) setRound(round uint64) {
 	p.state.SetCurrentRound(round)
 
 	// reset current timeout and start a new one
-	timeout := p.roundTimeout(round)
-	p.state.timeoutChan = time.NewTimer(timeout).C
+	p.state.timeoutChan = p.roundTimeout(round)
 }
 
 // runAcceptState runs the Accept state loop
@@ -801,7 +788,7 @@ func (p *Pbft) getNextMessage(span trace.Span) (*MessageReq, bool) {
 		// wait until there is a new message or
 		// someone closes the stopCh (i.e. timeout for round change)
 		select {
-		case <-p.getRoundTimeoutChan():
+		case <-p.state.timeoutChan:
 			span.AddEvent("Timeout")
 			p.notifier.HandleTimeout(p.validator.NodeID(), stateToMsg(p.getState()), &View{
 				Round:    p.state.GetCurrentRound(),
@@ -843,7 +830,7 @@ func (p *Pbft) ReadMessageWithDiscards() (*MessageReq, []*MessageReq) {
 // --- package-level helper functions ---
 // exponentialTimeout calculates the timeout duration depending on the current round.
 // Round acts as an exponent when determining timeout (2^round).
-func exponentialTimeout(round uint64) time.Duration {
+func exponentialTimeoutDuration(round uint64) time.Duration {
 	timeout := defaultTimeout
 	// limit exponent to be in range of maxTimeout (<=8) otherwise use maxTimeout
 	// this prevents calculating timeout that is greater than maxTimeout and
@@ -854,6 +841,9 @@ func exponentialTimeout(round uint64) time.Duration {
 		timeout = maxTimeout
 	}
 	return timeout
+}
+func exponentialTimeout(round uint64) <-chan time.Time {
+	return time.NewTimer(exponentialTimeoutDuration(round)).C
 }
 
 // MaxFaultyNodes calculate max faulty nodes in order to have Byzantine-fault tollerant system.

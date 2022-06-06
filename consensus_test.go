@@ -674,7 +674,7 @@ func TestExponentialTimeout(t *testing.T) {
 		tc := tc // rebind tc into this lexical scope
 		t.Run(tc.description, func(t *testing.T) {
 			t.Parallel()
-			timeout := exponentialTimeout(tc.round)
+			timeout := exponentialTimeoutDuration(tc.round)
 			require.Equal(t, tc.expected, timeout, fmt.Sprintf("timeout should be %s", tc.expected))
 		})
 	}
@@ -832,7 +832,9 @@ func newMockPbft(t *testing.T, accounts []string, account string, backendArg ...
 	// initialize pbft
 	m.Pbft = New(acct, m,
 		WithLogger(log.New(loggerOutput, "", log.LstdFlags)),
-		WithRoundTimeout(func(u uint64) time.Duration { return time.Millisecond }))
+		WithRoundTimeout(func(round uint64) <-chan time.Time {
+			return time.NewTimer(time.Millisecond).C
+		}))
 
 	// initialize backend mock
 	var backend *mockBackend

@@ -112,7 +112,7 @@ func GetLoggerOutput(name string, logsDir string) io.Writer {
 
 // GetPredefinedTimeout is a closure to the function which is returning given predefined timeout.
 func GetPredefinedTimeout(timeout time.Duration) pbft.RoundTimeout {
-	return func(u uint64) time.Duration {
-		return timeout
+	return func(u uint64) <-chan time.Time {
+		return time.NewTimer(timeout).C
 	}
 }
