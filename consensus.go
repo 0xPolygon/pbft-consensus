@@ -206,13 +206,6 @@ func New(validator SignKey, transport Transport, opts ...ConfigOption) *Pbft {
 		tracer:       config.Tracer,
 		roundTimeout: config.RoundTimeout,
 		notifier:     config.Notifier,
-		proposalDelayFunc: func(ctx context.Context, delay time.Duration) {
-			select {
-			case <-time.After(delay):
-			case <-ctx.Done():
-				return
-			}
-		},
 	}
 	p.roundTimeoutFunc = func() <-chan time.Time {
 		return p.state.timeout.C
@@ -366,7 +359,11 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 
 			// calculate how much time do we have to wait to gossip the proposal
 			delay := time.Until(p.state.proposal.Time)
-			p.proposalDelayFunc(p.ctx, delay)
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				return
+			}
 		}
 
 		// send the preprepare message

@@ -49,7 +49,7 @@ type BackendFake struct {
 func (bf *BackendFake) BuildProposal() (*pbft.Proposal, error) {
 	proposal := &pbft.Proposal{
 		Data: GenerateProposal(),
-		Time: time.Now().Add(1 * bf.ProposalTime),
+		Time: time.Now(),
 	}
 	proposal.Hash = Hash(proposal.Data)
 	return proposal, nil
@@ -265,7 +265,6 @@ func TestProperty4NodesCanAchiveAgreementIfWeLockButNotCommitProposer_Fails(t *t
 			return false
 		}, func(maxRound uint64) bool {
 			if maxRound > 5 {
-				//todo remove comment when fix liveness issue
 				t.Error("Liveness issue")
 				return true
 			}
@@ -398,7 +397,6 @@ func (bs *BoolSlice) String() string {
 func generateNode(id int, transport *fakeTransport) (*pbft.Pbft, chan time.Time) {
 	node := pbft.New(key(strconv.Itoa(id)), transport,
 		pbft.WithTracer(trace.NewNoopTracerProvider().Tracer("")),
-		func(config *pbft.Config) {},
 		pbft.WithLogger(log.New(io.Discard, "", 0)),
 	)
 
@@ -563,36 +561,4 @@ func runCluster(ctx context.Context,
 
 		}
 	}
-}
-
-//generateRoundsRoutingMap generator for routing map
-//map[uint64]map[uint64][]uint64
-func generateRoundsRoutingMap(numOfNodes uint64) *rapid.Generator {
-	return rapid.MapOfN(
-		//round number
-		rapid.Uint64Range(0, 3),
-		//validator routing
-		generateRoutingMap(numOfNodes, 0),
-		//min num of rounds
-		1,
-		//max num of rounds
-		10)
-}
-
-func generateRoutingMap(numberOfNode uint64, minNumberOfConnections int) *rapid.Generator {
-	maxNodeID := numberOfNode - 1
-	return rapid.MapOfN(
-		//nodes from
-		rapid.Uint64Range(uint64(minNumberOfConnections)-1, maxNodeID),
-		//nodes to
-		rapid.SliceOfNDistinct(rapid.Uint64Range(uint64(minNumberOfConnections)-1, maxNodeID),
-			minNumberOfConnections,
-			int(maxNodeID),
-			nil,
-		),
-		//min number of connections
-		minNumberOfConnections,
-		//numOfConnections
-		int(maxNodeID),
-	)
 }
