@@ -337,72 +337,62 @@ func TestFiveNodesCanAchiveAgreementIfWeLockTwoNodesOnDifferentProposals(t *test
 }
 
 func TestNodeDoubleSign(t *testing.T) {
-	numOfNodes := 5
-	maliciousMessages := numOfNodes / 2
+
 	maliciousNode := pbft.NodeID("0")
-	// proposal to 1/2 of the nodes
 	maliciousProposal := []byte{110, 89, 24, 11}
 	h := sha1.New()
 	h.Write(maliciousProposal)
 	maliciousProposalHash := h.Sum(nil) // hash is [55 127 129 232 88...]
-	ft := &fakeTransport{
-		GossipFunc: func(ft *fakeTransport, msg *pbft.MessageReq) error {
-			for to := range ft.nodes {
-				modifiedMessage := msg.Copy()
-				////faulty node sends one proposal to one half of the nodes and malicious on other half
-				if modifiedMessage.From == maliciousNode {
-					if maliciousMessages < to {
-						modifiedMessage.Proposal = maliciousProposal
-						modifiedMessage.Hash = maliciousProposalHash
+
+	rapid.Check(t, func(t *rapid.T) {
+		numOfNodes := rapid.IntRange(4, 8).Draw(t, "num of nodes").(int)
+		maliciousMessages := rapid.IntRange(0, numOfNodes/2).Draw(t, "malicious messages").(int)
+
+		ft := &fakeTransport{
+			GossipFunc: func(ft *fakeTransport, msg *pbft.MessageReq) error {
+				for to := range ft.nodes {
+					modifiedMessage := msg.Copy()
+					////faulty node sends one proposal to one half of the nodes and malicious on other half
+					if modifiedMessage.From == maliciousNode {
+						if maliciousMessages < to {
+							modifiedMessage.Proposal = maliciousProposal
+							modifiedMessage.Hash = maliciousProposalHash
+						}
 					}
+					ft.nodes[to].PushMessage(modifiedMessage)
 				}
 
-				ft.nodes[to].PushMessage(modifiedMessage)
-			}
+				return nil
+			},
+		}
+		cluster, timeoutsChan := generateCluster(numOfNodes, ft)
+		for i := range cluster {
+			cluster[i].SetInitialState(context.Background())
+		}
 
-			return nil
-		},
-	}
-	cluster, timeoutsChan := generateCluster(numOfNodes, ft)
-	for i := range cluster {
-		cluster[i].SetInitialState(context.Background())
-	}
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
 
-	stuckList := NewBoolSlice(len(cluster))
-	doneList := NewBoolSlice(len(cluster))
-
-	callNumber := 0
-	for {
-		callNumber++
-		err := runClusterCycle(cluster, callNumber, stuckList, doneList)
+		err := runCluster(ctx,
+			cluster,
+			sendTimeoutIfNNodesStucked(timeoutsChan, numOfNodes),
+			func(doneList *BoolSlice) bool {
+				if doneList.CalculateNum(true) >= pbft.QuorumSize(numOfNodes) {
+					//everything done. Success.
+					return true
+				}
+				return false
+			}, func(maxRound uint64) bool {
+				if maxRound > 10 {
+					t.Error("Infinite rounds")
+					return true
+				}
+				return false
+			}, 100)
 		if err != nil {
-			// TODO uncomment once it is fixed
-			//t.Fatalf("%v", err)
+			t.Fatal(err)
 		}
-
-		setDoneOnDoneState(cluster, doneList)
-		if stuckList.CalculateNum(true) == numOfNodes {
-			for i := range timeoutsChan {
-				timeoutsChan[i] <- time.Now()
-			}
-		}
-
-		if doneList.CalculateNum(true) >= pbft.QuorumSize(numOfNodes) {
-			//everything done. Success.
-			return
-		}
-
-		//something went wrong.
-		if getMaxClusterRound(cluster) > 10 {
-			t.Error("Infinite rounds")
-			return
-		}
-		if callNumber > 100 {
-			// TODO uncomment once it is fixed
-			//t.Error("stucked")
-			return
-		}
-	}
+	})
 }
 
 func getMaxClusterRound(cluster []*pbft.Pbft) uint64 {
