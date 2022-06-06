@@ -219,7 +219,7 @@ type currentState struct {
 	locked uint64
 
 	// timeout tracks the time left for this round
-	timeout *time.Timer
+	timeoutChan <-chan time.Time
 
 	// Describes whether there has been an error during the computation
 	err error
@@ -230,7 +230,7 @@ func newState() *currentState {
 	c := &currentState{
 		// this is a default value, it will get reset
 		// at every iteration
-		timeout: time.NewTimer(0),
+		timeoutChan: nil,
 	}
 	c.resetRoundMsgs()
 

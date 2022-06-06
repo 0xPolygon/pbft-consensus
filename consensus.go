@@ -31,7 +31,8 @@ type Config struct {
 	Tracer trace.Tracer
 
 	// RoundTimeout is a function that calculates timeout based on a round number
-	RoundTimeout RoundTimeout
+	RoundTimeout     RoundTimeout
+	RoundTimeoutFunc func() <-chan time.Time
 
 	// Notifier is a reference to the struct which encapsulates handling messages and timeouts
 	Notifier StateNotifier
@@ -67,6 +68,14 @@ func WithRoundTimeout(roundTimeout RoundTimeout) ConfigOption {
 	return func(c *Config) {
 		if roundTimeout != nil {
 			c.RoundTimeout = roundTimeout
+		}
+	}
+}
+
+func WithRoundTimeoutFunction(roundTimeoutFunc func() <-chan time.Time) ConfigOption {
+	return func(c *Config) {
+		if roundTimeoutFunc() != nil {
+			c.RoundTimeoutFunc = roundTimeoutFunc
 		}
 	}
 }
@@ -181,8 +190,7 @@ type Pbft struct {
 	notifier StateNotifier
 
 	//for experimenting
-	roundTimeoutFunc  func() <-chan time.Time
-	proposalDelayFunc func(ctx context.Context, delay time.Duration)
+	getRoundTimeoutChan func() <-chan time.Time
 }
 
 type SignKey interface {
@@ -207,19 +215,12 @@ func New(validator SignKey, transport Transport, opts ...ConfigOption) *Pbft {
 		roundTimeout: config.RoundTimeout,
 		notifier:     config.Notifier,
 	}
-	p.roundTimeoutFunc = func() <-chan time.Time {
-		return p.state.timeout.C
+	p.getRoundTimeoutChan = func() <-chan time.Time {
+		return p.state.timeoutChan
 	}
 
 	p.logger.Printf("[INFO] validator key: addr=%s\n", p.validator.NodeID())
 	return p
-}
-
-func (p *Pbft) SetRoundTimeoutFunction(f func() <-chan time.Time) {
-	p.roundTimeoutFunc = f
-}
-func (p *Pbft) GetRoundTimeout() <-chan time.Time {
-	return p.roundTimeoutFunc()
 }
 
 func (p *Pbft) SetBackend(backend Backend) error {
@@ -304,7 +305,7 @@ func (p *Pbft) setRound(round uint64) {
 
 	// reset current timeout and start a new one
 	timeout := p.roundTimeout(round)
-	p.state.timeout = time.NewTimer(timeout)
+	p.state.timeoutChan = time.NewTimer(timeout).C
 }
 
 // runAcceptState runs the Accept state loop
@@ -800,7 +801,7 @@ func (p *Pbft) getNextMessage(span trace.Span) (*MessageReq, bool) {
 		// wait until there is a new message or
 		// someone closes the stopCh (i.e. timeout for round change)
 		select {
-		case <-p.GetRoundTimeout():
+		case <-p.getRoundTimeoutChan():
 			span.AddEvent("Timeout")
 			p.notifier.HandleTimeout(p.validator.NodeID(), stateToMsg(p.getState()), &View{
 				Round:    p.state.GetCurrentRound(),

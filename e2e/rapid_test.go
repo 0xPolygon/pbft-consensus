@@ -395,16 +395,14 @@ func (bs *BoolSlice) String() string {
 }
 
 func generateNode(id int, transport *fakeTransport) (*pbft.Pbft, chan time.Time) {
+	timeoutChan := make(chan time.Time)
 	node := pbft.New(key(strconv.Itoa(id)), transport,
 		pbft.WithTracer(trace.NewNoopTracerProvider().Tracer("")),
 		pbft.WithLogger(log.New(io.Discard, "", 0)),
+		pbft.WithRoundTimeoutFunction(func() <-chan time.Time {
+			return timeoutChan
+		}),
 	)
-
-	timeoutChan := make(chan time.Time)
-	// round timeout mock
-	node.SetRoundTimeoutFunction(func() <-chan time.Time {
-		return timeoutChan
-	})
 
 	transport.nodes = append(transport.nodes, node)
 	return node, timeoutChan
