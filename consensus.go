@@ -590,8 +590,6 @@ func (p *Pbft) runCommitState(ctx context.Context, start time.Time) {
 	} else {
 		// move to done state to finish the current iteration of the state machine
 		p.setState(DoneState)
-		// todo reset stats?
-		//	p.stats.Clear()
 	}
 }
 
