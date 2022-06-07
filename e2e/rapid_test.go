@@ -110,7 +110,7 @@ func TestPropertySeveralHonestNodesCanAchiveAgreement(t *testing.T) {
 
 		err := runCluster(ctx,
 			cluster,
-			sendTimeoutIfNNodesStucked(timeoutsChan, numOfNodes),
+			sendTimeoutIfNNodesStucked(t, timeoutsChan, numOfNodes),
 			func(doneList *BoolSlice) bool {
 				//everything done. All nodes in done state
 				if doneList.CalculateNum(true) == numOfNodes {
@@ -175,7 +175,7 @@ func TestPropertySeveralNodesCanAchiveAgreementWithFailureNodes(t *testing.T) {
 
 		err := runCluster(ctx,
 			cluster,
-			sendTimeoutIfNNodesStucked(timeoutsChan, numOfNodes),
+			sendTimeoutIfNNodesStucked(t, timeoutsChan, numOfNodes),
 			func(doneList *BoolSlice) bool {
 				//check that 3 node switched to done state
 				if doneList.CalculateNum(true) >= numOfNodes*2/3+1 {
@@ -257,7 +257,7 @@ func TestProperty4NodesCanAchiveAgreementIfWeLockButNotCommitProposer_Fails(t *t
 	defer cancel()
 	err := runCluster(ctx,
 		cluster,
-		sendTimeoutIfNNodesStucked(timeoutsChan, numOfNodes),
+		sendTimeoutIfNNodesStucked(t, timeoutsChan, numOfNodes),
 		func(doneList *BoolSlice) bool {
 			if doneList.CalculateNum(true) >= 3 {
 				return true
@@ -318,7 +318,7 @@ func TestFiveNodesCanAchiveAgreementIfWeLockTwoNodesOnDifferentProposals(t *test
 
 	err := runCluster(context.Background(),
 		cluster,
-		sendTimeoutIfNNodesStucked(timeoutsChan, numOfNodes),
+		sendTimeoutIfNNodesStucked(t, timeoutsChan, numOfNodes),
 		func(doneList *BoolSlice) bool {
 			if doneList.CalculateNum(true) > 3 {
 				return true
@@ -505,11 +505,22 @@ func maxPredefinedRound(mp map[uint64]map[uint64][]uint64) uint64 {
 	return max
 }
 
-func sendTimeoutIfNNodesStucked(timeoutsChan []chan time.Time, numOfNodes int) func(stuckList *BoolSlice) bool {
+//inter
+type Errorer interface {
+	Error(args ...interface{})
+}
+
+func sendTimeoutIfNNodesStucked(t Errorer, timeoutsChan []chan time.Time, numOfNodes int) func(stuckList *BoolSlice) bool {
 	return func(stuckList *BoolSlice) bool {
 		if stuckList.CalculateNum(true) == numOfNodes {
+			c := time.After(time.Second * 5)
 			for i := range timeoutsChan {
-				timeoutsChan[i] <- time.Now()
+				select {
+				case timeoutsChan[i] <- time.Now():
+				case <-c:
+					t.Error(i, "node timeout stucked")
+					return true
+				}
 			}
 		}
 		return false
