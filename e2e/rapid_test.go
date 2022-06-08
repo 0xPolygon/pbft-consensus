@@ -336,27 +336,44 @@ func TestFiveNodesCanAchiveAgreementIfWeLockTwoNodesOnDifferentProposals(t *test
 	}
 }
 
-func TestNodeDoubleSign(t *testing.T) {
-	// one malicious node
-	maliciousNode := pbft.NodeID("0")
-	maliciousProposal := []byte{110, 89, 24, 11}
-	h := sha1.New()
-	h.Write(maliciousProposal)
-	maliciousProposalHash := h.Sum(nil) // hash is [55 127 129 232 88...]
+type maliciousProposer struct {
+	nodeID                pbft.NodeID
+	maliciousProposal     []byte
+	maliciousProposalHash []byte
+}
 
+func generateMaliciousProposers(num int) []maliciousProposer {
+	maliciousProposers := make([]maliciousProposer, num)
+	for i := 0; i < num; i++ {
+		maliciousProposal := GenerateProposal()
+		h := sha1.New()
+		h.Write(maliciousProposal)
+		maliciousProposalHash := h.Sum(nil)
+		malicious := maliciousProposer{pbft.NodeID(strconv.Itoa(i)), maliciousProposal, maliciousProposalHash}
+		maliciousProposers[i] = malicious
+	}
+
+	return maliciousProposers
+}
+
+func TestNodeDoubleSign(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		numOfNodes := rapid.IntRange(4, 10).Draw(t, "num of nodes").(int)
+		numOfNodes := rapid.IntRange(4, 7).Draw(t, "num of nodes").(int)
 		// sign different message to up to 1/2 of the nodes
 		maliciousMessagesToNodes := rapid.IntRange(0, numOfNodes/2).Draw(t, "malicious message to nodes").(int)
+		faultyNodes := rapid.IntRange(1, pbft.MaxFaultyNodes(numOfNodes)).Draw(t, "malicious nodes").(int)
+		maliciousNodes := generateMaliciousProposers(faultyNodes)
+
 		ft := &fakeTransport{
 			GossipFunc: func(ft *fakeTransport, msg *pbft.MessageReq) error {
 				for to := range ft.nodes {
 					modifiedMessage := msg.Copy()
 					// faulty node modifies proposal and sends to subset of nodes (maliciousMessagesToNodes)
-					if modifiedMessage.From == maliciousNode {
+					from, _ := strconv.Atoi(string(modifiedMessage.From))
+					if from < len(maliciousNodes) {
 						if maliciousMessagesToNodes > to {
-							modifiedMessage.Proposal = maliciousProposal
-							modifiedMessage.Hash = maliciousProposalHash
+							modifiedMessage.Proposal = maliciousNodes[from].maliciousProposal
+							modifiedMessage.Hash = maliciousNodes[from].maliciousProposalHash
 						}
 					}
 					ft.nodes[to].PushMessage(modifiedMessage)
@@ -375,10 +392,10 @@ func TestNodeDoubleSign(t *testing.T) {
 
 		err := runCluster(ctx,
 			cluster,
-			sendTimeoutIfNNodesStucked(timeoutsChan, numOfNodes),
+			sendTimeoutIfNNodesStucked(t, timeoutsChan, numOfNodes),
 			func(doneList *BoolSlice) bool {
 				// todo wait for quorum size of nodes?
-				if doneList.CalculateNum(true) >= pbft.QuorumSize(numOfNodes) {
+				if doneList.CalculateNum(true) >= 2*numOfNodes/3+1 {
 					return true
 				}
 				return false
