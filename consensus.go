@@ -281,16 +281,20 @@ func (p *Pbft) runCycle(ctx context.Context) {
 	// Based on the current state, execute the corresponding section
 	switch p.getState() {
 	case AcceptState:
-		p.runAcceptState(ctx, startTime)
+		p.runAcceptState(ctx)
+		p.stats.StateDuration(uint32(AcceptState), startTime)
 
 	case ValidateState:
-		p.runValidateState(ctx, startTime)
+		p.runValidateState(ctx)
+		p.stats.StateDuration(uint32(AcceptState), startTime)
 
 	case RoundChangeState:
-		p.runRoundChangeState(ctx, startTime)
+		p.runRoundChangeState(ctx)
+		p.stats.StateDuration(uint32(RoundChangeState), startTime)
 
 	case CommitState:
-		p.runCommitState(ctx, startTime)
+		p.runCommitState(ctx)
+		p.stats.StateDuration(uint32(CommitState), startTime)
 
 	case DoneState:
 		panic("BUG: We cannot iterate on DoneState")
@@ -317,13 +321,9 @@ func (p *Pbft) setRound(round uint64) {
 // The Accept state always checks the snapshot, and the validator set. If the current node is not in the validators set,
 // it moves back to the Sync state. On the other hand, if the node is a validator, it calculates the proposer.
 // If it turns out that the current node is the proposer, it builds a proposal, and sends preprepare and then prepare messages.
-func (p *Pbft) runAcceptState(ctx context.Context, start time.Time) { // start new round
+func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 	_, span := p.tracer.Start(ctx, "AcceptState")
-
-	defer func() {
-		span.End()
-		p.stats.StateDuration(uint32(AcceptState), start)
-	}()
+	defer span.End()
 
 	// todo backend init?
 	p.stats.SetView(p.state.view.Sequence, p.state.view.Round)
@@ -446,13 +446,9 @@ func (p *Pbft) runAcceptState(ctx context.Context, start time.Time) { // start n
 // runValidateState implements the Validate state loop.
 //
 // The Validate state is rather simple - all nodes do in this state is read messages and add them to their local snapshot state
-func (p *Pbft) runValidateState(ctx context.Context, start time.Time) { // start new round
+func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 	ctx, span := p.tracer.Start(ctx, "ValidateState")
-
-	defer func() {
-		span.End()
-		p.stats.StateDuration(uint32(AcceptState), start)
-	}()
+	defer span.End()
 
 	hasCommitted := false
 	sendCommit := func(span trace.Span) {
@@ -561,13 +557,9 @@ func (p *Pbft) setStateSpanAttributes(span trace.Span) {
 	span.SetAttributes(attr...)
 }
 
-func (p *Pbft) runCommitState(ctx context.Context, start time.Time) {
+func (p *Pbft) runCommitState(ctx context.Context) {
 	_, span := p.tracer.Start(ctx, "CommitState")
-
-	defer func() {
-		span.End()
-		p.stats.StateDuration(uint32(CommitState), start)
-	}()
+	defer span.End()
 
 	committedSeals := p.state.getCommittedSeals()
 	proposal := p.state.proposal.Copy()
@@ -604,13 +596,9 @@ func (p *Pbft) handleStateErr(err error) {
 	p.setState(RoundChangeState)
 }
 
-func (p *Pbft) runRoundChangeState(ctx context.Context, start time.Time) {
+func (p *Pbft) runRoundChangeState(ctx context.Context) {
 	ctx, span := p.tracer.Start(ctx, "RoundChange")
-
-	defer func() {
-		span.End()
-		p.stats.StateDuration(uint32(RoundChangeState), start)
-	}()
+	defer span.End()
 
 	sendRoundChange := func(round uint64) {
 		p.logger.Printf("[DEBUG] local round change: round=%d", round)
