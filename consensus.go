@@ -30,7 +30,7 @@ type Config struct {
 	// Tracer is the OpenTelemetry tracer to log traces
 	Tracer trace.Tracer
 
-	// RoundTimeoutFunction is a function that calculates timeout based on a round number
+	// RoundTimeout is a function that calculates timeout based on a round number
 	RoundTimeout RoundTimeout
 
 	// Notifier is a reference to the struct which encapsulates handling messages and timeouts
