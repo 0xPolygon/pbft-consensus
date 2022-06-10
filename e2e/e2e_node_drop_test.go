@@ -33,3 +33,37 @@ func TestE2E_NodeDrop(t *testing.T) {
 
 	c.Stop()
 }
+
+func TestE2E_BulkNodeDrop(t *testing.T) {
+	t.Parallel()
+
+	clusterCount := 5
+	bulkToDrop := 3
+
+	conf := &ClusterConfig{
+		Count:        clusterCount,
+		Name:         "bulk_node_drop",
+		Prefix:       "ptr",
+		RoundTimeout: GetPredefinedTimeout(2 * time.Second),
+	}
+	c := NewPBFTCluster(t, conf)
+	c.Start()
+	err := c.WaitForHeight(2, 3*time.Second)
+	assert.NoError(t, err)
+
+	// drop bulk of nodes from cluster
+	dropNodes := generateNodeNames(bulkToDrop, clusterCount-1, "ptr_")
+	for _, node := range dropNodes {
+		c.StopNode(node)
+	}
+	c.IsStuck(15*time.Second, dropNodes)
+
+	// restart dropped nodes
+	for _, node := range dropNodes {
+		c.StartNode(node)
+	}
+	err = c.WaitForHeight(5, 15*time.Second)
+	assert.NoError(t, err)
+
+	c.Stop()
+}
