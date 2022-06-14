@@ -19,6 +19,10 @@ jobs:
           go-version: '1.18'
       - name: Go test
         run: make test
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v2
+        with:
+          file: ./coverage.out
       - name: Go e2e test
         run: make e2e
   fuzz:
