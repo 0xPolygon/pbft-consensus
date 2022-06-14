@@ -103,7 +103,7 @@ func (c *Config) ApplyOps(opts ...ConfigOption) {
 
 type SealedProposal struct {
 	Proposal       *Proposal
-	CommittedSeals [][]byte
+	CommittedSeals []CommittedSeal
 	Proposer       NodeID
 	Number         uint64
 }
@@ -248,7 +248,7 @@ func (p *Pbft) Run(ctx context.Context) {
 func (p *Pbft) runCycle(ctx context.Context) {
 	// Log to the console
 	if p.state.view != nil {
-		p.logger.Printf("[DEBUG] cycle: state=%s, sequence=%d, round=%d", p.getState(), p.state.view.Sequence, p.state.view.Round)
+		p.logger.Printf("[DEBUG] cycle: state=%s, sequence=%d, round=%d", p.getState(), p.state.view.Sequence, p.state.GetCurrentRound())
 	}
 
 	// Based on the current state, execute the corresponding section
@@ -278,7 +278,7 @@ func (p *Pbft) setSequence(sequence uint64) {
 }
 
 func (p *Pbft) setRound(round uint64) {
-	p.state.view.Round = round
+	p.state.SetCurrentRound(round)
 
 	// reset current timeout and start a new one
 	timeout := p.roundTimeout(round)
@@ -349,8 +349,13 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 		// send the preprepare message
 		p.sendPreprepareMsg()
 
-		// send the prepare message since we are ready to move the state
-		p.sendPrepareMsg()
+		if !p.state.IsLocked() {
+			// send the prepare message since we are ready to move the state
+			p.sendPrepareMsg()
+		} else {
+			// proposer node is already locked to the same proposal => fast-track and send commit message straight away
+			p.sendCommitMsg()
+		}
 
 		if p.state.IsLocked() {
 			p.sendCommitMsg()
@@ -640,7 +645,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 		p.sendRoundChange()
 	}
 	sendNextRoundChange := func() {
-		sendRoundChange(p.state.view.Round + 1)
+		sendRoundChange(p.state.GetCurrentRound() + 1)
 	}
 
 	checkTimeout := func() {
@@ -705,11 +710,11 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 
 		if num == p.state.NumValid() {
 			// start a new round inmediatly
-			p.state.view.Round = msg.View.Round
+			p.state.SetCurrentRound(msg.View.Round)
 			p.setState(AcceptState)
 		} else if num == p.state.MaxFaultyNodes()+1 {
 			// weak certificate, try to catch up if our round number is smaller
-			if p.state.view.Round < msg.View.Round {
+			if p.state.GetCurrentRound() < msg.View.Round {
 				// update timer
 				sendRoundChange(msg.View.Round)
 			}
@@ -845,7 +850,7 @@ func (p *Pbft) getNextMessage(span trace.Span) (*MessageReq, bool) {
 		case <-p.state.timeout.C:
 			span.AddEvent("Timeout")
 			p.notifier.HandleTimeout(p.validator.NodeID(), stateToMsg(p.getState()), &View{
-				Round:    p.state.view.Round,
+				Round:    p.state.GetCurrentRound(),
 				Sequence: p.state.view.Sequence,
 			})
 			p.logger.Printf("[TRACE] Message read timeout occurred")

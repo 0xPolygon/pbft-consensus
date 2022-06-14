@@ -1,5 +1,10 @@
-name: Unit tests
+name: CI
 on: [ pull_request ]
+
+concurrency:
+  group: build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -11,9 +16,13 @@ jobs:
       - name: Setup go
         uses: actions/setup-go@v1
         with:
-          go-version: '1.17'
+          go-version: '1.18'
       - name: Go test
         run: make test
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v2
+        with:
+          file: ./coverage.out
       - name: Go e2e test
         run: make e2e
   fuzz:
@@ -29,5 +38,5 @@ jobs:
         with:
           go-version: '1.17'
       - name: Go fuzz test
-        timeout-minutes: 10
+        timeout-minutes: 20
         run: make fuzz

@@ -380,7 +380,7 @@ func TestTransition_RoundChangeState_Timeout(t *testing.T) {
 	go func() {
 		close(waitSignal)
 		for {
-			if m.state.view.Round == 2 {
+			if m.state.GetCurrentRound() == 2 {
 				m.cancelFn()
 				return
 			}
@@ -904,14 +904,14 @@ type expectResult struct {
 
 // expect is a test helper function
 // printed information from this one will be skipped
-// may be called from simultaneosly from multiple gorutines
+// may be called from simultaneously from multiple gorutines
 func (m *mockPbft) expect(res expectResult) {
 	m.t.Helper()
 
 	if sequence := m.state.view.Sequence; sequence != res.sequence {
 		m.t.Fatalf("incorrect sequence %d %d", sequence, res.sequence)
 	}
-	if round := m.state.view.Round; round != res.round {
+	if round := m.state.GetCurrentRound(); round != res.round {
 		m.t.Fatalf("incorrect round %d %d", round, res.round)
 	}
 	if m.getState() != res.state {
