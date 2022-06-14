@@ -484,7 +484,7 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 		// at this point either we have enough prepare messages
 		// or commit messages so we can lock the proposal
 		if !p.state.IsLocked() {
-			// invoke lock only at initial round when locking occured
+			// invoke lock only at initial round when locking occurred
 			p.state.lock(p.state.view.Round)
 		}
 
