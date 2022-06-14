@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"log"
 	"math"
 	"strconv"
 	"testing"
@@ -259,6 +260,74 @@ func TestE2E_Network_Stuck_Locked_Node_Dropped(t *testing.T) {
 			t.Logf("Node %v, running: %v, isProposalLocked: %v, no proposal set\n", n.name, n.IsRunning(), n.pbft.IsLocked())
 		}
 	}
+	// TODO: Temporary assertion until liveness issue is fixed
+	assert.Error(t, err)
+}
+
+// TestE2E_Liveness_Issue_3Nodes tests the network where
+// node A_4 is isolated from the network
+// in round 0 for a sequence 1 node A_0 gets locked with one proposal and triggers round change
+// in round 1 for sequence 1 node A_1 gets locked with different proposal
+// 2 other running nodes (A_2 and A_3) are not locked and cannot form a consensus.
+func TestE2E_Liveness_Issue_3Nodes(t *testing.T) {
+	t.Parallel()
+	round0 := roundMetadata{
+		round: 0,
+		routingMap: map[sender]receivers{
+			"A_0": {"A_0", "A_1", "A_2"},
+			"A_1": {"A_0"},
+			"A_2": {"A_0", "A_3"},
+			"A_3": {"A_0"},
+		},
+	}
+
+	round1 := roundMetadata{
+		round: 1,
+		routingMap: map[sender]receivers{
+			"A_0": {"A_1"},
+			"A_1": {"A_1", "A_2", "A_3"},
+			"A_2": {"A_1"},
+			"A_3": {"A_1"},
+		},
+	}
+
+	flowMap := map[uint64]roundMetadata{0: round0, 1: round1}
+	transport := newGenericGossipTransport()
+
+	config := &ClusterConfig{
+		Count:  5,
+		Name:   "liveness_issue",
+		Prefix: "A",
+	}
+
+	c := NewPBFTCluster(t, config, transport)
+	// If gossipHandler returns false, message should not be transported.
+	gossipHandler := func(senderId, receiverId pbft.NodeID, msg *pbft.MessageReq) (sent bool) {
+		// cut communication for node A_4
+		if senderId == "A_4" || receiverId == "A_4" {
+			return false
+		}
+
+		if msg.View.Sequence == 1 && (msg.View.Round == 0 || msg.View.Round == 1) {
+			// do not send commit message to any of the nodes in round 0 and 1 for sequence 1
+			if msg.Type == pbft.MessageReq_Commit {
+				return false
+			}
+			return transport.shouldGossipBasedOnMsgFlowMap(msg, senderId, receiverId)
+		}
+		return true
+	}
+
+	transport.withFlowMap(flowMap).withGossipHandler(gossipHandler)
+	c.Start()
+	defer c.Stop()
+
+	err := c.WaitForHeight(5, 1*time.Minute, []string{"A_2", "A_3"})
+
+	for _, n := range c.Nodes() {
+		log.Printf("Node: %v, running: %v, locked: %v, height: %v, proposal: %v\n", n.GetName(), n.IsRunning(), n.IsLocked(), n.GetNodeHeight(), n.GetProposal())
+	}
+
 	// TODO: Temporary assertion until liveness issue is fixed
 	assert.Error(t, err)
 }
