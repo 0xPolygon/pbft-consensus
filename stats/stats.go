@@ -12,15 +12,15 @@ type Stats struct {
 	round    uint64
 	sequence uint64
 
-	msgCount      map[uint32]uint64
-	stateDuration map[uint32]time.Duration
+	msgCount      map[string]uint64
+	stateDuration map[string]time.Duration
 }
 
 func NewStats() *Stats {
 	return &Stats{
 		lock:          &sync.Mutex{},
-		msgCount:      make(map[uint32]uint64),
-		stateDuration: make(map[uint32]time.Duration),
+		msgCount:      make(map[string]uint64),
+		stateDuration: make(map[string]time.Duration),
 	}
 }
 
@@ -31,13 +31,13 @@ func (s *Stats) SetView(sequence uint64, round uint64) {
 	s.round = round
 }
 
-func (s *Stats) IncrMsgCount(msgType uint32) {
+func (s *Stats) IncrMsgCount(msgType string) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	s.msgCount[msgType]++
 }
 
-func (s *Stats) StateDuration(msgType uint32, t time.Time) {
+func (s *Stats) StateDuration(msgType string, t time.Time) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	s.stateDuration[msgType] = time.Since(t)
@@ -69,6 +69,6 @@ func (s *Stats) Reset() {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	s.msgCount = make(map[uint32]uint64)
-	s.stateDuration = make(map[uint32]time.Duration)
+	s.msgCount = make(map[string]uint64)
+	s.stateDuration = make(map[string]time.Duration)
 }

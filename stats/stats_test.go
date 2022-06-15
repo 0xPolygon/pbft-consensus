@@ -11,44 +11,49 @@ func TestIncrMsgCount(t *testing.T) {
 	stats := NewStats()
 	var wg sync.WaitGroup
 
+	roundChange := "RoundChange"
+	preprepare := "Preprepare"
+	commit := "Commit"
+	prepare := "Prepare"
+
 	// increment Round Change Message count
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		stats.IncrMsgCount(uint32(0))
+		stats.IncrMsgCount(roundChange)
 	}()
 	// increment Prepepare Message count
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		stats.IncrMsgCount(uint32(1))
-		stats.IncrMsgCount(uint32(1))
+		stats.IncrMsgCount(preprepare)
+		stats.IncrMsgCount(preprepare)
 	}()
 	// increment Commit Message count
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		stats.IncrMsgCount(uint32(2))
+		stats.IncrMsgCount(commit)
 	}()
 	// increment Prepare Message count
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		stats.IncrMsgCount(uint32(3))
-		stats.IncrMsgCount(uint32(3))
-		stats.IncrMsgCount(uint32(3))
+		stats.IncrMsgCount(prepare)
+		stats.IncrMsgCount(prepare)
+		stats.IncrMsgCount(prepare)
 	}()
 
 	wg.Wait()
 
 	// assert Round Changes
-	assert.Equal(t, uint64(1), stats.msgCount[uint32(0)])
+	assert.Equal(t, uint64(1), stats.msgCount[roundChange])
 	// assert Prepepares
-	assert.Equal(t, uint64(2), stats.msgCount[uint32(1)])
+	assert.Equal(t, uint64(2), stats.msgCount[preprepare])
 	// assert Commit Messages
-	assert.Equal(t, uint64(1), stats.msgCount[uint32(2)])
+	assert.Equal(t, uint64(1), stats.msgCount[commit])
 	// assert Prepare Message
-	assert.Equal(t, uint64(3), stats.msgCount[uint32(3)])
+	assert.Equal(t, uint64(3), stats.msgCount[prepare])
 }
 
 func TestSetView(t *testing.T) {
@@ -63,10 +68,11 @@ func TestSetView(t *testing.T) {
 
 func TestReset(t *testing.T) {
 	stats := NewStats()
+	preprepare := "Preprepare"
 
-	stats.IncrMsgCount(uint32(1))
-	stats.IncrMsgCount(uint32(1))
+	stats.IncrMsgCount(preprepare)
+	stats.IncrMsgCount(preprepare)
 	stats.Reset()
 
-	assert.Equal(t, uint64(0), stats.msgCount[(uint32(1))])
+	assert.Equal(t, uint64(0), stats.msgCount[preprepare])
 }

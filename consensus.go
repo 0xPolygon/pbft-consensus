@@ -273,28 +273,26 @@ func (p *Pbft) emitStats() {
 // runCycle represents the PBFT state machine loop
 func (p *Pbft) runCycle(ctx context.Context) {
 	startTime := time.Now()
+	state := p.getState()
+	defer p.stats.StateDuration(state.String(), startTime)
 
 	// Log to the console
 	if p.state.view != nil {
 		p.logger.Printf("[DEBUG] cycle: state=%s, sequence=%d, round=%d", p.getState(), p.state.view.Sequence, p.state.GetCurrentRound())
 	}
 	// Based on the current state, execute the corresponding section
-	switch p.getState() {
+	switch state {
 	case AcceptState:
 		p.runAcceptState(ctx)
-		p.stats.StateDuration(uint32(AcceptState), startTime)
 
 	case ValidateState:
 		p.runValidateState(ctx)
-		p.stats.StateDuration(uint32(AcceptState), startTime)
 
 	case RoundChangeState:
 		p.runRoundChangeState(ctx)
-		p.stats.StateDuration(uint32(RoundChangeState), startTime)
 
 	case CommitState:
 		p.runCommitState(ctx)
-		p.stats.StateDuration(uint32(CommitState), startTime)
 
 	case DoneState:
 		panic("BUG: We cannot iterate on DoneState")
@@ -522,7 +520,9 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 	}
 }
 
-func spanAddEventMessage(typ string, span trace.Span, msg *MessageReq) {
+func (p *Pbft) spanAddEventMessage(typ string, span trace.Span, msg *MessageReq) {
+	p.stats.IncrMsgCount(msg.Type.String())
+
 	span.AddEvent("Message", trace.WithAttributes(
 		// where was the message generated
 		attribute.String("typ", typ),
@@ -800,12 +800,11 @@ func (p *Pbft) getNextMessage(span trace.Span) (*MessageReq, bool) {
 
 		for _, msg := range discards {
 			p.logger.Printf("[TRACE] Discarded %s ", msg)
-			spanAddEventMessage("dropMessage", span, msg)
+			p.spanAddEventMessage("dropMessage", span, msg)
 		}
 		if msg != nil {
 			// add the event to the span
-			p.stats.IncrMsgCount(uint32(msg.Type))
-			spanAddEventMessage("message", span, msg)
+			p.spanAddEventMessage("message", span, msg)
 			p.logger.Printf("[TRACE] Received %s", msg)
 			return msg, true
 		}
