@@ -8,6 +8,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/0xPolygon/pbft-consensus/stats"
+
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -34,9 +36,19 @@ type Config struct {
 
 	// Notifier is a reference to the struct which encapsulates handling messages and timeouts
 	Notifier StateNotifier
+
+	StatsCallback StatsCallback
 }
 
 type ConfigOption func(*Config)
+
+type StatsCallback func(stats.Stats)
+
+func WithStats(s StatsCallback) ConfigOption {
+	return func(c *Config) {
+		c.StatsCallback = s
+	}
+}
 
 func WithTimeout(p time.Duration) ConfigOption {
 	return func(c *Config) {
@@ -178,6 +190,8 @@ type Pbft struct {
 
 	// notifier is a reference to the struct which encapsulates handling messages and timeouts
 	notifier StateNotifier
+
+	stats *stats.Stats
 }
 
 type SignKey interface {
@@ -201,6 +215,7 @@ func New(validator SignKey, transport Transport, opts ...ConfigOption) *Pbft {
 		tracer:       config.Tracer,
 		roundTimeout: config.RoundTimeout,
 		notifier:     config.Notifier,
+		stats:        stats.NewStats(),
 	}
 
 	p.logger.Printf("[INFO] validator key: addr=%s\n", p.validator.NodeID())
@@ -241,18 +256,32 @@ func (p *Pbft) Run(ctx context.Context) {
 
 		// Start the state machine loop
 		p.runCycle(spanCtx)
+
+		// emit stats when the round is ended
+		p.emitStats()
+	}
+}
+
+func (p *Pbft) emitStats() {
+	if p.config.StatsCallback != nil {
+		p.config.StatsCallback(p.stats.Snapshot())
+		// once emitted, reset the Stats
+		p.stats.Reset()
 	}
 }
 
 // runCycle represents the PBFT state machine loop
 func (p *Pbft) runCycle(ctx context.Context) {
+	startTime := time.Now()
+	state := p.getState()
+	defer p.stats.StateDuration(state.String(), startTime)
+
 	// Log to the console
 	if p.state.view != nil {
 		p.logger.Printf("[DEBUG] cycle: state=%s, sequence=%d, round=%d", p.getState(), p.state.view.Sequence, p.state.GetCurrentRound())
 	}
-
 	// Based on the current state, execute the corresponding section
-	switch p.getState() {
+	switch state {
 	case AcceptState:
 		p.runAcceptState(ctx)
 
@@ -294,6 +323,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 	_, span := p.tracer.Start(ctx, "AcceptState")
 	defer span.End()
 
+	p.stats.SetView(p.state.view.Sequence, p.state.view.Round)
 	p.logger.Printf("[INFO] accept state: sequence %d", p.state.view.Sequence)
 
 	if !p.state.validators.Includes(p.validator.NodeID()) {
@@ -489,7 +519,9 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 	}
 }
 
-func spanAddEventMessage(typ string, span trace.Span, msg *MessageReq) {
+func (p *Pbft) spanAddEventMessage(typ string, span trace.Span, msg *MessageReq) {
+	p.stats.IncrMsgCount(msg.Type.String())
+
 	span.AddEvent("Message", trace.WithAttributes(
 		// where was the message generated
 		attribute.String("typ", typ),
@@ -767,11 +799,11 @@ func (p *Pbft) getNextMessage(span trace.Span) (*MessageReq, bool) {
 
 		for _, msg := range discards {
 			p.logger.Printf("[TRACE] Discarded %s ", msg)
-			spanAddEventMessage("dropMessage", span, msg)
+			p.spanAddEventMessage("dropMessage", span, msg)
 		}
 		if msg != nil {
 			// add the event to the span
-			spanAddEventMessage("message", span, msg)
+			p.spanAddEventMessage("message", span, msg)
 			p.logger.Printf("[TRACE] Received %s", msg)
 			return msg, true
 		}
