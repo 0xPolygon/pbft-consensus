@@ -37,10 +37,10 @@ func (s *Stats) IncrMsgCount(msgType string) {
 	s.msgCount[msgType]++
 }
 
-func (s *Stats) StateDuration(msgType string, t time.Time) {
+func (s *Stats) StateDuration(state string, t time.Time) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	s.stateDuration[msgType] = time.Since(t)
+	s.stateDuration[state] = time.Since(t)
 }
 
 func (s *Stats) Snapshot() Stats {
