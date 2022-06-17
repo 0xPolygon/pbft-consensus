@@ -6,7 +6,6 @@ import (
 )
 
 type Stats struct {
-	// todo atomic instead of lock?
 	lock *sync.Mutex
 
 	round    uint64
@@ -63,8 +62,6 @@ func (s *Stats) Snapshot() Stats {
 	return *stats
 }
 
-// TODO: reset?
-// TODO: stats per round?
 func (s *Stats) Reset() {
 	s.lock.Lock()
 	defer s.lock.Unlock()

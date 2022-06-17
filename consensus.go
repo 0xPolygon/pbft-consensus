@@ -323,7 +323,6 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 	_, span := p.tracer.Start(ctx, "AcceptState")
 	defer span.End()
 
-	// todo backend init?
 	p.stats.SetView(p.state.view.Sequence, p.state.view.Round)
 	p.logger.Printf("[INFO] accept state: sequence %d", p.state.view.Sequence)
 
