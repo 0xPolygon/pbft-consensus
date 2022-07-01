@@ -196,7 +196,7 @@ func New(validator SignKey, transport Transport, opts ...ConfigOption) *Pbft {
 		state:        newState(),
 		transport:    transport,
 		msgQueue:     newMsgQueue(),
-		updateCh:     make(chan struct{}, 100), //hack. There is a bug when you have several messages pushed on the same time.
+		updateCh:     make(chan struct{}, 1), //hack. There is a bug when you have several messages pushed on the same time.
 		config:       config,
 		logger:       config.Logger,
 		tracer:       config.Tracer,
