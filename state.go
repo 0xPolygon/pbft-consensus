@@ -216,10 +216,10 @@ type currentState struct {
 	roundMessages map[uint64]map[NodeID]*MessageReq
 
 	// Locked signals whether the proposal is locked
-	locked bool
+	locked uint64
 
 	// timeout tracks the time left for this round
-	timeout *time.Timer
+	timeoutChan <-chan time.Time
 
 	// Describes whether there has been an error during the computation
 	err error
@@ -230,7 +230,7 @@ func newState() *currentState {
 	c := &currentState{
 		// this is a default value, it will get reset
 		// at every iteration
-		timeout: time.NewTimer(0),
+		timeoutChan: nil,
 	}
 	c.resetRoundMsgs()
 
@@ -238,7 +238,7 @@ func newState() *currentState {
 }
 
 func (c *currentState) IsLocked() bool {
-	return c.locked
+	return atomic.LoadUint64(&c.locked) == 1
 }
 
 func (c *currentState) GetSequence() uint64 {
@@ -316,12 +316,12 @@ func (c *currentState) CalcProposer() {
 }
 
 func (c *currentState) lock() {
-	c.locked = true
+	atomic.StoreUint64(&c.locked, 1)
 }
 
 func (c *currentState) unlock() {
 	c.proposal = nil
-	c.locked = false
+	atomic.StoreUint64(&c.locked, 0)
 }
 
 // cleanRound deletes the specific round messages
@@ -335,7 +335,6 @@ func (c *currentState) AddRoundMessage(msg *MessageReq) int {
 		return 0
 	}
 	c.addMessage(msg)
-
 	return len(c.roundMessages[msg.View.Round])
 }
 

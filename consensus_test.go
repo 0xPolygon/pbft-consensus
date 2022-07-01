@@ -70,7 +70,7 @@ func TestTransition_AcceptState_Proposer_Locked(t *testing.T) {
 	i := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
 	i.setState(AcceptState)
 
-	i.state.locked = true
+	i.state.lock()
 	i.state.proposal = &Proposal{
 		Data: mockProposal,
 		Hash: digest,
@@ -266,7 +266,7 @@ func TestTransition_AcceptState_Validator_LockCorrect(t *testing.T) {
 		Data: proposal,
 		Hash: digest,
 	}
-	i.state.locked = true
+	i.state.lock()
 
 	i.emitMsg(&MessageReq{
 		From:     "A",
@@ -674,7 +674,7 @@ func TestExponentialTimeout(t *testing.T) {
 		tc := tc // rebind tc into this lexical scope
 		t.Run(tc.description, func(t *testing.T) {
 			t.Parallel()
-			timeout := exponentialTimeout(tc.round)
+			timeout := exponentialTimeoutDuration(tc.round)
 			require.Equal(t, tc.expected, timeout, fmt.Sprintf("timeout should be %s", tc.expected))
 		})
 	}
@@ -832,7 +832,9 @@ func newMockPbft(t *testing.T, accounts []string, account string, backendArg ...
 	// initialize pbft
 	m.Pbft = New(acct, m,
 		WithLogger(log.New(loggerOutput, "", log.LstdFlags)),
-		WithRoundTimeout(func(u uint64) time.Duration { return time.Millisecond }))
+		WithRoundTimeout(func(round uint64) <-chan time.Time {
+			return time.NewTimer(time.Millisecond).C
+		}))
 
 	// initialize backend mock
 	var backend *mockBackend
@@ -922,7 +924,7 @@ func (m *mockPbft) expect(res expectResult) {
 	if size := len(m.state.committed); uint64(size) != res.commitMsgs {
 		m.t.Fatalf("incorrect commit messages %d %d", size, res.commitMsgs)
 	}
-	if m.state.locked != res.locked {
+	if m.state.IsLocked() != res.locked {
 		m.t.Fatalf("incorrect locked %v %v", m.state.locked, res.locked)
 	}
 	if size := len(m.respMsg); uint64(size) != res.outgoing {

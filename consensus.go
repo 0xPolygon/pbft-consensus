@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"github.com/0xPolygon/pbft-consensus/stats"
@@ -14,7 +15,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-type RoundTimeout func(uint64) time.Duration
+type RoundTimeout func(round uint64) <-chan time.Time
 
 type Config struct {
 	// ProposalTimeout is the time to wait for the proposal
@@ -209,7 +210,7 @@ func New(validator SignKey, transport Transport, opts ...ConfigOption) *Pbft {
 		state:        newState(),
 		transport:    transport,
 		msgQueue:     newMsgQueue(),
-		updateCh:     make(chan struct{}),
+		updateCh:     make(chan struct{}, 1), //hack. There is a bug when you have several messages pushed on the same time.
 		config:       config,
 		logger:       config.Logger,
 		tracer:       config.Tracer,
@@ -236,11 +237,7 @@ func (p *Pbft) SetBackend(backend Backend) error {
 
 // start starts the PBFT consensus state machine
 func (p *Pbft) Run(ctx context.Context) {
-	p.ctx = ctx
-
-	// the iteration always starts with the AcceptState.
-	// AcceptState stages will reset the rest of the message queues.
-	p.setState(AcceptState)
+	p.SetInitialState(ctx)
 
 	// start the trace span
 	spanCtx, span := p.tracer.Start(context.Background(), fmt.Sprintf("Sequence-%d", p.state.view.Sequence))
@@ -268,6 +265,17 @@ func (p *Pbft) emitStats() {
 		// once emitted, reset the Stats
 		p.stats.Reset()
 	}
+}
+
+func (p *Pbft) SetInitialState(ctx context.Context) {
+	p.ctx = ctx
+
+	// the iteration always starts with the AcceptState.
+	// AcceptState stages will reset the rest of the message queues.
+	p.setState(AcceptState)
+}
+func (p *Pbft) RunCycle(ctx context.Context) {
+	p.runCycle(ctx)
 }
 
 // runCycle represents the PBFT state machine loop
@@ -310,8 +318,7 @@ func (p *Pbft) setRound(round uint64) {
 	p.state.SetCurrentRound(round)
 
 	// reset current timeout and start a new one
-	timeout := p.roundTimeout(round)
-	p.state.timeout = time.NewTimer(timeout)
+	p.state.timeoutChan = p.roundTimeout(round)
 }
 
 // runAcceptState runs the Accept state loop
@@ -338,17 +345,16 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 	p.state.CalcProposer()
 
 	isProposer := p.state.proposer == p.validator.NodeID()
-
 	p.backend.Init(&RoundInfo{
 		Proposer:   p.state.proposer,
 		IsProposer: isProposer,
-		Locked:     p.state.locked,
+		Locked:     p.state.IsLocked(),
 	})
 
 	// log the current state of this span
 	span.SetAttributes(
 		attribute.Bool("isproposer", isProposer),
-		attribute.Bool("locked", p.state.locked),
+		attribute.Bool("locked", p.state.IsLocked()),
 		attribute.String("proposer", string(p.state.proposer)),
 	)
 
@@ -357,7 +363,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 	if isProposer {
 		p.logger.Printf("[INFO] we are the proposer")
 
-		if !p.state.locked {
+		if !p.state.IsLocked() {
 			// since the state is not locked, we need to build a new proposal
 			p.state.proposal, err = p.backend.BuildProposal()
 			if err != nil {
@@ -368,13 +374,11 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 
 			// calculate how much time do we have to wait to gossip the proposal
 			delay := time.Until(p.state.proposal.Time)
-
 			select {
 			case <-time.After(delay):
-			case <-p.ctx.Done():
+			case <-ctx.Done():
 				return
 			}
-
 		}
 
 		// send the preprepare message
@@ -405,7 +409,6 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 			p.setState(RoundChangeState)
 			continue
 		}
-
 		// TODO: Validate that the fields required for Preprepare are set (Proposal and Hash)
 		if msg.From != p.state.proposer {
 			p.logger.Printf("[ERROR] msg received from wrong proposer: expected=%s, found=%s", p.state.proposer, msg.From)
@@ -423,7 +426,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 			return
 		}
 
-		if p.state.locked {
+		if p.state.IsLocked() {
 			// the state is locked, we need to receive the same proposal
 			if p.state.proposal.Equal(proposal) {
 				// fast-track and send a commit message and wait for validations
@@ -494,7 +497,6 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 				continue
 			}
 			p.state.addCommitted(msg)
-
 		default:
 			panic(fmt.Errorf("BUG: Unexpected message type: %s in %s", msg.Type, p.getState()))
 		}
@@ -782,7 +784,7 @@ func (p *Pbft) setState(s PbftState) {
 
 // IsLocked returns if the current proposal is locked
 func (p *Pbft) IsLocked() bool {
-	return p.state.locked
+	return atomic.LoadUint64(&p.state.locked) == 1
 }
 
 // GetProposal returns current proposal in the pbft
@@ -790,12 +792,16 @@ func (p *Pbft) GetProposal() *Proposal {
 	return p.state.proposal
 }
 
+func (p *Pbft) Round() uint64 {
+	return atomic.LoadUint64(&p.state.view.Round)
+}
+
 // getNextMessage reads a new message from the message queue
 func (p *Pbft) getNextMessage(span trace.Span) (*MessageReq, bool) {
 	for {
 		msg, discards := p.notifier.ReadNextMessage(p)
 		// send the discard messages
-		p.logger.Printf("[TRACE] Current state %s, number of prepared messages: %d, number of committed messages %d", PbftState(p.state.state), p.state.numPrepared(), p.state.numCommitted())
+		p.logger.Printf("[TRACE] Current state %s, number of prepared messages: %d, number of committed messages %d", p.getState(), p.state.numPrepared(), p.state.numCommitted())
 
 		for _, msg := range discards {
 			p.logger.Printf("[TRACE] Discarded %s ", msg)
@@ -811,7 +817,7 @@ func (p *Pbft) getNextMessage(span trace.Span) (*MessageReq, bool) {
 		// wait until there is a new message or
 		// someone closes the stopCh (i.e. timeout for round change)
 		select {
-		case <-p.state.timeout.C:
+		case <-p.state.timeoutChan:
 			span.AddEvent("Timeout")
 			p.notifier.HandleTimeout(p.validator.NodeID(), stateToMsg(p.getState()), &View{
 				Round:    p.state.GetCurrentRound(),
@@ -853,7 +859,7 @@ func (p *Pbft) ReadMessageWithDiscards() (*MessageReq, []*MessageReq) {
 // --- package-level helper functions ---
 // exponentialTimeout calculates the timeout duration depending on the current round.
 // Round acts as an exponent when determining timeout (2^round).
-func exponentialTimeout(round uint64) time.Duration {
+func exponentialTimeoutDuration(round uint64) time.Duration {
 	timeout := defaultTimeout
 	// limit exponent to be in range of maxTimeout (<=8) otherwise use maxTimeout
 	// this prevents calculating timeout that is greater than maxTimeout and
@@ -864,6 +870,9 @@ func exponentialTimeout(round uint64) time.Duration {
 		timeout = maxTimeout
 	}
 	return timeout
+}
+func exponentialTimeout(round uint64) <-chan time.Time {
+	return time.NewTimer(exponentialTimeoutDuration(round)).C
 }
 
 // MaxFaultyNodes calculate max faulty nodes in order to have Byzantine-fault tollerant system.
