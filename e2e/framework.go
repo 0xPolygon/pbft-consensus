@@ -22,6 +22,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+var proposalInsertionError = errors.New("existing proposal on a given position is not not equal to the one being inserted to the same position")
+
 func initTracer(name string) *sdktrace.TracerProvider {
 	ctx := context.Background()
 
@@ -159,7 +161,7 @@ func (c *Cluster) insertFinalProposal(sealProp *pbft.SealedProposal) error {
 		if insertIndex <= uint64(lastIndex) {
 			// already exists
 			if !c.sealedProposals[insertIndex].Proposal.Equal(sealProp.Proposal) {
-				return errors.New("existing proposal on a given position is not not equal to the one being inserted to the same position")
+				return proposalInsertionError
 			} else {
 				return nil
 			}
@@ -414,6 +416,11 @@ type node struct {
 
 	// indicate if the node is faulty
 	faulty uint64
+
+	// indicate if node should insert proposal or not
+	insert func(pp *pbft.Proposal) error
+	// chan for sending error if panic occurs in the node
+	panicCh chan error
 }
 
 func newPBFTNode(name string, clusterConfig *ClusterConfig, nodes []string, trace trace.Tracer, tt *transport) (*node, error) {
@@ -446,6 +453,7 @@ func newPBFTNode(name string, clusterConfig *ClusterConfig, nodes []string, trac
 		running: 0,
 		// set to init index -1 so that zero value is not the same as first index
 		localSyncIndex: -1,
+		panicCh:        make(chan error),
 	}
 	return n, nil
 }
@@ -468,6 +476,11 @@ func (n *node) isStuck(num uint64) (uint64, bool) {
 }
 
 func (n *node) Insert(pp *pbft.SealedProposal) error {
+	if n.insert != nil {
+		if err := n.insert(pp.Proposal); err != nil {
+			return fmt.Errorf("%s error inserting proposal %s for height %d: %w", n.name, pp.Proposal.Data, pp.Number, err)
+		}
+	}
 	err := n.c.insertFinalProposal(pp)
 	if err != nil {
 		panic(err)
@@ -507,6 +520,12 @@ func (n *node) Start() {
 	go func() {
 		defer func() {
 			atomic.StoreUint64(&n.running, 0)
+			if err := recover(); err != nil {
+				select {
+				case n.panicCh <- err.(error):
+				default:
+				}
+			}
 		}()
 	SYNC:
 		_, syncIndex := n.c.syncWithNetwork(n.name)
