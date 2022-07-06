@@ -39,6 +39,8 @@ type Config struct {
 	Notifier StateNotifier
 
 	StatsCallback StatsCallback
+
+	VotingPower map[NodeID]uint64
 }
 
 type ConfigOption func(*Config)
@@ -87,6 +89,14 @@ func WithNotifier(notifier StateNotifier) ConfigOption {
 	return func(c *Config) {
 		if notifier != nil {
 			c.Notifier = notifier
+		}
+	}
+}
+
+func WithVotingPower(vp map[NodeID]uint64) ConfigOption {
+	return func(c *Config) {
+		if len(vp) > 0 {
+			c.VotingPower = vp
 		}
 	}
 }
@@ -501,17 +511,35 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 			panic(fmt.Errorf("BUG: Unexpected message type: %s in %s", msg.Type, p.getState()))
 		}
 
-		if p.state.numPrepared() > p.state.NumValid() {
-			// we have received enough prepare messages
-			sendCommit(span)
-		}
+		if p.config.VotingPower == nil {
+			if p.state.numPrepared() > p.state.NumValid() {
+				// we have received enough prepare messages
+				sendCommit(span)
+			}
 
-		if p.state.numCommitted() > p.state.NumValid() {
-			// we have received enough commit messages
-			sendCommit(span)
+			if p.state.numCommitted() > p.state.NumValid() {
+				// we have received enough commit messages
+				sendCommit(span)
 
-			// change to commit state just to get out of the loop
-			p.setState(CommitState)
+				// change to commit state just to get out of the loop
+				p.setState(CommitState)
+			}
+		} else {
+			totalVotingPower := totalVotingPower(p.config.VotingPower)
+			validVotingPower := QuorumSizeVP(totalVotingPower)
+
+			if p.state.calculateMessagesVotingPower(p.state.prepared, p.config.VotingPower) > validVotingPower {
+				// we have received enough prepare messages
+				sendCommit(span)
+			}
+
+			if p.state.calculateMessagesVotingPower(p.state.committed, p.config.VotingPower) > validVotingPower {
+				// we have received enough commit messages
+				sendCommit(span)
+
+				// change to commit state just to get out of the loop
+				p.setState(CommitState)
+			}
 		}
 
 		// set the attributes of this span once it is done
@@ -674,15 +702,32 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 		// we only expect RoundChange messages right now
 		num := p.state.AddRoundMessage(msg)
 
-		if num == p.state.NumValid() {
-			// start a new round inmediatly
-			p.state.SetCurrentRound(msg.View.Round)
-			p.setState(AcceptState)
-		} else if num == p.state.MaxFaultyNodes()+1 {
-			// weak certificate, try to catch up if our round number is smaller
-			if p.state.GetCurrentRound() < msg.View.Round {
-				// update timer
-				sendRoundChange(msg.View.Round)
+		if p.config.VotingPower == nil {
+			if num == p.state.NumValid() {
+				// start a new round inmediatly
+				p.state.SetCurrentRound(msg.View.Round)
+				p.setState(AcceptState)
+			} else if num == p.state.MaxFaultyNodes()+1 {
+				// weak certificate, try to catch up if our round number is smaller
+				if p.state.GetCurrentRound() < msg.View.Round {
+					// update timer
+					sendRoundChange(msg.View.Round)
+				}
+			}
+		} else {
+			totalVotingPower := totalVotingPower(p.config.VotingPower)
+			validVotingPower := QuorumSizeVP(totalVotingPower)
+			roundVotingPower := p.state.calculateMessagesVotingPower(p.state.roundMessages[msg.View.Round], p.config.VotingPower)
+			if roundVotingPower >= validVotingPower {
+				// start a new round inmediatly
+				p.state.SetCurrentRound(msg.View.Round)
+				p.setState(AcceptState)
+			} else if roundVotingPower > MaxFaultyVP(totalVotingPower)+1 {
+				// weak certificate, try to catch up if our round number is smaller
+				if p.state.GetCurrentRound() < msg.View.Round {
+					// update timer
+					sendRoundChange(msg.View.Round)
+				}
 			}
 		}
 
@@ -898,4 +943,23 @@ func MaxFaultyNodes(nodesCount int) int {
 // 2 * F + 1, where F denotes maximum count of faulty nodes in order to have Byzantine fault tollerant property satisfied.
 func QuorumSize(nodesCount int) int {
 	return 2*MaxFaultyNodes(nodesCount) + 1
+}
+
+func totalVotingPower(mp map[NodeID]uint64) uint64 {
+	var totalVotingPower uint64
+	for _, v := range mp {
+		totalVotingPower += v
+	}
+	return totalVotingPower
+}
+
+func MaxFaultyVP(vp uint64) uint64 {
+	if vp == 0 {
+		return 0
+	}
+	return (vp - 1) / 3
+}
+
+func QuorumSizeVP(totalVP uint64) uint64 {
+	return 2*MaxFaultyVP(totalVP) + 1
 }

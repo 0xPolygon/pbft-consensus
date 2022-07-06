@@ -9,6 +9,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"io"
 	"log"
+	"math"
 	"pgregory.net/rapid"
 	"strconv"
 	"sync"
@@ -100,7 +101,7 @@ func TestPropertySeveralHonestNodesCanAchiveAgreement(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		numOfNodes := rapid.IntRange(4, 30).Draw(t, "num of nodes").(int)
 		ft := &fakeTransport{}
-		cluster, timeoutsChan := generateCluster(numOfNodes, ft)
+		cluster, timeoutsChan := generateCluster(numOfNodes, ft, nil)
 		for i := range cluster {
 			cluster[i].SetInitialState(context.Background())
 		}
@@ -165,7 +166,7 @@ func TestPropertySeveralNodesCanAchiveAgreementWithFailureNodes(t *testing.T) {
 				return nil
 			},
 		}
-		cluster, timeoutsChan := generateCluster(numOfNodes, ft)
+		cluster, timeoutsChan := generateCluster(numOfNodes, ft, nil)
 		for i := range cluster {
 			cluster[i].SetInitialState(context.Background())
 		}
@@ -249,7 +250,7 @@ func TestProperty4NodesCanAchiveAgreementIfWeLockButNotCommitProposer_Fails(t *t
 			return nil
 		},
 	}
-	cluster, timeoutsChan := generateCluster(numOfNodes, ft)
+	cluster, timeoutsChan := generateCluster(numOfNodes, ft, nil)
 	for i := range cluster {
 		cluster[i].SetInitialState(context.Background())
 	}
@@ -311,7 +312,7 @@ func TestFiveNodesCanAchiveAgreementIfWeLockTwoNodesOnDifferentProposals(t *test
 			return nil
 		},
 	}
-	cluster, timeoutsChan := generateCluster(numOfNodes, ft)
+	cluster, timeoutsChan := generateCluster(numOfNodes, ft, nil)
 	for i := range cluster {
 		cluster[i].SetInitialState(context.Background())
 	}
@@ -394,7 +395,7 @@ func (bs *BoolSlice) String() string {
 	return fmt.Sprintf("%v", bs.slice)
 }
 
-func generateNode(id int, transport *fakeTransport) (*pbft.Pbft, chan time.Time) {
+func generateNode(id int, transport *fakeTransport, votingPower map[pbft.NodeID]uint64) (*pbft.Pbft, chan time.Time) {
 	timeoutChan := make(chan time.Time)
 	node := pbft.New(key(strconv.Itoa(id)), transport,
 		pbft.WithTracer(trace.NewNoopTracerProvider().Tracer("")),
@@ -402,18 +403,19 @@ func generateNode(id int, transport *fakeTransport) (*pbft.Pbft, chan time.Time)
 		pbft.WithRoundTimeout(func(_ uint64) <-chan time.Time {
 			return timeoutChan
 		}),
+		pbft.WithVotingPower(votingPower),
 	)
 
 	transport.nodes = append(transport.nodes, node)
 	return node, timeoutChan
 }
 
-func generateCluster(numOfNodes int, transport *fakeTransport) ([]*pbft.Pbft, []chan time.Time) {
+func generateCluster(numOfNodes int, transport *fakeTransport, votingPower map[pbft.NodeID]uint64) ([]*pbft.Pbft, []chan time.Time) {
 	nodes := make([]string, numOfNodes)
 	timeoutsChan := make([]chan time.Time, numOfNodes)
 	cluster := make([]*pbft.Pbft, numOfNodes)
 	for i := 0; i < numOfNodes; i++ {
-		cluster[i], timeoutsChan[i] = generateNode(i, transport)
+		cluster[i], timeoutsChan[i] = generateNode(i, transport, votingPower)
 		nodes[i] = strconv.Itoa(i)
 	}
 
@@ -570,4 +572,44 @@ func runCluster(ctx context.Context,
 
 		}
 	}
+}
+
+func TestPropertySeveralHonestNodesWithVotingPowerCanAchiveAgreement(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		numOfNodes := rapid.IntRange(4, 10).Draw(t, "num of nodes").(int)
+		votingPowerSlice := rapid.SliceOfN(rapid.Uint64Range(1, math.MaxUint64/uint64(numOfNodes)), numOfNodes, numOfNodes).Draw(t, "voting power").([]uint64)
+		votingPower := make(map[pbft.NodeID]uint64, numOfNodes)
+		for i := 0; i < numOfNodes; i++ {
+			votingPower[pbft.NodeID(strconv.Itoa(i))] = votingPowerSlice[i]
+		}
+		ft := &fakeTransport{}
+		cluster, timeoutsChan := generateCluster(numOfNodes, ft, votingPower)
+		for i := range cluster {
+			cluster[i].SetInitialState(context.Background())
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+
+		err := runCluster(ctx,
+			cluster,
+			sendTimeoutIfNNodesStucked(t, timeoutsChan, numOfNodes),
+			func(doneList *BoolSlice) bool {
+				//everything done. All nodes in done state
+				if doneList.CalculateNum(true) == numOfNodes {
+					return true
+				}
+				return false
+			}, func(maxRound uint64) bool {
+				//something went wrong.
+				if maxRound > 3 {
+					t.Error("Infinite rounds")
+					return true
+				}
+				return false
+			}, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
 }
