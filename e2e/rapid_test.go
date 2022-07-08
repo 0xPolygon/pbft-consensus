@@ -4,16 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/0xPolygon/pbft-consensus"
-	"go.opentelemetry.io/otel/trace"
-	"golang.org/x/sync/errgroup"
 	"io"
 	"log"
-	"pgregory.net/rapid"
 	"strconv"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/0xPolygon/pbft-consensus"
+	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/sync/errgroup"
+	"pgregory.net/rapid"
 )
 
 const waitDuration = 50 * time.Millisecond
@@ -113,10 +114,7 @@ func TestPropertySeveralHonestNodesCanAchiveAgreement(t *testing.T) {
 			sendTimeoutIfNNodesStucked(t, timeoutsChan, numOfNodes),
 			func(doneList *BoolSlice) bool {
 				//everything done. All nodes in done state
-				if doneList.CalculateNum(true) == numOfNodes {
-					return true
-				}
-				return false
+				return doneList.CalculateNum(true) == numOfNodes
 			}, func(maxRound uint64) bool {
 				//something went wrong.
 				if maxRound > 3 {
@@ -178,11 +176,7 @@ func TestPropertySeveralNodesCanAchiveAgreementWithFailureNodes(t *testing.T) {
 			sendTimeoutIfNNodesStucked(t, timeoutsChan, numOfNodes),
 			func(doneList *BoolSlice) bool {
 				//check that 3 node switched to done state
-				if doneList.CalculateNum(true) >= numOfNodes*2/3+1 {
-					//everything done. Success.
-					return true
-				}
-				return false
+				return doneList.CalculateNum(true) >= numOfNodes*2/3+1
 			}, func(maxRound uint64) bool {
 				if maxRound > 10 {
 					t.Error("Infinite rounds")
@@ -259,10 +253,7 @@ func TestProperty4NodesCanAchiveAgreementIfWeLockButNotCommitProposer_Fails(t *t
 		cluster,
 		sendTimeoutIfNNodesStucked(t, timeoutsChan, numOfNodes),
 		func(doneList *BoolSlice) bool {
-			if doneList.CalculateNum(true) >= 3 {
-				return true
-			}
-			return false
+			return doneList.CalculateNum(true) >= 3
 		}, func(maxRound uint64) bool {
 			if maxRound > 5 {
 				t.Error("Liveness issue")
@@ -275,7 +266,7 @@ func TestProperty4NodesCanAchiveAgreementIfWeLockButNotCommitProposer_Fails(t *t
 	}
 }
 
-func TestFiveNodesCanAchiveAgreementIfWeLockTwoNodesOnDifferentProposals(t *testing.T) {
+func TestPropertyFiveNodesCanAchiveAgreementIfWeLockTwoNodesOnDifferentProposals(t *testing.T) {
 	numOfNodes := 5
 	rounds := map[uint64]map[int][]int{
 		0: {
@@ -320,10 +311,7 @@ func TestFiveNodesCanAchiveAgreementIfWeLockTwoNodesOnDifferentProposals(t *test
 		cluster,
 		sendTimeoutIfNNodesStucked(t, timeoutsChan, numOfNodes),
 		func(doneList *BoolSlice) bool {
-			if doneList.CalculateNum(true) > 3 {
-				return true
-			}
-			return false
+			return doneList.CalculateNum(true) > 3
 		}, func(maxNodeRound uint64) bool {
 			if maxNodeRound > 20 {
 				t.Fatal("too many rounds")
@@ -493,16 +481,6 @@ func setDoneOnDoneState(cluster []*pbft.Pbft, doneList *BoolSlice) {
 			doneList.Set(i, true)
 		}
 	}
-}
-
-func maxPredefinedRound(mp map[uint64]map[uint64][]uint64) uint64 {
-	var max uint64
-	for i := range mp {
-		if i > max {
-			max = i
-		}
-	}
-	return max
 }
 
 //inter
