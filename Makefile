@@ -3,7 +3,10 @@ test:
 	go test -v --race -shuffle=on -coverprofile=coverage.out -covermode=atomic ./...
 
 e2e:
-	cd ./e2e && go test -v ./...
+	cd ./e2e && go test -v -run TestE2E
+
+property-tests:
+	cd ./e2e && go test -v -run TestProperty
 
 fuzz:
 	cd ./e2e && go test -timeout=20m -run TestFuzz
@@ -15,4 +18,4 @@ lint:
 	@"$(GOPATH)/bin/golangci-lint" run --config ./.golangci.yml ./...
 
 
-.PHONY: test e2e
+.PHONY: test e2e property-tests
