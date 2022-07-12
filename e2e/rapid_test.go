@@ -60,10 +60,6 @@ func (bf *BackendFake) ValidatorSet() pbft.ValidatorSet {
 		valsAsNode = append(valsAsNode, pbft.NodeID(i))
 	}
 	vv := pbft.ValStringStub(valsAsNode)
-
-	//vv := valString{
-	//	nodes: valsAsNode,
-	//}
 	return &vv
 }
 
