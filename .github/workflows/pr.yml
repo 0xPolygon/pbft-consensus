@@ -6,7 +6,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
     name: Go test
     env:
@@ -64,4 +64,4 @@ jobs:
           go-version: '1.18'
       - name: Go fuzz test
         timeout-minutes: 20
-        run: make e2e
+        run: make nodes=3 duration=3m e2e
