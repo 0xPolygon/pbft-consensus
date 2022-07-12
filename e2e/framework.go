@@ -420,7 +420,7 @@ func newPBFTNode(name string, clusterConfig *ClusterConfig, nodes []string, trac
 	loggerOutput := GetLoggerOutput(name, clusterConfig.LogsDir)
 
 	con := pbft.New(
-		key(name),
+		pbft.ValidatorKeyMock(name),
 		tt,
 		pbft.WithTracer(trace),
 		pbft.WithLogger(log.New(loggerOutput, "", log.LstdFlags)),
@@ -567,16 +567,6 @@ func (n *node) GetName() string {
 
 func (n *node) String() string {
 	return n.name
-}
-
-type key string
-
-func (k key) NodeID() pbft.NodeID {
-	return pbft.NodeID(k)
-}
-
-func (k key) Sign(b []byte) ([]byte, error) {
-	return b, nil
 }
 
 // -- fsm --

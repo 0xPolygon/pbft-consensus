@@ -528,12 +528,12 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 			totalVotingPower := totalVotingPower(p.config.VotingPower)
 			validVotingPower := QuorumSizeVP(totalVotingPower)
 
-			if p.state.calculateMessagesVotingPower(p.state.prepared, p.config.VotingPower) > validVotingPower {
+			if p.state.calculateMessagesVotingPower(p.state.prepared, p.config.VotingPower) >= validVotingPower {
 				// we have received enough prepare messages
 				sendCommit(span)
 			}
-
-			if p.state.calculateMessagesVotingPower(p.state.committed, p.config.VotingPower) > validVotingPower {
+			
+			if p.state.calculateMessagesVotingPower(p.state.committed, p.config.VotingPower) >= validVotingPower {
 				// we have received enough commit messages
 				sendCommit(span)
 
