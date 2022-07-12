@@ -9,10 +9,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/0xPolygon/pbft-consensus/stats"
-
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/0xPolygon/pbft-consensus/stats"
 )
 
 type RoundTimeout func(round uint64) <-chan time.Time

@@ -8,6 +8,7 @@ import (
 
 	"github.com/0xPolygon/pbft-consensus"
 	"github.com/0xPolygon/pbft-consensus/e2e"
+	"github.com/0xPolygon/pbft-consensus/e2e/action"
 )
 
 var (
@@ -15,13 +16,14 @@ var (
 	waitForHeightTimeInterval  = 10 * time.Minute
 )
 
-type Runner struct {
+type runner struct {
 	wg               sync.WaitGroup
 	cluster          *e2e.Cluster
-	availableActions []e2e.FunctionalAction
+	availableActions []action.Action
 }
 
-func NewRunner(initialNodesCount uint, replayMessageNotifier e2e.ReplayNotifier) *Runner {
+// newRunner is the constructor of runner
+func newRunner(initialNodesCount uint, replayMessageNotifier e2e.ReplayNotifier) *runner {
 	config := &e2e.ClusterConfig{
 		Count:                 int(initialNodesCount),
 		Name:                  "fuzz_cluster",
@@ -29,14 +31,14 @@ func NewRunner(initialNodesCount uint, replayMessageNotifier e2e.ReplayNotifier)
 		ReplayMessageNotifier: replayMessageNotifier,
 	}
 
-	return &Runner{
+	return &runner{
 		availableActions: getAvailableActions(),
 		cluster:          e2e.NewPBFTCluster(nil, config),
 		wg:               sync.WaitGroup{},
 	}
 }
 
-func (r *Runner) Run(d time.Duration) error {
+func (r *runner) run(d time.Duration) error {
 	r.cluster.Start()
 	defer r.cluster.Stop()
 	done := time.After(d)
@@ -49,7 +51,7 @@ func (r *Runner) Run(d time.Duration) error {
 	defer revertTicker.Stop()
 	defer validationTicker.Stop()
 
-	var reverts []e2e.RevertFunc
+	var reverts []action.RevertFunc
 
 	r.wg.Add(1)
 	go func() {
@@ -90,6 +92,7 @@ func (r *Runner) Run(d time.Duration) error {
 	}()
 
 	r.wg.Wait()
+
 	return nil
 }
 
@@ -152,9 +155,9 @@ func validateCluster(c *e2e.Cluster) ([]string, bool) {
 	return runningNodes, len(runningNodes) >= pbft.QuorumSize(totalNodesCount)
 }
 
-func getAvailableActions() []e2e.FunctionalAction {
-	return []e2e.FunctionalAction{
-		&e2e.DropNodeAction{},
-		&e2e.PartitionAction{},
+func getAvailableActions() []action.Action {
+	return []action.Action{
+		&action.DropNode{},
+		&action.Partition{},
 	}
 }

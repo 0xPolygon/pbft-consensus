@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/0xPolygon/pbft-consensus/e2e/transport"
 )
 
 func TestE2E_NoIssue(t *testing.T) {
@@ -16,7 +18,7 @@ func TestE2E_NoIssue(t *testing.T) {
 		RoundTimeout: GetPredefinedTimeout(2 * time.Second),
 	}
 
-	c := NewPBFTCluster(t, config, newRandomTransport(50*time.Millisecond))
+	c := NewPBFTCluster(t, config, transport.NewRandom(50*time.Millisecond))
 	c.Start()
 	defer c.Stop()
 

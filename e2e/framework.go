@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/0xPolygon/pbft-consensus"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
@@ -20,6 +19,9 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.7.0"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/0xPolygon/pbft-consensus"
+	"github.com/0xPolygon/pbft-consensus/e2e/transport"
 )
 
 func initTracer(name string) *sdktrace.TracerProvider {
@@ -73,7 +75,7 @@ type Cluster struct {
 	lock                  sync.Mutex
 	nodes                 map[string]*node
 	tracer                *sdktrace.TracerProvider
-	transport             *transport
+	transport             *transport.Transport
 	sealedProposals       []*pbft.SealedProposal
 	replayMessageNotifier ReplayNotifier
 	createBackend         CreateBackend
@@ -85,20 +87,20 @@ type ClusterConfig struct {
 	Prefix                string
 	LogsDir               string
 	ReplayMessageNotifier ReplayNotifier
-	TransportHandler      transportHandler
+	TransportHandler      transport.Handler
 	RoundTimeout          pbft.RoundTimeout
 	CreateBackend         CreateBackend
 }
 
-func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transportHook) *Cluster {
+func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transport.Hook) *Cluster {
 	names := make([]string, config.Count)
 	for i := 0; i < config.Count; i++ {
 		names[i] = fmt.Sprintf("%s_%d", config.Prefix, i)
 	}
 
-	tt := &transport{}
+	tt := &transport.Transport{}
 	if len(hook) == 1 {
-		tt.addHook(hook[0])
+		tt.AddHook(hook[0])
 	}
 
 	var directoryName string
@@ -121,7 +123,7 @@ func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transportHook) 
 		config.LogsDir = logsDir
 	}
 
-	tt.logger = log.New(GetLoggerOutput("transport", logsDir), "", log.LstdFlags)
+	tt.SetLogger(log.New(GetLoggerOutput("transport", logsDir), "", log.LstdFlags))
 
 	c := &Cluster{
 		t:                     t,
@@ -219,8 +221,8 @@ func (c *Cluster) IsStuck(timeout time.Duration, nodes ...[]string) {
 	}
 }
 
-func (c *Cluster) SetHook(hook transportHook) {
-	c.transport.addHook(hook)
+func (c *Cluster) SetHook(hook transport.Hook) {
+	c.transport.AddHook(hook)
 }
 
 func (c *Cluster) GetMaxHeight(nodes ...[]string) uint64 {
@@ -296,7 +298,7 @@ func (c *Cluster) syncWithNetwork(nodeID string) (uint64, int64) {
 		if n.name == nodeID {
 			continue
 		}
-		if hook := c.transport.getHook(); hook != nil {
+		if hook := c.transport.GetHook(); hook != nil {
 			// we need to see if this transport does allow those two nodes to be connected
 			// Otherwise, that node should not be eligible to sync
 			if !hook.Connects(pbft.NodeID(nodeID), pbft.NodeID(n.name)) {
@@ -333,6 +335,9 @@ func (c *Cluster) getProposer(index int64) pbft.NodeID {
 }
 
 func (c *Cluster) Nodes() []*node {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
 	list := make([]*node, len(c.nodes))
 	i := 0
 	for _, n := range c.nodes {
@@ -394,8 +399,8 @@ func (c *Cluster) Stop() {
 	}
 }
 
-func (c *Cluster) GetTransportHook() transportHook {
-	return c.transport.getHook()
+func (c *Cluster) GetTransportHook() transport.Hook {
+	return c.transport.GetHook()
 }
 
 type node struct {
@@ -416,7 +421,7 @@ type node struct {
 	faulty uint64
 }
 
-func newPBFTNode(name string, clusterConfig *ClusterConfig, nodes []string, trace trace.Tracer, tt *transport) (*node, error) {
+func newPBFTNode(name string, clusterConfig *ClusterConfig, nodes []string, trace trace.Tracer, tt *transport.Transport) (*node, error) {
 	loggerOutput := GetLoggerOutput(name, clusterConfig.LogsDir)
 
 	con := pbft.New(

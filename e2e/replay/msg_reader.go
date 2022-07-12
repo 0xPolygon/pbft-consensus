@@ -22,8 +22,8 @@ type sequenceMessages struct {
 	messages []*pbft.MessageReq
 }
 
-// replayMessageReader encapsulates logic for reading messages from flow file
-type replayMessageReader struct {
+// MessageReader encapsulates logic for reading messages from flow file
+type MessageReader struct {
 	lock                   sync.Mutex
 	file                   *os.File
 	scanner                *bufio.Scanner
@@ -33,8 +33,15 @@ type replayMessageReader struct {
 	prePrepareMessages     map[uint64]*pbft.MessageReq
 }
 
-// openFile opens the file on provided location
-func (r *replayMessageReader) openFile(filePath string) error {
+// NewMessageReader is the constructor of MessageReader
+func NewMessageReader() *MessageReader {
+	return &MessageReader{
+		msgProcessingDone: make(chan string),
+	}
+}
+
+// OpenFile opens the file on provided location
+func (r *MessageReader) OpenFile(filePath string) error {
 	_, err := os.Stat(filePath)
 	if err != nil {
 		return err
@@ -53,16 +60,16 @@ func (r *replayMessageReader) openFile(filePath string) error {
 	return nil
 }
 
-// closeFile closes the opened .flow file
-func (r *replayMessageReader) closeFile() error {
+// CloseFile closes the opened .flow file
+func (r *MessageReader) CloseFile() error {
 	if r.file != nil {
 		return r.file.Close()
 	}
 	return nil
 }
 
-// readNodeMetaData reads the first line of .flow file which should be a list of nodes
-func (r *replayMessageReader) readNodeMetaData() ([]string, error) {
+// ReadNodeMetaData reads the first line of .flow file which should be a list of nodes
+func (r *MessageReader) ReadNodeMetaData() ([]string, error) {
 	var nodeNames []string
 	r.scanner.Scan() // first line carries the node names needed to create appropriate number of nodes for replay
 	err := json.Unmarshal(r.scanner.Bytes(), &nodeNames)
@@ -75,8 +82,8 @@ func (r *replayMessageReader) readNodeMetaData() ([]string, error) {
 	return nodeNames, err
 }
 
-// readMessages reads messages from open .flow file and pushes them to appropriate nodes
-func (r *replayMessageReader) readMessages(cluster *e2e.Cluster) {
+// ReadMessages reads messages from open .flow file and pushes them to appropriate nodes
+func (r *MessageReader) ReadMessages(cluster *e2e.Cluster) {
 	nodes := cluster.GetNodesMap()
 
 	nodesCount := len(nodes)
@@ -84,10 +91,10 @@ func (r *replayMessageReader) readMessages(cluster *e2e.Cluster) {
 	r.lastSequenceMessages = make(map[pbft.NodeID]*sequenceMessages, nodesCount)
 	r.prePrepareMessages = make(map[uint64]*pbft.MessageReq)
 
-	messagesChannel := make(chan []*ReplayMessage)
+	messagesChannel := make(chan []*Message)
 	doneChannel := make(chan struct{})
 
-	r.startChunkReading(messagesChannel, doneChannel)
+	r.StartChunkReading(messagesChannel, doneChannel)
 	nodeMessages := make(map[pbft.NodeID]map[uint64][]*pbft.MessageReq, nodesCount)
 	for _, n := range nodes {
 		nodeMessages[pbft.NodeID(n.GetName())] = make(map[uint64][]*pbft.MessageReq)
@@ -134,13 +141,13 @@ LOOP:
 	}
 }
 
-// startChunkReading reads messages from .flow file in chunks
-func (r *replayMessageReader) startChunkReading(messagesChannel chan []*ReplayMessage, doneChannel chan struct{}) {
+// StartChunkReading reads messages from .flow file in chunks
+func (r *MessageReader) StartChunkReading(messagesChannel chan []*Message, doneChannel chan struct{}) {
 	go func() {
-		messages := make([]*ReplayMessage, 0)
+		messages := make([]*Message, 0)
 		i := 0
 		for r.scanner.Scan() {
-			var message *ReplayMessage
+			var message *Message
 			if err := json.Unmarshal(r.scanner.Bytes(), &message); err != nil {
 				log.Printf("[ERROR] Error happened on unmarshalling a message in .flow file. Reason: %v.\n", err)
 				return
@@ -165,10 +172,10 @@ func (r *replayMessageReader) startChunkReading(messagesChannel chan []*ReplayMe
 	}()
 }
 
-// checkIfDoneWithExecution checks if node finished with processing all the messages from .flow file
-func (r *replayMessageReader) checkIfDoneWithExecution(validatorId pbft.NodeID, msg *pbft.MessageReq) {
+// CheckIfDoneWithExecution checks if node finished with processing all the messages from .flow file
+func (r *MessageReader) CheckIfDoneWithExecution(validatorId pbft.NodeID, msg *pbft.MessageReq) {
 	if msg.View.Sequence > r.lastSequenceMessages[validatorId].sequence ||
-		(msg.View.Sequence == r.lastSequenceMessages[validatorId].sequence && r.areMessagesFromLastSequenceProcessed(msg, validatorId)) {
+		(msg.View.Sequence == r.lastSequenceMessages[validatorId].sequence && r.AreMessagesFromLastSequenceProcessed(msg, validatorId)) {
 		r.lock.Lock()
 		if _, isDone := r.nodesDoneWithExecution[validatorId]; !isDone {
 			r.nodesDoneWithExecution[validatorId] = true
@@ -178,8 +185,8 @@ func (r *replayMessageReader) checkIfDoneWithExecution(validatorId pbft.NodeID, 
 	}
 }
 
-// areMessagesFromLastSequenceProcessed checks if all the messages from the last sequence of given node are processed so that the node can be stoped
-func (r *replayMessageReader) areMessagesFromLastSequenceProcessed(msg *pbft.MessageReq, validatorId pbft.NodeID) bool {
+// AreMessagesFromLastSequenceProcessed checks if all the messages from the last sequence of given node are processed so that the node can be stoped
+func (r *MessageReader) AreMessagesFromLastSequenceProcessed(msg *pbft.MessageReq, validatorId pbft.NodeID) bool {
 	lastSequenceMessages := r.lastSequenceMessages[validatorId]
 
 	lastSequenceMessagesCount := len(lastSequenceMessages.messages)
@@ -201,7 +208,7 @@ func (r *replayMessageReader) areMessagesFromLastSequenceProcessed(msg *pbft.Mes
 	return lastSequenceMessagesCount == 0
 }
 
-// isTimeoutMessage checks if message in .flow file represents a timeout
-func isTimeoutMessage(message *pbft.MessageReq) bool {
-	return message.Hash == nil && message.Proposal == nil && message.Seal == nil && message.From == ""
+// ProcessingDone returns msgProcessingDone chan
+func (r *MessageReader) ProcessingDone() <-chan string {
+	return r.msgProcessingDone
 }

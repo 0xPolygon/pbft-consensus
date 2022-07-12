@@ -4,8 +4,10 @@ import (
 	"log"
 	"os"
 
-	"github.com/0xPolygon/pbft-consensus/e2e/fuzz/replay"
 	"github.com/mitchellh/cli"
+
+	"github.com/0xPolygon/pbft-consensus/e2e/cmd/fuzz"
+	"github.com/0xPolygon/pbft-consensus/e2e/cmd/replay"
 )
 
 func main() {
@@ -23,6 +25,7 @@ func main() {
 	}
 }
 
+// getCommands returns all registered commands
 func getCommands() map[string]cli.CommandFactory {
 	ui := &cli.BasicUi{
 		Reader:      os.Stdin,
@@ -31,14 +34,10 @@ func getCommands() map[string]cli.CommandFactory {
 	}
 	return map[string]cli.CommandFactory{
 		"fuzz-run": func() (cli.Command, error) {
-			return &FuzzCommand{
-				UI: ui,
-			}, nil
+			return fuzz.New(ui), nil
 		},
 		"replay-messages": func() (cli.Command, error) {
-			return &replay.ReplayMessageCommand{
-				UI: ui,
-			}, nil
+			return replay.New(ui), nil
 		},
 	}
 }

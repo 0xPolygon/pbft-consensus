@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/0xPolygon/pbft-consensus/e2e/transport"
+
 	"github.com/stretchr/testify/assert"
 )
 
@@ -19,7 +21,7 @@ func TestFuzz_Unreliable_Network(t *testing.T) {
 	maxHeight := uint64(40)
 	currentHeight := uint64(0)
 	jitterMax := 300 * time.Millisecond
-	hook := newPartitionTransport(jitterMax)
+	hook := transport.NewPartition(jitterMax)
 
 	config := &ClusterConfig{
 		Count:        nodesCount,
