@@ -64,4 +64,4 @@ jobs:
           go-version: '1.18'
       - name: Go fuzz test
         timeout-minutes: 20
-        run: make nodes=3 duration=3m e2e
+        run: make nodes=3 duration=5m e2e

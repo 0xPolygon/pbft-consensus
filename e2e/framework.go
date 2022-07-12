@@ -162,9 +162,9 @@ func (c *Cluster) insertFinalProposal(sealProp *pbft.SealedProposal) error {
 			// already exists
 			if !c.sealedProposals[insertIndex].Proposal.Equal(sealProp.Proposal) {
 				return errors.New("existing proposal on a given position is not not equal to the one being inserted to the same position")
-			} else {
-				return nil
 			}
+
+			return nil
 		} else if insertIndex != uint64(lastIndex+1) {
 			return fmt.Errorf("expected that final proposal number is %v, but was %v", len(c.sealedProposals)+1, sealProp.Number)
 		}
