@@ -23,11 +23,9 @@ jobs:
         uses: codecov/codecov-action@v2
         with:
           file: ./coverage.out
-      - name: Go e2e test
-        run: make e2e
-  fuzz:
+  unit-e2e:
     runs-on: ubuntu-latest
-    name: Go fuzz test
+    name: Go unit E2E test
     env:
       SILENT: true
       FUZZ: true
@@ -36,7 +34,34 @@ jobs:
       - name: Setup go
         uses: actions/setup-go@v1
         with:
-          go-version: '1.17'
+          go-version: '1.18'
+      - name: Go unit e2e test
+        timeout-minutes: 20
+        run: make unit-e2e
+  unit-fuzz:
+    runs-on: ubuntu-latest
+    name: Go unit fuzz test
+    env:
+      SILENT: true
+      FUZZ: true
+    steps:
+      - uses: actions/checkout@v2
+      - name: Setup go
+        uses: actions/setup-go@v1
+        with:
+          go-version: '1.18'
       - name: Go fuzz test
         timeout-minutes: 20
-        run: make fuzz
+        run: make unit-fuzz
+  e2e:
+    runs-on: ubuntu-latest
+    name: Go E2E test
+    steps:
+      - uses: actions/checkout@v2
+      - name: Setup go
+        uses: actions/setup-go@v1
+        with:
+          go-version: '1.18'
+      - name: Go fuzz test
+        timeout-minutes: 20
+        run: make e2e
