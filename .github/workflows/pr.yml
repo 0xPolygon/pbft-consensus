@@ -6,7 +6,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  unit-test:
+  build:
     runs-on: ubuntu-latest
     name: Go test
     env:
@@ -23,24 +23,11 @@ jobs:
         uses: codecov/codecov-action@v2
         with:
           file: ./coverage.out
-  unit-test-e2e:
-    runs-on: ubuntu-latest
-    name: Go unit E2E test
-    env:
-      SILENT: true
-      FUZZ: true
-    steps:
-      - uses: actions/checkout@v2
-      - name: Setup go
-        uses: actions/setup-go@v1
-        with:
-          go-version: '1.18'
-      - name: Go unit e2e test
-        timeout-minutes: 20
+      - name: Go e2e test
         run: make unit-e2e
-  unit-test-fuzz:
+  fuzz:
     runs-on: ubuntu-latest
-    name: Go unit fuzz test
+    name: Go fuzz test
     env:
       SILENT: true
       FUZZ: true
@@ -49,7 +36,7 @@ jobs:
       - name: Setup go
         uses: actions/setup-go@v1
         with:
-          go-version: '1.18'
+          go-version: '1.17'
       - name: Go fuzz test
         timeout-minutes: 20
         run: make unit-fuzz
