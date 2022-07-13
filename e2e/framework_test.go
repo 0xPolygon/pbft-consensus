@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func Test_ClusterInsertFinalProposal(t *testing.T) {
+func TestE2E_ClusterInsertFinalProposal(t *testing.T) {
 	clusterConfig := &ClusterConfig{
 		Count:  3,
 		Name:   "cluster",
