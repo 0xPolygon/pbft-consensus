@@ -4,17 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/0xPolygon/pbft-consensus"
-	"go.opentelemetry.io/otel/trace"
-	"golang.org/x/sync/errgroup"
 	"io"
 	"log"
 	"math"
-	"pgregory.net/rapid"
 	"strconv"
 	"sync"
 	"testing"
 	"time"
+
+	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/sync/errgroup"
+	"pgregory.net/rapid"
+
+	"github.com/0xPolygon/pbft-consensus"
 )
 
 const waitDuration = 50 * time.Millisecond

@@ -24,7 +24,7 @@ jobs:
         with:
           file: ./coverage.out
       - name: Go e2e test
-        run: make e2e
+        run: make unit-e2e
   fuzz:
     runs-on: ubuntu-latest
     name: Go fuzz test
@@ -39,4 +39,4 @@ jobs:
           go-version: '1.17'
       - name: Go fuzz test
         timeout-minutes: 20
-        run: make fuzz
+        run: make unit-fuzz
