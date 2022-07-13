@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"crypto/sha1"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -14,6 +15,18 @@ import (
 
 	"github.com/0xPolygon/pbft-consensus"
 )
+
+func Hash(p []byte) []byte {
+	h := sha1.New()
+	h.Write(p)
+	return h.Sum(nil)
+}
+
+func GenerateProposal() []byte {
+	prop := make([]byte, 4)
+	_, _ = rand.Read(prop)
+	return prop
+}
 
 func GenerateNodeNames(from int, count int, prefix string) []string {
 	var names []string

@@ -4,6 +4,8 @@ import (
 	"log"
 	"time"
 
+	"github.com/0xPolygon/pbft-consensus/e2e/helper"
+
 	"github.com/0xPolygon/pbft-consensus"
 	"github.com/0xPolygon/pbft-consensus/e2e"
 )
@@ -12,7 +14,7 @@ const (
 	FileName = "messages"
 )
 
-// MessagesMiddleware is a struct that implements ReplayNotifier interface
+// MessagesMiddleware is a struct that implements Notifier interface
 type MessagesMiddleware struct {
 	messagePersister *messagePersister
 	messageReader    *MessageReader
@@ -94,12 +96,12 @@ func (f *Backend) BuildProposal() (*pbft.Proposal, error) {
 		data = prePrepareMessage.Proposal
 	} else {
 		log.Printf("[WARNING] Could not find PRE-PREPARE message for sequence: %v", sequence)
-		data = e2e.GenerateProposal()
+		data = helper.GenerateProposal()
 	}
 
 	return &pbft.Proposal{
 		Data: data,
 		Time: time.Now().Add(1 * time.Second),
-		Hash: e2e.Hash(data),
+		Hash: helper.Hash(data),
 	}, nil
 }
