@@ -47,7 +47,10 @@ func (bf *BackendFake) Validate(proposal *pbft.Proposal) error {
 }
 
 func (bf *BackendFake) Insert(p *pbft.SealedProposal) error {
-	return bf.finalProposals.Insert(*p)
+	if bf.finalProposals != nil {
+		return bf.finalProposals.Insert(*p)
+	}
+	return nil
 }
 
 func (bf *BackendFake) Height() uint64 {
@@ -319,7 +322,7 @@ func TestFiveNodesCanAchiveAgreementIfWeLockTwoNodesOnDifferentProposals(t *test
 	}
 }
 
-func TestNodeDoubleSign(t *testing.T) {
+func TestPropertyNodeDoubleSign(t *testing.T) {
 	t.Skip("Unskip when fix")
 	rapid.Check(t, func(t *rapid.T) {
 		numOfNodes := rapid.IntRange(4, 7).Draw(t, "num of nodes").(int)
