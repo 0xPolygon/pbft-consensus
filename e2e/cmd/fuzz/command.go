@@ -27,7 +27,7 @@ func New(ui cli.Ui) *Command {
 }
 
 // Help implements the cli.Command interface
-func (fc *Command) Help() string {
+func (c *Command) Help() string {
 	return `Command runs the fuzz runner in fuzz framework based on provided configuration (nodes count and duration).
 	
 	Usage: fuzz-run -nodes={numberOfNodes} -duration={duration}
@@ -39,35 +39,35 @@ func (fc *Command) Help() string {
 }
 
 // Synopsis implements the cli.Command interface
-func (fc *Command) Synopsis() string {
+func (c *Command) Synopsis() string {
 	return "Starts the PolyBFT fuzz runner"
 }
 
 // Run implements the cli.Command interface and runs the command
-func (fc *Command) Run(args []string) int {
-	flagSet := fc.NewFlagSet()
+func (c *Command) Run(args []string) int {
+	flagSet := c.NewFlagSet()
 	err := flagSet.Parse(args)
 	if err != nil {
-		fc.UI.Error(err.Error())
+		c.UI.Error(err.Error())
 		return 1
 	}
 
-	fc.UI.Info("Starting PolyBFT fuzz runner...")
-	fc.UI.Info(fmt.Sprintf("Node count: %v\n", fc.numberOfNodes))
-	fc.UI.Info(fmt.Sprintf("Duration: %v\n", fc.duration))
+	c.UI.Info("Starting PolyBFT fuzz runner...")
+	c.UI.Info(fmt.Sprintf("Node count: %v\n", c.numberOfNodes))
+	c.UI.Info(fmt.Sprintf("Duration: %v\n", c.duration))
 	rand.Seed(time.Now().Unix())
 
 	replayMessageHandler := replay.NewMessagesMiddlewareWithPersister()
 
-	rnnr := newRunner(fc.numberOfNodes, replayMessageHandler)
-	if err = rnnr.run(fc.duration); err != nil {
-		fc.UI.Error(fmt.Sprintf("Error while running PolyBFT fuzz runner: '%s'\n", err))
+	rnnr := newRunner(c.numberOfNodes, replayMessageHandler)
+	if err = rnnr.run(c.duration); err != nil {
+		c.UI.Error(fmt.Sprintf("Error while running PolyBFT fuzz runner: '%s'\n", err))
 	} else {
-		fc.UI.Info("PolyBFT fuzz runner is stopped.")
+		c.UI.Info("PolyBFT fuzz runner is stopped.")
 	}
 
 	if err = replayMessageHandler.CloseFile(); err != nil {
-		fc.UI.Error(fmt.Sprintf("Error while closing .flow file: '%s'\n", err))
+		c.UI.Error(fmt.Sprintf("Error while closing .flow file: '%s'\n", err))
 		return 1
 	}
 
@@ -75,10 +75,10 @@ func (fc *Command) Run(args []string) int {
 }
 
 // NewFlagSet implements the FuzzCLICommand interface and creates a new flag set for command arguments
-func (fc *Command) NewFlagSet() *flag.FlagSet {
+func (c *Command) NewFlagSet() *flag.FlagSet {
 	flagSet := flag.NewFlagSet("fuzz-run", flag.ContinueOnError)
-	flagSet.UintVar(&fc.numberOfNodes, "nodes", 5, "Count of initially started nodes")
-	flagSet.DurationVar(&fc.duration, "duration", 25*time.Minute, "Duration of fuzz daemon running")
+	flagSet.UintVar(&c.numberOfNodes, "nodes", 5, "Count of initially started nodes")
+	flagSet.DurationVar(&c.duration, "duration", 25*time.Minute, "Duration of fuzz daemon running")
 
 	return flagSet
 }
