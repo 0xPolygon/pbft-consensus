@@ -724,7 +724,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 				// start a new round inmediatly
 				p.state.SetCurrentRound(msg.View.Round)
 				p.setState(AcceptState)
-			} else if roundVotingPower > MaxFaultyVP(totalVotingPower)+1 {
+			} else if roundVotingPower >= MaxFaultyVP(totalVotingPower)+1 {
 				// weak certificate, try to catch up if our round number is smaller
 				if p.state.GetCurrentRound() < msg.View.Round {
 					// update timer
