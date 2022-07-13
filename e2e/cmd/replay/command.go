@@ -17,22 +17,22 @@ import (
 	"github.com/0xPolygon/pbft-consensus/e2e/replay"
 )
 
-// MessageCommand is a struct containing data for running replay-message command
-type MessageCommand struct {
+// Command is a struct containing data for running replay-message command
+type Command struct {
 	UI cli.Ui
 
 	filePath string
 }
 
-// New is the constructor of MessageCommand
-func New(ui cli.Ui) *MessageCommand {
-	return &MessageCommand{
+// New is the constructor of Command
+func New(ui cli.Ui) *Command {
+	return &Command{
 		UI: ui,
 	}
 }
 
 // Help implements the cli.Command interface
-func (fc *MessageCommand) Help() string {
+func (c *Command) Help() string {
 	return `Runs the message and timeouts replay for analysis and testing purposes based on provided .flow file.
 	
 	Usage: replay-messages -file={fullPathToFlowFile}
@@ -43,29 +43,29 @@ func (fc *MessageCommand) Help() string {
 }
 
 // Synopsis implements the cli.Command interface
-func (rmc *MessageCommand) Synopsis() string {
+func (c *Command) Synopsis() string {
 	return "Starts the replay of messages and timeouts in fuzz runner"
 }
 
 // Run implements the cli.Command interface and runs the command
-func (rmc *MessageCommand) Run(args []string) int {
-	err := rmc.validateInput(args)
+func (c *Command) Run(args []string) int {
+	err := c.validateInput(args)
 	if err != nil {
-		rmc.UI.Error(err.Error())
+		c.UI.Error(err.Error())
 		return 1
 	}
 
 	messageReader := replay.NewMessageReader()
 
-	err = messageReader.OpenFile(rmc.filePath)
+	err = messageReader.OpenFile(c.filePath)
 	if err != nil {
-		rmc.UI.Error(err.Error())
+		c.UI.Error(err.Error())
 		return 1
 	}
 
 	nodeNames, err := messageReader.ReadNodeMetaData()
 	if err != nil {
-		rmc.UI.Error(err.Error())
+		c.UI.Error(err.Error())
 		return 1
 	}
 
@@ -116,9 +116,9 @@ func (rmc *MessageCommand) Run(args []string) int {
 	wg.Wait()
 	cluster.Stop()
 
-	rmc.UI.Info("Done with execution")
+	c.UI.Info("Done with execution")
 	if err = replayMessagesNotifier.CloseFile(); err != nil {
-		rmc.UI.Error(fmt.Sprintf("Error while closing .flow file: '%s'\n", err))
+		c.UI.Error(fmt.Sprintf("Error while closing .flow file: '%s'\n", err))
 		return 1
 	}
 
@@ -126,22 +126,22 @@ func (rmc *MessageCommand) Run(args []string) int {
 }
 
 // NewFlagSet implements the FuzzCLICommand interface and creates a new flag set for command arguments
-func (rmc *MessageCommand) NewFlagSet() *flag.FlagSet {
+func (c *Command) NewFlagSet() *flag.FlagSet {
 	flagSet := flag.NewFlagSet("replay-messages", flag.ContinueOnError)
-	flagSet.StringVar(&rmc.filePath, "file", "", "Full path to .flow file containing messages and timeouts to be replayed by the fuzz framework")
+	flagSet.StringVar(&c.filePath, "file", "", "Full path to .flow file containing messages and timeouts to be replayed by the fuzz framework")
 
 	return flagSet
 }
 
 // validateInput parses arguments from CLI and validates their correctness
-func (rmc *MessageCommand) validateInput(args []string) error {
-	flagSet := rmc.NewFlagSet()
+func (c *Command) validateInput(args []string) error {
+	flagSet := c.NewFlagSet()
 	err := flagSet.Parse(args)
 	if err != nil {
 		return err
 	}
 
-	if rmc.filePath == "" {
+	if c.filePath == "" {
 		err = errors.New("provided file path is empty")
 		return err
 	}
