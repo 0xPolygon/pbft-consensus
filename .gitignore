@@ -5,3 +5,4 @@ SavedState/
 **/*.txt
 log*/
 e2e/*.fail
+*.fail

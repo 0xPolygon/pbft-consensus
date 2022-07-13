@@ -454,43 +454,6 @@ func newMockValidatorSet(validatorIds []string) ValidatorSet {
 }
 
 func convertToMockValidatorSet(validatorIds []NodeID) ValidatorSet {
-	validatorSet := valString(validatorIds)
+	validatorSet := ValStringStub(validatorIds)
 	return &validatorSet
-}
-
-type valString []NodeID
-
-func (v *valString) CalcProposer(round uint64) NodeID {
-	seed := uint64(0)
-
-	offset := 0
-	// add last proposer
-
-	seed = uint64(offset) + round
-	pick := seed % uint64(v.Len())
-
-	return (*v)[pick]
-}
-
-func (v *valString) Index(id NodeID) int {
-	for i, currentId := range *v {
-		if currentId == id {
-			return i
-		}
-	}
-
-	return -1
-}
-
-func (v *valString) Includes(id NodeID) bool {
-	for _, currentId := range *v {
-		if currentId == id {
-			return true
-		}
-	}
-	return false
-}
-
-func (v *valString) Len() int {
-	return len(*v)
 }

@@ -11,6 +11,8 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/0xPolygon/pbft-consensus/stats"
 )
 
 type RoundTimeout func(round uint64) <-chan time.Time
@@ -35,9 +37,21 @@ type Config struct {
 
 	// Notifier is a reference to the struct which encapsulates handling messages and timeouts
 	Notifier StateNotifier
+
+	StatsCallback StatsCallback
+
+	VotingPower map[NodeID]uint64
 }
 
 type ConfigOption func(*Config)
+
+type StatsCallback func(stats.Stats)
+
+func WithStats(s StatsCallback) ConfigOption {
+	return func(c *Config) {
+		c.StatsCallback = s
+	}
+}
 
 func WithTimeout(p time.Duration) ConfigOption {
 	return func(c *Config) {
@@ -75,6 +89,14 @@ func WithNotifier(notifier StateNotifier) ConfigOption {
 	return func(c *Config) {
 		if notifier != nil {
 			c.Notifier = notifier
+		}
+	}
+}
+
+func WithVotingPower(vp map[NodeID]uint64) ConfigOption {
+	return func(c *Config) {
+		if len(vp) > 0 {
+			c.VotingPower = vp
 		}
 	}
 }
@@ -179,6 +201,8 @@ type Pbft struct {
 
 	// notifier is a reference to the struct which encapsulates handling messages and timeouts
 	notifier StateNotifier
+
+	stats *stats.Stats
 }
 
 type SignKey interface {
@@ -196,12 +220,13 @@ func New(validator SignKey, transport Transport, opts ...ConfigOption) *Pbft {
 		state:        newState(),
 		transport:    transport,
 		msgQueue:     newMsgQueue(),
-		updateCh:     make(chan struct{}, 100), //hack. There is a bug when you have several messages pushed on the same time.
+		updateCh:     make(chan struct{}, 1), //hack. There is a bug when you have several messages pushed on the same time.
 		config:       config,
 		logger:       config.Logger,
 		tracer:       config.Tracer,
 		roundTimeout: config.RoundTimeout,
 		notifier:     config.Notifier,
+		stats:        stats.NewStats(),
 	}
 
 	p.logger.Printf("[INFO] validator key: addr=%s\n", p.validator.NodeID())
@@ -238,6 +263,17 @@ func (p *Pbft) Run(ctx context.Context) {
 
 		// Start the state machine loop
 		p.runCycle(spanCtx)
+
+		// emit stats when the round is ended
+		p.emitStats()
+	}
+}
+
+func (p *Pbft) emitStats() {
+	if p.config.StatsCallback != nil {
+		p.config.StatsCallback(p.stats.Snapshot())
+		// once emitted, reset the Stats
+		p.stats.Reset()
 	}
 }
 
@@ -254,13 +290,16 @@ func (p *Pbft) RunCycle(ctx context.Context) {
 
 // runCycle represents the PBFT state machine loop
 func (p *Pbft) runCycle(ctx context.Context) {
+	startTime := time.Now()
+	state := p.getState()
+	defer p.stats.StateDuration(state.String(), startTime)
+
 	// Log to the console
 	if p.state.view != nil {
 		p.logger.Printf("[DEBUG] cycle: state=%s, sequence=%d, round=%d", p.getState(), p.state.view.Sequence, p.state.GetCurrentRound())
 	}
-
 	// Based on the current state, execute the corresponding section
-	switch p.getState() {
+	switch state {
 	case AcceptState:
 		p.runAcceptState(ctx)
 
@@ -301,6 +340,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 	_, span := p.tracer.Start(ctx, "AcceptState")
 	defer span.End()
 
+	p.stats.SetView(p.state.view.Sequence, p.state.view.Round)
 	p.logger.Printf("[INFO] accept state: sequence %d", p.state.view.Sequence)
 
 	if !p.state.validators.Includes(p.validator.NodeID()) {
@@ -471,17 +511,36 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 			panic(fmt.Errorf("BUG: Unexpected message type: %s in %s", msg.Type, p.getState()))
 		}
 
-		if p.state.numPrepared() > p.state.NumValid() {
-			// we have received enough prepare messages
-			sendCommit(span)
-		}
+		//if voting power is disabled - count number of votes
+		if !p.IsVotingPowerEnabled() {
+			if p.state.numPrepared() > p.state.NumValid() {
+				// we have received enough prepare messages
+				sendCommit(span)
+			}
 
-		if p.state.numCommitted() > p.state.NumValid() {
-			// we have received enough commit messages
-			sendCommit(span)
+			if p.state.numCommitted() > p.state.NumValid() {
+				// we have received enough commit messages
+				sendCommit(span)
 
-			// change to commit state just to get out of the loop
-			p.setState(CommitState)
+				// change to commit state just to get out of the loop
+				p.setState(CommitState)
+			}
+		} else {
+			totalVotingPower := TotalVotingPower(p.config.VotingPower)
+			validVotingPower := QuorumSizeVP(totalVotingPower)
+
+			if p.state.calculateMessagesVotingPower(p.state.prepared, p.config.VotingPower) >= validVotingPower {
+				// we have received enough prepare messages
+				sendCommit(span)
+			}
+
+			if p.state.calculateMessagesVotingPower(p.state.committed, p.config.VotingPower) >= validVotingPower {
+				// we have received enough commit messages
+				sendCommit(span)
+
+				// change to commit state just to get out of the loop
+				p.setState(CommitState)
+			}
 		}
 
 		// set the attributes of this span once it is done
@@ -491,7 +550,9 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 	}
 }
 
-func spanAddEventMessage(typ string, span trace.Span, msg *MessageReq) {
+func (p *Pbft) spanAddEventMessage(typ string, span trace.Span, msg *MessageReq) {
+	p.stats.IncrMsgCount(msg.Type.String())
+
 	span.AddEvent("Message", trace.WithAttributes(
 		// where was the message generated
 		attribute.String("typ", typ),
@@ -642,15 +703,33 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 		// we only expect RoundChange messages right now
 		num := p.state.AddRoundMessage(msg)
 
-		if num == p.state.NumValid() {
-			// start a new round inmediatly
-			p.state.SetCurrentRound(msg.View.Round)
-			p.setState(AcceptState)
-		} else if num == p.state.MaxFaultyNodes()+1 {
-			// weak certificate, try to catch up if our round number is smaller
-			if p.state.GetCurrentRound() < msg.View.Round {
-				// update timer
-				sendRoundChange(msg.View.Round)
+		//if voting power is disabled - count number of votes
+		if !p.IsVotingPowerEnabled() {
+			if num == p.state.NumValid() {
+				// start a new round inmediatly
+				p.state.SetCurrentRound(msg.View.Round)
+				p.setState(AcceptState)
+			} else if num == p.state.MaxFaultyNodes()+1 {
+				// weak certificate, try to catch up if our round number is smaller
+				if p.state.GetCurrentRound() < msg.View.Round {
+					// update timer
+					sendRoundChange(msg.View.Round)
+				}
+			}
+		} else {
+			totalVotingPower := TotalVotingPower(p.config.VotingPower)
+			validVotingPower := QuorumSizeVP(totalVotingPower)
+			roundVotingPower := p.state.calculateMessagesVotingPower(p.state.roundMessages[msg.View.Round], p.config.VotingPower)
+			if roundVotingPower >= validVotingPower {
+				// start a new round inmediatly
+				p.state.SetCurrentRound(msg.View.Round)
+				p.setState(AcceptState)
+			} else if roundVotingPower >= MaxFaultyVP(totalVotingPower)+1 {
+				// weak certificate, try to catch up if our round number is smaller
+				if p.state.GetCurrentRound() < msg.View.Round {
+					// update timer
+					sendRoundChange(msg.View.Round)
+				}
 			}
 		}
 
@@ -773,11 +852,11 @@ func (p *Pbft) getNextMessage(span trace.Span) (*MessageReq, bool) {
 
 		for _, msg := range discards {
 			p.logger.Printf("[TRACE] Discarded %s ", msg)
-			spanAddEventMessage("dropMessage", span, msg)
+			p.spanAddEventMessage("dropMessage", span, msg)
 		}
 		if msg != nil {
 			// add the event to the span
-			spanAddEventMessage("message", span, msg)
+			p.spanAddEventMessage("message", span, msg)
 			p.logger.Printf("[TRACE] Received %s", msg)
 			return msg, true
 		}
@@ -824,6 +903,10 @@ func (p *Pbft) ReadMessageWithDiscards() (*MessageReq, []*MessageReq) {
 	return p.msgQueue.readMessageWithDiscards(p.getState(), p.state.view)
 }
 
+func (p *Pbft) IsVotingPowerEnabled() bool {
+	return p.config.VotingPower != nil
+}
+
 // --- package-level helper functions ---
 // exponentialTimeout calculates the timeout duration depending on the current round.
 // Round acts as an exponent when determining timeout (2^round).
@@ -866,4 +949,23 @@ func MaxFaultyNodes(nodesCount int) int {
 // 2 * F + 1, where F denotes maximum count of faulty nodes in order to have Byzantine fault tollerant property satisfied.
 func QuorumSize(nodesCount int) int {
 	return 2*MaxFaultyNodes(nodesCount) + 1
+}
+
+func TotalVotingPower(mp map[NodeID]uint64) uint64 {
+	var totalVotingPower uint64
+	for _, v := range mp {
+		totalVotingPower += v
+	}
+	return totalVotingPower
+}
+
+func MaxFaultyVP(vp uint64) uint64 {
+	if vp == 0 {
+		return 0
+	}
+	return (vp - 1) / 3
+}
+
+func QuorumSizeVP(totalVP uint64) uint64 {
+	return 2*MaxFaultyVP(totalVP) + 1
 }
