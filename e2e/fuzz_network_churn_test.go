@@ -7,10 +7,12 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/0xPolygon/pbft-consensus/e2e/helper"
 )
 
 func TestFuzz_NetworkChurn(t *testing.T) {
-	isFuzzEnabled(t)
+	helper.IsFuzzEnabled(t)
 
 	t.Parallel()
 	rand.Seed(time.Now().Unix())
@@ -21,7 +23,7 @@ func TestFuzz_NetworkChurn(t *testing.T) {
 		Count:        nodeCount,
 		Name:         "network_churn",
 		Prefix:       "ptr",
-		RoundTimeout: GetPredefinedTimeout(2 * time.Second),
+		RoundTimeout: helper.GetPredefinedTimeout(2 * time.Second),
 	}
 
 	c := NewPBFTCluster(t, config)
@@ -29,7 +31,7 @@ func TestFuzz_NetworkChurn(t *testing.T) {
 	defer c.Stop()
 	runningNodeCount := nodeCount
 	// randomly stop nodes every 3 seconds
-	executeInTimerAndWait(3*time.Second, 30*time.Second, func(_ time.Duration) {
+	helper.ExecuteInTimerAndWait(3*time.Second, 30*time.Second, func(_ time.Duration) {
 		nodeNo := rand.Intn(nodeCount)
 		nodeID := prefix + strconv.Itoa(nodeNo)
 		node := c.nodes[nodeID]

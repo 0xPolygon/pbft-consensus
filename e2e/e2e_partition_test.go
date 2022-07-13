@@ -1,12 +1,16 @@
 package e2e
 
 import (
-	"github.com/0xPolygon/pbft-consensus"
-	"github.com/stretchr/testify/assert"
 	"math"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+
+	"github.com/0xPolygon/pbft-consensus"
+	"github.com/0xPolygon/pbft-consensus/e2e/helper"
+	"github.com/0xPolygon/pbft-consensus/e2e/transport"
 )
 
 // Test proves existence of liveness issues which is described in
@@ -22,19 +26,19 @@ import (
 func TestE2E_Partition_LivenessIssue_Case1_FiveNodes_OneFaulty(t *testing.T) {
 	t.Parallel()
 
-	round0 := roundMetadata{
-		round: 0,
+	round0 := transport.RoundMetadata{
+		Round: 0,
 		// induce locking A_3 and A_4 on one proposal
-		routingMap: map[sender]receivers{
+		RoutingMap: map[transport.Sender]transport.Receivers{
 			"A_0": {"A_3", "A_4"},
 			"A_3": {"A_0", "A_3", "A_4"},
 			"A_4": {"A_3", "A_4"},
 		},
 	}
-	round1 := roundMetadata{
-		round: 1,
+	round1 := transport.RoundMetadata{
+		Round: 1,
 		// induce locking lock A_0 and A_2 on another proposal
-		routingMap: map[sender]receivers{
+		RoutingMap: map[transport.Sender]transport.Receivers{
 			"A_0": {"A_0", "A_2", "A_3", "A_4"},
 			"A_1": {"A_0", "A_2", "A_3", "A_4"},
 			"A_2": {"A_0", "A_1", "A_2", "A_3", "A_4"},
@@ -43,11 +47,11 @@ func TestE2E_Partition_LivenessIssue_Case1_FiveNodes_OneFaulty(t *testing.T) {
 			"A_4": {"A_0", "A_1", "A_2", "A_3", "A_4"},
 		},
 	}
-	flowMap := map[uint64]roundMetadata{0: round0, 1: round1}
+	flowMap := map[uint64]transport.RoundMetadata{0: round0, 1: round1}
 
 	faultyNodeId := pbft.NodeID("A_1")
 
-	transport := newGenericGossipTransport()
+	transport := transport.NewGenericGossip()
 	// If livenessGossipHandler returns false, message should not be transported.
 	livenessGossipHandler := func(senderId, receiverId pbft.NodeID, msg *pbft.MessageReq) bool {
 		if msg.View.Round > 1 || msg.View.Sequence > 2 {
@@ -66,10 +70,10 @@ func TestE2E_Partition_LivenessIssue_Case1_FiveNodes_OneFaulty(t *testing.T) {
 			}
 		}
 
-		return transport.shouldGossipBasedOnMsgFlowMap(msg, senderId, receiverId)
+		return transport.ShouldGossipBasedOnMsgFlowMap(msg, senderId, receiverId)
 	}
 
-	transport.withFlowMap(flowMap).withGossipHandler(livenessGossipHandler)
+	transport.WithFlowMap(flowMap).WithGossipHandler(livenessGossipHandler)
 
 	config := &ClusterConfig{
 		Count:  5,
@@ -112,20 +116,20 @@ func TestE2E_Partition_LivenessIssue_Case1_FiveNodes_OneFaulty(t *testing.T) {
 func TestE2E_Partition_LivenessIssue_Case2_SixNodes_OneFaulty(t *testing.T) {
 	t.Parallel()
 
-	round0 := roundMetadata{
-		round: 0,
+	round0 := transport.RoundMetadata{
+		Round: 0,
 		// lock A_1, A_4
-		routingMap: map[sender]receivers{
+		RoutingMap: map[transport.Sender]transport.Receivers{
 			"A_0": {"A_1", "A_3", "A_4"},
 			"A_3": {"A_1", "A_3", "A_4"},
 			"A_4": {"A_1", "A_4"},
 		},
 	}
 
-	round2 := roundMetadata{
-		round: 2,
+	round2 := transport.RoundMetadata{
+		Round: 2,
 		// lock A_5
-		routingMap: map[sender]receivers{
+		RoutingMap: map[transport.Sender]transport.Receivers{
 			"A_0": {"A_5", "A_2", "A_4"},
 			"A_1": {"A_5", "A_0"},
 			"A_2": {"A_5", "A_3"},
@@ -134,17 +138,17 @@ func TestE2E_Partition_LivenessIssue_Case2_SixNodes_OneFaulty(t *testing.T) {
 		},
 	}
 
-	round3 := roundMetadata{
-		round: 3,
+	round3 := transport.RoundMetadata{
+		Round: 3,
 		// lock A_3 and A_0 on one proposal and A_2 will be faulty
-		routingMap: map[sender]receivers{
+		RoutingMap: map[transport.Sender]transport.Receivers{
 			"A_3": {"A_0", "A_2", "A_3", "A_4"},
 			"A_0": {"A_0", "A_3", "A_4"},
 			"A_2": {"A_0", "A_1", "A_3", "A_4"},
 		},
 	}
-	flowMap := map[uint64]roundMetadata{0: round0, 2: round2, 3: round3}
-	transport := newGenericGossipTransport()
+	flowMap := map[uint64]transport.RoundMetadata{0: round0, 2: round2, 3: round3}
+	transport := transport.NewGenericGossip()
 	faultyNodeId := pbft.NodeID("A_2")
 
 	// If livenessGossipHandler returns false, message should not be transported.
@@ -169,10 +173,10 @@ func TestE2E_Partition_LivenessIssue_Case2_SixNodes_OneFaulty(t *testing.T) {
 			}
 		}
 
-		return transport.shouldGossipBasedOnMsgFlowMap(msg, senderId, receiverId)
+		return transport.ShouldGossipBasedOnMsgFlowMap(msg, senderId, receiverId)
 	}
 
-	transport.withFlowMap(flowMap).withGossipHandler(livenessGossipHandler)
+	transport.WithFlowMap(flowMap).WithGossipHandler(livenessGossipHandler)
 
 	config := &ClusterConfig{
 		Count:  6,
@@ -209,22 +213,22 @@ func TestE2E_Partition_LivenessIssue_Case2_SixNodes_OneFaulty(t *testing.T) {
 func TestE2E_Network_Stuck_Locked_Node_Dropped(t *testing.T) {
 	t.Parallel()
 
-	round0 := roundMetadata{
-		round: 0,
-		routingMap: map[sender]receivers{
+	round0 := transport.RoundMetadata{
+		Round: 0,
+		RoutingMap: map[transport.Sender]transport.Receivers{
 			"A_0": {"A_0", "A_1", "A_3", "A_2"},
 			"A_1": {"A_0", "A_1", "A_3"},
 			"A_2": {"A_0", "A_1", "A_2", "A_3"},
 		},
 	}
-	flowMap := map[uint64]roundMetadata{0: round0}
-	transport := newGenericGossipTransport()
+	flowMap := map[uint64]transport.RoundMetadata{0: round0}
+	transport := transport.NewGenericGossip()
 
 	config := &ClusterConfig{
 		Count:        4,
 		Name:         "liveness_issue",
 		Prefix:       "A",
-		RoundTimeout: GetPredefinedTimeout(2 * time.Second),
+		RoundTimeout: helper.GetPredefinedTimeout(2 * time.Second),
 	}
 
 	c := NewPBFTCluster(t, config, transport)
@@ -240,10 +244,10 @@ func TestE2E_Network_Stuck_Locked_Node_Dropped(t *testing.T) {
 		if node3.IsRunning() && node3.IsLocked() {
 			node3.Stop()
 		}
-		return transport.shouldGossipBasedOnMsgFlowMap(msg, senderId, receiverId)
+		return transport.ShouldGossipBasedOnMsgFlowMap(msg, senderId, receiverId)
 	}
 
-	transport.withFlowMap(flowMap).withGossipHandler(gossipHandler)
+	transport.WithFlowMap(flowMap).WithGossipHandler(gossipHandler)
 
 	c.Start()
 	defer c.Stop()
@@ -266,13 +270,13 @@ func TestE2E_Network_Stuck_Locked_Node_Dropped(t *testing.T) {
 func TestE2E_Partition_OneMajority(t *testing.T) {
 	t.Parallel()
 	const nodesCnt = 5
-	hook := newPartitionTransport(50 * time.Millisecond)
+	hook := transport.NewPartition(50 * time.Millisecond)
 
 	config := &ClusterConfig{
 		Count:        nodesCnt,
 		Name:         "majority_partition",
 		Prefix:       "prt",
-		RoundTimeout: GetPredefinedTimeout(2 * time.Second),
+		RoundTimeout: helper.GetPredefinedTimeout(2 * time.Second),
 	}
 
 	c := NewPBFTCluster(t, config, hook)
@@ -309,13 +313,13 @@ func TestE2E_Partition_OneMajority(t *testing.T) {
 func TestE2E_Partition_MajorityCanValidate(t *testing.T) {
 	t.Parallel()
 	const nodesCnt = 7 // N = 3 * F + 1, F = 2
-	hook := newPartitionTransport(50 * time.Millisecond)
+	hook := transport.NewPartition(50 * time.Millisecond)
 
 	config := &ClusterConfig{
 		Count:        nodesCnt,
 		Name:         "majority_partition",
 		Prefix:       "prt",
-		RoundTimeout: GetPredefinedTimeout(2 * time.Second),
+		RoundTimeout: helper.GetPredefinedTimeout(2 * time.Second),
 	}
 
 	c := NewPBFTCluster(t, config, hook)
@@ -325,7 +329,7 @@ func TestE2E_Partition_MajorityCanValidate(t *testing.T) {
 	}
 	c.Start()
 	defer c.Stop()
-	names := generateNodeNames(0, limit, "prt_")
+	names := helper.GenerateNodeNames(0, limit, "prt_")
 	err := c.WaitForHeight(4, 1*time.Minute, names)
 	assert.NoError(t, err)
 	// restart minority and wait to sync
@@ -341,13 +345,13 @@ func TestE2E_Partition_MajorityCanValidate(t *testing.T) {
 func TestE2E_Partition_MajorityCantValidate(t *testing.T) {
 	t.Parallel()
 	const nodesCnt = 7 // N = 3 * F + 1, F = 2
-	hook := newPartitionTransport(50 * time.Millisecond)
+	hook := transport.NewPartition(50 * time.Millisecond)
 
 	config := &ClusterConfig{
 		Count:        nodesCnt,
 		Name:         "majority_partition",
 		Prefix:       "prt",
-		RoundTimeout: GetPredefinedTimeout(2 * time.Second),
+		RoundTimeout: helper.GetPredefinedTimeout(2 * time.Second),
 	}
 
 	c := NewPBFTCluster(t, config, hook)
@@ -357,7 +361,7 @@ func TestE2E_Partition_MajorityCantValidate(t *testing.T) {
 	}
 	c.Start()
 	defer c.Stop()
-	names := generateNodeNames(limit, nodesCnt, "prt_")
+	names := helper.GenerateNodeNames(limit, nodesCnt, "prt_")
 	err := c.WaitForHeight(3, 1*time.Minute, names)
 	assert.Errorf(t, err, "Height reached for minority of nodes")
 }
@@ -365,13 +369,13 @@ func TestE2E_Partition_MajorityCantValidate(t *testing.T) {
 func TestE2E_Partition_BigMajorityCantValidate(t *testing.T) {
 	t.Parallel()
 	const nodesCnt = 100
-	hook := newPartitionTransport(50 * time.Millisecond)
+	hook := transport.NewPartition(50 * time.Millisecond)
 
 	config := &ClusterConfig{
 		Count:        nodesCnt,
 		Name:         "majority_partition",
 		Prefix:       "prt",
-		RoundTimeout: GetPredefinedTimeout(2 * time.Second),
+		RoundTimeout: helper.GetPredefinedTimeout(2 * time.Second),
 	}
 
 	c := NewPBFTCluster(t, config, hook)
@@ -381,7 +385,7 @@ func TestE2E_Partition_BigMajorityCantValidate(t *testing.T) {
 	}
 	c.Start()
 	defer c.Stop()
-	nodeNames := generateNodeNames(limit, nodesCnt, "prt_")
+	nodeNames := helper.GenerateNodeNames(limit, nodesCnt, "prt_")
 	err := c.WaitForHeight(8, 1*time.Minute, nodeNames)
 	assert.Errorf(t, err, "Height reached for minority of nodes")
 }

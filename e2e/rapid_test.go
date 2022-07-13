@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/0xPolygon/pbft-consensus"
+
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/errgroup"
 	"pgregory.net/rapid"
