@@ -526,7 +526,7 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 				p.setState(CommitState)
 			}
 		} else {
-			totalVotingPower := totalVotingPower(p.config.VotingPower)
+			totalVotingPower := TotalVotingPower(p.config.VotingPower)
 			validVotingPower := QuorumSizeVP(totalVotingPower)
 
 			if p.state.calculateMessagesVotingPower(p.state.prepared, p.config.VotingPower) >= validVotingPower {
@@ -717,7 +717,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 				}
 			}
 		} else {
-			totalVotingPower := totalVotingPower(p.config.VotingPower)
+			totalVotingPower := TotalVotingPower(p.config.VotingPower)
 			validVotingPower := QuorumSizeVP(totalVotingPower)
 			roundVotingPower := p.state.calculateMessagesVotingPower(p.state.roundMessages[msg.View.Round], p.config.VotingPower)
 			if roundVotingPower >= validVotingPower {
@@ -951,7 +951,7 @@ func QuorumSize(nodesCount int) int {
 	return 2*MaxFaultyNodes(nodesCount) + 1
 }
 
-func totalVotingPower(mp map[NodeID]uint64) uint64 {
+func TotalVotingPower(mp map[NodeID]uint64) uint64 {
 	var totalVotingPower uint64
 	for _, v := range mp {
 		totalVotingPower += v
