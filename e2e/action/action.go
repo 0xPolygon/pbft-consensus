@@ -10,5 +10,3 @@ type Action interface {
 	CanApply(c *e2e.Cluster) bool
 	Apply(c *e2e.Cluster) RevertFunc
 }
-
-Action, Hook
