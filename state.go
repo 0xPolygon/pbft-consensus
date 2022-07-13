@@ -388,11 +388,20 @@ func (c *currentState) numPrepared() int {
 func (c *currentState) numCommitted() int {
 	return len(c.committed)
 }
+
 func (c *currentState) GetCurrentRound() uint64 {
 	return atomic.LoadUint64(&c.view.Round)
 }
 func (c *currentState) SetCurrentRound(round uint64) {
 	atomic.StoreUint64(&c.view.Round, round)
+}
+
+func (c *currentState) calculateMessagesVotingPower(mp map[NodeID]*MessageReq, votingPower map[NodeID]uint64) uint64 {
+	var vp uint64
+	for i := range mp {
+		vp += votingPower[i]
+	}
+	return vp
 }
 
 type ValidatorSet interface {
