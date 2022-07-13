@@ -1,4 +1,4 @@
-package e2e
+package helper
 
 import (
 	"fmt"
@@ -15,7 +15,7 @@ import (
 	"github.com/0xPolygon/pbft-consensus"
 )
 
-func generateNodeNames(from int, count int, prefix string) []string {
+func GenerateNodeNames(from int, count int, prefix string) []string {
 	var names []string
 	for j := from; j < count; j++ {
 		names = append(names, prefix+strconv.Itoa(j))
@@ -23,7 +23,7 @@ func generateNodeNames(from int, count int, prefix string) []string {
 	return names
 }
 
-func executeInTimerAndWait(tickTime time.Duration, duration time.Duration, fn func(time.Duration)) {
+func ExecuteInTimerAndWait(tickTime time.Duration, duration time.Duration, fn func(time.Duration)) {
 	end := executeInTimer(tickTime, duration, fn)
 	<-end
 }
@@ -71,7 +71,7 @@ func ShouldApply(threshold int) bool {
 	return r >= threshold
 }
 
-func isFuzzEnabled(t *testing.T) {
+func IsFuzzEnabled(t *testing.T) {
 	if os.Getenv("FUZZ") != "true" {
 		t.Skip("Fuzz tests are disabled.")
 	}
