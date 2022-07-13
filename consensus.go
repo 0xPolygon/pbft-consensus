@@ -511,7 +511,8 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 			panic(fmt.Errorf("BUG: Unexpected message type: %s in %s", msg.Type, p.getState()))
 		}
 
-		if p.config.VotingPower == nil {
+		//if voting power is disabled - count number of votes
+		if !p.IsVotingPowerEnabled() {
 			if p.state.numPrepared() > p.state.NumValid() {
 				// we have received enough prepare messages
 				sendCommit(span)
@@ -702,7 +703,8 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 		// we only expect RoundChange messages right now
 		num := p.state.AddRoundMessage(msg)
 
-		if p.config.VotingPower == nil {
+		//if voting power is disabled - count number of votes
+		if !p.IsVotingPowerEnabled() {
 			if num == p.state.NumValid() {
 				// start a new round inmediatly
 				p.state.SetCurrentRound(msg.View.Round)
@@ -899,6 +901,10 @@ func (p *Pbft) PushMessage(msg *MessageReq) {
 // Reads next message with discards from message queue based on current state, sequence and round
 func (p *Pbft) ReadMessageWithDiscards() (*MessageReq, []*MessageReq) {
 	return p.msgQueue.readMessageWithDiscards(p.getState(), p.state.view)
+}
+
+func (p *Pbft) IsVotingPowerEnabled() bool {
+	return p.config.VotingPower != nil
 }
 
 // --- package-level helper functions ---
