@@ -19,6 +19,7 @@ type IntegrationBackend interface {
 	SetBackendData(n *node)
 }
 
+// BackendFake implements pbft.Backend interface
 type BackendFake struct {
 	nodes            []string
 	height           uint64

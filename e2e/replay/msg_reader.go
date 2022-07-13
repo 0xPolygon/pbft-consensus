@@ -147,6 +147,12 @@ LOOP:
 	}
 }
 
+// GetPrePrepareMessages reads messages from .flow file in chunks
+func (r *MessageReader) GetPrePrepareMessages(sequence uint64) (*pbft.MessageReq, bool) {
+	msg, ok := r.prePrepareMessages[sequence]
+	return msg, ok
+}
+
 // startChunkReading reads messages from .flow file in chunks
 func (r *MessageReader) startChunkReading(messagesChannel chan []*message, doneChannel chan struct{}) {
 	go func() {

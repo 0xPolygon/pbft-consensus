@@ -86,7 +86,7 @@ func (c *Command) Run(args []string) int {
 		RoundTimeout:          helper.GetPredefinedTimeout(time.Millisecond),
 		TransportHandler:      func(to pbft.NodeID, msg *pbft.MessageReq) { replayMessagesNotifier.HandleMessage(to, msg) },
 		CreateBackend: func() e2e.IntegrationBackend {
-			return replay.NewBackend(messageReader)
+			return newBackend(messageReader)
 		},
 	}
 
