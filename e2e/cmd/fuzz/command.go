@@ -27,7 +27,7 @@ func New(ui cli.Ui) *Command {
 }
 
 // Help implements the cli.Command interface
-func (c *Command) Help() string {
+func (*Command) Help() string {
 	return `Command runs the fuzz runner in fuzz framework based on provided configuration (nodes count and duration).
 	
 	Usage: fuzz-run -nodes={numberOfNodes} -duration={duration}
@@ -39,7 +39,7 @@ func (c *Command) Help() string {
 }
 
 // Synopsis implements the cli.Command interface
-func (c *Command) Synopsis() string {
+func (*Command) Synopsis() string {
 	return "Starts the PolyBFT fuzz runner"
 }
 
@@ -55,6 +55,7 @@ func (c *Command) Run(args []string) int {
 	c.UI.Info("Starting PolyBFT fuzz runner...")
 	c.UI.Info(fmt.Sprintf("Node count: %v\n", c.numberOfNodes))
 	c.UI.Info(fmt.Sprintf("Duration: %v\n", c.duration))
+
 	rand.Seed(time.Now().Unix())
 
 	replayMessageHandler := replay.NewMessagesMiddlewareWithPersister()
