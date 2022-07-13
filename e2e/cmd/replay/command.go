@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/0xPolygon/pbft-consensus/e2e/helper"
+
 	"github.com/mitchellh/cli"
 
 	"github.com/0xPolygon/pbft-consensus"
@@ -73,7 +75,7 @@ func (rmc *MessageCommand) Run(args []string) int {
 		prefix = (nodeNames[0])[:i]
 	}
 
-	replayMessagesNotifier := replay.NewMessagesNotifierWithReader(messageReader)
+	replayMessagesNotifier := replay.NewMessagesMiddlewareWithReader(messageReader)
 
 	nodesCount := len(nodeNames)
 	config := &e2e.ClusterConfig{
@@ -81,7 +83,7 @@ func (rmc *MessageCommand) Run(args []string) int {
 		Name:                  "fuzz_cluster",
 		Prefix:                prefix,
 		ReplayMessageNotifier: replayMessagesNotifier,
-		RoundTimeout:          e2e.GetPredefinedTimeout(time.Millisecond),
+		RoundTimeout:          helper.GetPredefinedTimeout(time.Millisecond),
 		TransportHandler:      func(to pbft.NodeID, msg *pbft.MessageReq) { replayMessagesNotifier.HandleMessage(to, msg) },
 		CreateBackend: func() e2e.IntegrationBackend {
 			return replay.NewBackend(messageReader)

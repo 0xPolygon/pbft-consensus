@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/0xPolygon/pbft-consensus"
+	"github.com/0xPolygon/pbft-consensus/e2e/helper"
 	"github.com/0xPolygon/pbft-consensus/e2e/transport"
 )
 
@@ -227,7 +228,7 @@ func TestE2E_Network_Stuck_Locked_Node_Dropped(t *testing.T) {
 		Count:        4,
 		Name:         "liveness_issue",
 		Prefix:       "A",
-		RoundTimeout: GetPredefinedTimeout(2 * time.Second),
+		RoundTimeout: helper.GetPredefinedTimeout(2 * time.Second),
 	}
 
 	c := NewPBFTCluster(t, config, transport)
@@ -275,7 +276,7 @@ func TestE2E_Partition_OneMajority(t *testing.T) {
 		Count:        nodesCnt,
 		Name:         "majority_partition",
 		Prefix:       "prt",
-		RoundTimeout: GetPredefinedTimeout(2 * time.Second),
+		RoundTimeout: helper.GetPredefinedTimeout(2 * time.Second),
 	}
 
 	c := NewPBFTCluster(t, config, hook)
@@ -318,7 +319,7 @@ func TestE2E_Partition_MajorityCanValidate(t *testing.T) {
 		Count:        nodesCnt,
 		Name:         "majority_partition",
 		Prefix:       "prt",
-		RoundTimeout: GetPredefinedTimeout(2 * time.Second),
+		RoundTimeout: helper.GetPredefinedTimeout(2 * time.Second),
 	}
 
 	c := NewPBFTCluster(t, config, hook)
@@ -328,7 +329,7 @@ func TestE2E_Partition_MajorityCanValidate(t *testing.T) {
 	}
 	c.Start()
 	defer c.Stop()
-	names := generateNodeNames(0, limit, "prt_")
+	names := helper.GenerateNodeNames(0, limit, "prt_")
 	err := c.WaitForHeight(4, 1*time.Minute, names)
 	assert.NoError(t, err)
 	// restart minority and wait to sync
@@ -350,7 +351,7 @@ func TestE2E_Partition_MajorityCantValidate(t *testing.T) {
 		Count:        nodesCnt,
 		Name:         "majority_partition",
 		Prefix:       "prt",
-		RoundTimeout: GetPredefinedTimeout(2 * time.Second),
+		RoundTimeout: helper.GetPredefinedTimeout(2 * time.Second),
 	}
 
 	c := NewPBFTCluster(t, config, hook)
@@ -360,7 +361,7 @@ func TestE2E_Partition_MajorityCantValidate(t *testing.T) {
 	}
 	c.Start()
 	defer c.Stop()
-	names := generateNodeNames(limit, nodesCnt, "prt_")
+	names := helper.GenerateNodeNames(limit, nodesCnt, "prt_")
 	err := c.WaitForHeight(3, 1*time.Minute, names)
 	assert.Errorf(t, err, "Height reached for minority of nodes")
 }
@@ -374,7 +375,7 @@ func TestE2E_Partition_BigMajorityCantValidate(t *testing.T) {
 		Count:        nodesCnt,
 		Name:         "majority_partition",
 		Prefix:       "prt",
-		RoundTimeout: GetPredefinedTimeout(2 * time.Second),
+		RoundTimeout: helper.GetPredefinedTimeout(2 * time.Second),
 	}
 
 	c := NewPBFTCluster(t, config, hook)
@@ -384,7 +385,7 @@ func TestE2E_Partition_BigMajorityCantValidate(t *testing.T) {
 	}
 	c.Start()
 	defer c.Stop()
-	nodeNames := generateNodeNames(limit, nodesCnt, "prt_")
+	nodeNames := helper.GenerateNodeNames(limit, nodesCnt, "prt_")
 	err := c.WaitForHeight(8, 1*time.Minute, nodeNames)
 	assert.Errorf(t, err, "Height reached for minority of nodes")
 }

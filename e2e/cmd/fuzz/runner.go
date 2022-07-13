@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/0xPolygon/pbft-consensus/e2e/helper"
+
 	"github.com/0xPolygon/pbft-consensus"
 	"github.com/0xPolygon/pbft-consensus/e2e"
 	"github.com/0xPolygon/pbft-consensus/e2e/action"
@@ -77,7 +79,7 @@ func (r *runner) run(d time.Duration) error {
 					continue
 				}
 
-				if e2e.ShouldApply(revertProbabilityThreshold) {
+				if helper.ShouldApply(revertProbabilityThreshold) {
 					revertIndex := rand.Intn(len(reverts))
 					revertFn := reverts[revertIndex]
 					reverts = append(reverts[:revertIndex], reverts[revertIndex+1:]...)
@@ -148,7 +150,7 @@ func validateCluster(c *e2e.Cluster) ([]string, bool) {
 
 	// loop through running nodes and check if they are in majority partition
 	for _, n := range c.GetRunningNodes() {
-		if e2e.Contains(majorityPartition, n.GetName()) {
+		if helper.Contains(majorityPartition, n.GetName()) {
 			runningNodes = append(runningNodes, n.GetName())
 		}
 	}

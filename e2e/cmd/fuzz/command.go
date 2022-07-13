@@ -57,7 +57,7 @@ func (fc *Command) Run(args []string) int {
 	fc.UI.Info(fmt.Sprintf("Duration: %v\n", fc.duration))
 	rand.Seed(time.Now().Unix())
 
-	replayMessageHandler := replay.NewMessagesNotifierWithPersister()
+	replayMessageHandler := replay.NewMessagesMiddlewareWithPersister()
 
 	rnnr := newRunner(fc.numberOfNodes, replayMessageHandler)
 	if err = rnnr.run(fc.duration); err != nil {

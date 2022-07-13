@@ -40,6 +40,11 @@ func NewMessageReader() *MessageReader {
 	}
 }
 
+// ProcessingDone returns msgProcessingDone chan
+func (r *MessageReader) ProcessingDone() <-chan string {
+	return r.msgProcessingDone
+}
+
 // OpenFile opens the file on provided location
 func (r *MessageReader) OpenFile(filePath string) error {
 	_, err := os.Stat(filePath)
@@ -91,10 +96,11 @@ func (r *MessageReader) ReadMessages(cluster *e2e.Cluster) {
 	r.lastSequenceMessages = make(map[pbft.NodeID]*sequenceMessages, nodesCount)
 	r.prePrepareMessages = make(map[uint64]*pbft.MessageReq)
 
-	messagesChannel := make(chan []*Message)
+	messagesChannel := make(chan []*message)
 	doneChannel := make(chan struct{})
 
-	r.StartChunkReading(messagesChannel, doneChannel)
+	r.startChunkReading(messagesChannel, doneChannel)
+
 	nodeMessages := make(map[pbft.NodeID]map[uint64][]*pbft.MessageReq, nodesCount)
 	for _, n := range nodes {
 		nodeMessages[pbft.NodeID(n.GetName())] = make(map[uint64][]*pbft.MessageReq)
@@ -141,19 +147,19 @@ LOOP:
 	}
 }
 
-// StartChunkReading reads messages from .flow file in chunks
-func (r *MessageReader) StartChunkReading(messagesChannel chan []*Message, doneChannel chan struct{}) {
+// startChunkReading reads messages from .flow file in chunks
+func (r *MessageReader) startChunkReading(messagesChannel chan []*message, doneChannel chan struct{}) {
 	go func() {
-		messages := make([]*Message, 0)
+		messages := make([]*message, 0)
 		i := 0
 		for r.scanner.Scan() {
-			var message *Message
-			if err := json.Unmarshal(r.scanner.Bytes(), &message); err != nil {
+			var msg *message
+			if err := json.Unmarshal(r.scanner.Bytes(), &msg); err != nil {
 				log.Printf("[ERROR] Error happened on unmarshalling a message in .flow file. Reason: %v.\n", err)
 				return
 			}
 
-			messages = append(messages, message)
+			messages = append(messages, msg)
 			i++
 
 			if i%messageChunkSize == 0 {
@@ -172,10 +178,10 @@ func (r *MessageReader) StartChunkReading(messagesChannel chan []*Message, doneC
 	}()
 }
 
-// CheckIfDoneWithExecution checks if node finished with processing all the messages from .flow file
-func (r *MessageReader) CheckIfDoneWithExecution(validatorId pbft.NodeID, msg *pbft.MessageReq) {
+// checkIfDoneWithExecution checks if node finished with processing all the messages from .flow file
+func (r *MessageReader) checkIfDoneWithExecution(validatorId pbft.NodeID, msg *pbft.MessageReq) {
 	if msg.View.Sequence > r.lastSequenceMessages[validatorId].sequence ||
-		(msg.View.Sequence == r.lastSequenceMessages[validatorId].sequence && r.AreMessagesFromLastSequenceProcessed(msg, validatorId)) {
+		(msg.View.Sequence == r.lastSequenceMessages[validatorId].sequence && r.areMessagesFromLastSequenceProcessed(msg, validatorId)) {
 		r.lock.Lock()
 		if _, isDone := r.nodesDoneWithExecution[validatorId]; !isDone {
 			r.nodesDoneWithExecution[validatorId] = true
@@ -185,8 +191,8 @@ func (r *MessageReader) CheckIfDoneWithExecution(validatorId pbft.NodeID, msg *p
 	}
 }
 
-// AreMessagesFromLastSequenceProcessed checks if all the messages from the last sequence of given node are processed so that the node can be stoped
-func (r *MessageReader) AreMessagesFromLastSequenceProcessed(msg *pbft.MessageReq, validatorId pbft.NodeID) bool {
+// areMessagesFromLastSequenceProcessed checks if all the messages from the last sequence of given node are processed so that the node can be stoped
+func (r *MessageReader) areMessagesFromLastSequenceProcessed(msg *pbft.MessageReq, validatorId pbft.NodeID) bool {
 	lastSequenceMessages := r.lastSequenceMessages[validatorId]
 
 	lastSequenceMessagesCount := len(lastSequenceMessages.messages)
@@ -206,9 +212,4 @@ func (r *MessageReader) AreMessagesFromLastSequenceProcessed(msg *pbft.MessageRe
 	}
 
 	return lastSequenceMessagesCount == 0
-}
-
-// ProcessingDone returns msgProcessingDone chan
-func (r *MessageReader) ProcessingDone() <-chan string {
-	return r.msgProcessingDone
 }

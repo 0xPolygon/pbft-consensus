@@ -12,17 +12,17 @@ import (
 
 const directoryPath = "../SavedState"
 
-// MessagePersister encapsulates logic for saving messages in .flow file
-type MessagePersister struct {
+// messagePersister encapsulates logic for saving messages in .flow file
+type messagePersister struct {
 	lock     sync.Mutex
-	messages []*Message
+	messages []*message
 	file     *os.File
 }
 
-// SaveMetaData saves node meta data to .flow file
-func (r *MessagePersister) SaveMetaData(nodeNames *[]string) error {
+// saveMetaData saves node meta data to .flow file
+func (r *messagePersister) saveMetaData(nodeNames *[]string) error {
 	var err error
-	if err = r.CreateFile(); err != nil {
+	if err = r.createFile(); err != nil {
 		return err
 	}
 
@@ -44,25 +44,25 @@ func (r *MessagePersister) SaveMetaData(nodeNames *[]string) error {
 	return err
 }
 
-// SaveCachedMessages saves currently cached messages and timeouts to .flow file
-func (r *MessagePersister) SaveCachedMessages() error {
+// saveCachedMessages saves currently cached messages and timeouts to .flow file
+func (r *messagePersister) saveCachedMessages() error {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
 	var err error
-	if err = r.CreateFile(); err != nil {
+	if err = r.createFile(); err != nil {
 		return err
 	}
 
 	if r.messages != nil {
-		err = r.SaveMessages(r.file)
+		err = r.saveMessages(r.file)
 	}
 
 	return err
 }
 
-// CreateFile creates a .flow file to save messages and timeouts on the predifined location
-func (r *MessagePersister) CreateFile() error {
+// createFile creates a .flow file to save messages and timeouts on the predifined location
+func (r *messagePersister) createFile() error {
 	if r.file == nil {
 		if _, err := os.Stat(directoryPath); os.IsNotExist(err) {
 			err := os.Mkdir(directoryPath, 0777)
@@ -86,24 +86,24 @@ func (r *MessagePersister) CreateFile() error {
 	return nil
 }
 
-// CloseFile closes file created by the ReplayMessagesHandler if it is open
-func (r *MessagePersister) CloseFile() error {
+// closeFile closes file created by the ReplayMessagesHandler if it is open
+func (r *messagePersister) closeFile() error {
 	if r.file != nil {
 		return r.file.Close()
 	}
 	return nil
 }
 
-// AddMessage adds a message from sequence to message cache that will be written to .flow file
-func (r *MessagePersister) AddMessage(message *Message) {
+// addMessage adds a message from sequence to message cache that will be written to .flow file
+func (r *messagePersister) addMessage(message *message) {
 	r.lock.Lock()
-	defer r.lock.Unlock()
 	r.messages = append(r.messages, message)
+	r.lock.Unlock()
 }
 
-// SaveMessages saves ReplayMessages to the JSON file within the pre-defined directory.
-func (r *MessagePersister) SaveMessages(fileWriter *os.File) error {
-	rawMessages, err := ConvertToByteArrays(r.messages)
+// saveMessages saves ReplayMessages to the JSON file within the pre-defined directory.
+func (r *messagePersister) saveMessages(fileWriter *os.File) error {
+	rawMessages, err := convertToByteArrays(r.messages)
 	if err != nil {
 		return err
 	}

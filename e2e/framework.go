@@ -21,6 +21,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/0xPolygon/pbft-consensus"
+	"github.com/0xPolygon/pbft-consensus/e2e/helper"
 	"github.com/0xPolygon/pbft-consensus/e2e/transport"
 )
 
@@ -116,14 +117,14 @@ func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transport.Hook)
 		config.CreateBackend = func() IntegrationBackend { return &Fsm{} }
 	}
 
-	logsDir, err := CreateLogsDir(directoryName)
+	logsDir, err := helper.CreateLogsDir(directoryName)
 	if err != nil {
 		log.Printf("[WARNING] Could not create logs directory. Reason: %v. Logging will be defaulted to standard output.", err)
 	} else {
 		config.LogsDir = logsDir
 	}
 
-	tt.SetLogger(log.New(GetLoggerOutput("transport", logsDir), "", log.LstdFlags))
+	tt.SetLogger(log.New(helper.GetLoggerOutput("transport", logsDir), "", log.LstdFlags))
 
 	c := &Cluster{
 		t:                     t,
@@ -422,7 +423,7 @@ type node struct {
 }
 
 func newPBFTNode(name string, clusterConfig *ClusterConfig, nodes []string, trace trace.Tracer, tt *transport.Transport) (*node, error) {
-	loggerOutput := GetLoggerOutput(name, clusterConfig.LogsDir)
+	loggerOutput := helper.GetLoggerOutput(name, clusterConfig.LogsDir)
 
 	con := pbft.New(
 		key(name),
