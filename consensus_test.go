@@ -10,8 +10,11 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"strconv"
 	"testing"
 	"time"
+
+	"pgregory.net/rapid"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -768,6 +771,61 @@ func TestGossip_SignProposalFailed(t *testing.T) {
 	assert.Empty(t, m.msgQueue.validateStateQueue)
 }
 
+func TestRoundChange_PropertyMajorityOfVotingPowerAggreement(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		numberOfNodes := rapid.IntRange(4, 100).Draw(t, "Generate number of nodes").(int)
+		stake := rapid.SliceOfN(rapid.Uint64Range(1, 1000000), numberOfNodes, numberOfNodes).Draw(t, "Generate stake").([]uint64)
+		randomValidator := rapid.IntRange(0, 99).Draw(t, "Get random validator").(int)
+		validators := make(ValStringStub, numberOfNodes)
+		votingPower := make(map[NodeID]uint64)
+
+		var totalVotingPower uint64
+		for i := range validators {
+			validators[i] = NodeID(strconv.Itoa(i))
+			votingPower[validators[i]] = stake[i]
+			totalVotingPower += stake[i]
+		}
+		quorumVotingPower := QuorumSizeVP(totalVotingPower)
+
+		maxNodeID := numberOfNodes - 1
+		votes := rapid.SliceOfDistinct(rapid.IntRange(0, maxNodeID), func(v int) int {
+			return v
+		}).Filter(func(votes []int) bool {
+			var votesVP uint64
+			for i := range votes {
+				votesVP += stake[votes[i]]
+			}
+			return votesVP >= quorumVotingPower
+		}).Draw(t, "Select arbitrary nodes that have majority of voting power").([]int)
+
+		node := New(ValidatorKeyMock(strconv.Itoa(randomValidator)), &TransportStub{
+			GossipFunc: func(ft *TransportStub, msg *MessageReq) error {
+				return nil
+			},
+		}, WithLogger(log.New(io.Discard, "", log.LstdFlags)))
+		node.state.validators = &validators
+		node.config.VotingPower = votingPower
+		node.state.view = &View{
+			1,
+			1,
+		}
+		for _, voterID := range votes {
+			node.PushMessage(&MessageReq{Type: MessageReq_RoundChange, From: NodeID(strconv.Itoa(voterID)), View: ViewMsg(1, 2)})
+		}
+
+		//for sending rounchange message
+		node.state.err = errors.New("skip")
+		node.state.setState(RoundChangeState)
+
+		node.ctx = context.Background()
+		node.runRoundChangeState(context.Background())
+
+		if node.getState() != AcceptState {
+			t.Error("Invalid state")
+		}
+	})
+}
+
 type gossipDelegate func(*MessageReq) error
 
 type mockPbft struct {
@@ -869,7 +927,7 @@ func getDefaultLoggerOutput() io.Writer {
 func newMockBackend(validatorIds []string, mockPbft *mockPbft) *mockBackend {
 	return &mockBackend{
 		mock:       mockPbft,
-		validators: newMockValidatorSet(validatorIds).(*valString),
+		validators: newMockValidatorSet(validatorIds).(*ValStringStub),
 	}
 }
 
@@ -941,7 +999,7 @@ type isStuckDelegate func(uint64) (uint64, bool)
 
 type mockBackend struct {
 	mock            *mockPbft
-	validators      *valString
+	validators      *ValStringStub
 	buildProposalFn buildProposalDelegate
 	validateFn      validateDelegate
 	isStuckFn       isStuckDelegate
