@@ -13,13 +13,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/0xPolygon/pbft-consensus/e2e/helper"
-
-	"github.com/0xPolygon/pbft-consensus"
-
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/errgroup"
 	"pgregory.net/rapid"
+
+	"github.com/0xPolygon/pbft-consensus"
+	"github.com/0xPolygon/pbft-consensus/e2e/helper"
 )
 
 const waitDuration = 50 * time.Millisecond
@@ -440,7 +439,7 @@ type maliciousProposer struct {
 func generateMaliciousProposers(num int) []maliciousProposer {
 	maliciousProposers := make([]maliciousProposer, num)
 	for i := 0; i < num; i++ {
-		maliciousProposal := GenerateProposal()
+		maliciousProposal := helper.GenerateProposal()
 		h := sha1.New()
 		h.Write(maliciousProposal)
 		maliciousProposalHash := h.Sum(nil)
