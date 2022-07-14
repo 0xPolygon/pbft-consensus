@@ -15,6 +15,13 @@ import (
 	"github.com/0xPolygon/pbft-consensus/stats"
 )
 
+// Transport is a generic interface for a gossip transport protocol
+type Transport interface {
+	// Gossip broadcast the message to the network
+	Gossip(msg *MessageReq) error
+}
+
+// SignKey represents the behavior of the signing key
 type SignKey interface {
 	NodeID() NodeID
 	Sign(b []byte) ([]byte, error)
