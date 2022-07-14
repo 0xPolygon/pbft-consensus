@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/0xPolygon/pbft-consensus/e2e/notifier"
+
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
@@ -18,27 +20,18 @@ import (
 
 	"github.com/0xPolygon/pbft-consensus"
 	"github.com/0xPolygon/pbft-consensus/e2e/helper"
-	"github.com/0xPolygon/pbft-consensus/e2e/replay"
 	"github.com/0xPolygon/pbft-consensus/e2e/transport"
 )
 
 // CreateBackend is a delegate that creates a new instance of IntegrationBackend interface
 type CreateBackend func() IntegrationBackend
 
-// Notifier is an interface that expands the StateNotifier with additional methods for saving and loading replay messages
-type Notifier interface {
-	pbft.StateNotifier
-	SaveMetaData(nodeNames *[]string) error
-	SaveState() error
-	HandleMessage(to pbft.NodeID, message *pbft.MessageReq)
-}
-
 type ClusterConfig struct {
 	Count                 int
 	Name                  string
 	Prefix                string
 	LogsDir               string
-	ReplayMessageNotifier Notifier
+	ReplayMessageNotifier notifier.Notifier
 	TransportHandler      transport.Handler
 	RoundTimeout          pbft.RoundTimeout
 	CreateBackend         CreateBackend
@@ -51,7 +44,7 @@ type Cluster struct {
 	tracer                *sdktrace.TracerProvider
 	transport             *transport.Transport
 	sealedProposals       []*pbft.SealedProposal
-	replayMessageNotifier Notifier
+	replayMessageNotifier notifier.Notifier
 	createBackend         CreateBackend
 }
 
@@ -73,7 +66,7 @@ func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transport.Hook)
 	}
 
 	if config.ReplayMessageNotifier == nil {
-		config.ReplayMessageNotifier = &replay.DefaultNotifier{}
+		config.ReplayMessageNotifier = &notifier.DefaultNotifier{}
 	}
 
 	if config.CreateBackend == nil {

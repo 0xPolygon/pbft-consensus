@@ -1,8 +1,8 @@
-package replay
+package notifier
 
 import "github.com/0xPolygon/pbft-consensus"
 
-// DefaultNotifier is a null object implementation of ReplayNotifier interface
+// DefaultNotifier is a null object implementation of Notifier interface
 type DefaultNotifier struct {
 }
 

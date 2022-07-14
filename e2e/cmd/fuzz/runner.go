@@ -8,8 +8,8 @@ import (
 
 	"github.com/0xPolygon/pbft-consensus"
 	"github.com/0xPolygon/pbft-consensus/e2e"
-	"github.com/0xPolygon/pbft-consensus/e2e/action"
 	"github.com/0xPolygon/pbft-consensus/e2e/helper"
+	"github.com/0xPolygon/pbft-consensus/e2e/notifier"
 )
 
 var (
@@ -20,11 +20,11 @@ var (
 type runner struct {
 	wg               sync.WaitGroup
 	cluster          *e2e.Cluster
-	availableActions []action.Action
+	availableActions []Action
 }
 
 // newRunner is the constructor of runner
-func newRunner(initialNodesCount uint, replayMessageNotifier e2e.Notifier) *runner {
+func newRunner(initialNodesCount uint, replayMessageNotifier notifier.Notifier) *runner {
 	config := &e2e.ClusterConfig{
 		Count:                 int(initialNodesCount),
 		Name:                  "fuzz_cluster",
@@ -51,7 +51,7 @@ func (r *runner) run(d time.Duration) error {
 	defer revertTicker.Stop()
 	defer validationTicker.Stop()
 
-	var reverts []action.RevertFunc
+	var reverts []RevertFunc
 
 	r.wg.Add(1)
 	go func() {
@@ -153,11 +153,4 @@ func validateCluster(c *e2e.Cluster) ([]string, bool) {
 		}
 	}
 	return runningNodes, len(runningNodes) >= pbft.QuorumSize(totalNodesCount)
-}
-
-func getAvailableActions() []action.Action {
-	return []action.Action{
-		&action.DropNode{},
-		&action.Partition{},
-	}
 }
