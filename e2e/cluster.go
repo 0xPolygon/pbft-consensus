@@ -113,76 +113,17 @@ func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transport.Hook)
 	return c
 }
 
-// insertFinalProposal inserts final proposal from the node to the cluster
-func (c *Cluster) insertFinalProposal(sealProp *pbft.SealedProposal) error {
+func (c *Cluster) Nodes() []*node {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	insertIndex := sealProp.Number - 1
-	lastIndex := len(c.sealedProposals) - 1
-
-	if lastIndex >= 0 {
-		if insertIndex <= uint64(lastIndex) {
-			// already exists
-			if !c.sealedProposals[insertIndex].Proposal.Equal(sealProp.Proposal) {
-				return errors.New("existing proposal on a given position is not not equal to the one being inserted to the same position")
-			}
-
-			return nil
-		} else if insertIndex != uint64(lastIndex+1) {
-			return fmt.Errorf("expected that final proposal number is %v, but was %v", len(c.sealedProposals)+1, sealProp.Number)
-		}
+	list := make([]*node, len(c.nodes))
+	i := 0
+	for _, n := range c.nodes {
+		list[i] = n
+		i++
 	}
-	c.sealedProposals = append(c.sealedProposals, sealProp)
-	return nil
-}
-
-func (c *Cluster) resolveNodes(nodes ...[]string) []string {
-	queryNodes := []string{}
-	if len(nodes) == 1 {
-		for _, n := range nodes[0] {
-			if _, ok := c.nodes[n]; !ok {
-				panic("node not found in query")
-			}
-		}
-		queryNodes = nodes[0]
-	} else {
-		for n := range c.nodes {
-			queryNodes = append(queryNodes, n)
-		}
-	}
-	return queryNodes
-}
-
-func (c *Cluster) IsStuck(timeout time.Duration, nodes ...[]string) {
-	queryNodes := c.resolveNodes(nodes...)
-
-	nodeHeight := map[string]uint64{}
-	isStuck := func() bool {
-		for _, n := range queryNodes {
-			height := c.nodes[n].GetNodeHeight()
-			if lastHeight, ok := nodeHeight[n]; ok {
-				if lastHeight != height {
-					return false
-				}
-			} else {
-				nodeHeight[n] = height
-			}
-		}
-		return true
-	}
-
-	timer := time.NewTimer(timeout)
-	for {
-		select {
-		case <-time.After(200 * time.Millisecond):
-			if !isStuck() {
-				c.t.Fatal("it is not stuck")
-			}
-		case <-timer.C:
-			return
-		}
-	}
+	return list
 }
 
 func (c *Cluster) SetHook(hook transport.Hook) {
@@ -237,10 +178,113 @@ func (c *Cluster) GetNodesMap() map[string]*node {
 	return c.nodes
 }
 
-func (c *Cluster) GetNodes() []*node {
+func (c *Cluster) GetRunningNodes() []*node {
+	return c.getFilteredNodes(func(n *node) bool {
+		return n.IsRunning()
+	})
+}
+
+func (c *Cluster) Start() {
+	for _, n := range c.nodes {
+		n.Start()
+	}
+}
+
+func (c *Cluster) StopNode(name string) {
+	c.nodes[name].Stop()
+}
+
+func (c *Cluster) Stop() {
+	for _, n := range c.nodes {
+		if n.IsRunning() {
+			n.Stop()
+		}
+	}
+	if err := c.tracer.Shutdown(context.Background()); err != nil {
+		panic("failed to shutdown TracerProvider")
+	}
+}
+
+func (c *Cluster) GetTransportHook() transport.Hook {
+	return c.transport.GetHook()
+}
+
+// insertFinalProposal inserts final proposal from the node to the cluster
+func (c *Cluster) insertFinalProposal(sealProp *pbft.SealedProposal) error {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	insertIndex := sealProp.Number - 1
+	lastIndex := len(c.sealedProposals) - 1
+
+	if lastIndex >= 0 {
+		if insertIndex <= uint64(lastIndex) {
+			// already exists
+			if !c.sealedProposals[insertIndex].Proposal.Equal(sealProp.Proposal) {
+				return errors.New("existing proposal on a given position is not not equal to the one being inserted to the same position")
+			}
+
+			return nil
+		} else if insertIndex != uint64(lastIndex+1) {
+			return fmt.Errorf("expected that final proposal number is %v, but was %v", len(c.sealedProposals)+1, sealProp.Number)
+		}
+	}
+	c.sealedProposals = append(c.sealedProposals, sealProp)
+	return nil
+}
+
+func (c *Cluster) resolveNodes(nodes ...[]string) []string {
+	queryNodes := []string{}
+	if len(nodes) == 1 {
+		for _, n := range nodes[0] {
+			if _, ok := c.nodes[n]; !ok {
+				panic("node not found in query")
+			}
+		}
+		queryNodes = nodes[0]
+	} else {
+		for n := range c.nodes {
+			queryNodes = append(queryNodes, n)
+		}
+	}
+	return queryNodes
+}
+
+func (c *Cluster) isStuck(timeout time.Duration, nodes ...[]string) {
+	queryNodes := c.resolveNodes(nodes...)
+
+	nodeHeight := map[string]uint64{}
+	isStuck := func() bool {
+		for _, n := range queryNodes {
+			height := c.nodes[n].GetNodeHeight()
+			if lastHeight, ok := nodeHeight[n]; ok {
+				if lastHeight != height {
+					return false
+				}
+			} else {
+				nodeHeight[n] = height
+			}
+		}
+		return true
+	}
+
+	timer := time.NewTimer(timeout)
+	for {
+		select {
+		case <-time.After(200 * time.Millisecond):
+			if !isStuck() {
+				c.t.Fatal("it is not stuck")
+			}
+		case <-timer.C:
+			return
+		}
+	}
+}
+
+func (c *Cluster) getNodes() []*node {
 	nodes := make([]*node, 0, len(c.nodes))
-	for _, node := range c.nodes {
-		nodes = append(nodes, node)
+	for _, nd := range c.nodes {
+		nodes = append(nodes, nd)
 	}
 	return nodes
 }
@@ -283,22 +327,9 @@ func (c *Cluster) getProposer(index int64) pbft.NodeID {
 	return proposer
 }
 
-func (c *Cluster) Nodes() []*node {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-
-	list := make([]*node, len(c.nodes))
-	i := 0
-	for _, n := range c.nodes {
-		list[i] = n
-		i++
-	}
-	return list
-}
-
-// Returns nodes which satisfy provided filter delegate function.
+// getFilteredNodes returns nodes which satisfy provided filter delegate function.
 // If filter is not provided, all the nodes will be retreived.
-func (c *Cluster) GetFilteredNodes(filter func(*node) bool) []*node {
+func (c *Cluster) getFilteredNodes(filter func(*node) bool) []*node {
 	if filter != nil {
 		var filteredNodes []*node
 		for _, n := range c.nodes {
@@ -308,48 +339,11 @@ func (c *Cluster) GetFilteredNodes(filter func(*node) bool) []*node {
 		}
 		return filteredNodes
 	}
-	return c.GetNodes()
+	return c.getNodes()
 }
 
-func (c *Cluster) GetRunningNodes() []*node {
-	return c.GetFilteredNodes(func(n *node) bool {
-		return n.IsRunning()
-	})
-}
-
-func (c *Cluster) GetStoppedNodes() []*node {
-	return c.GetFilteredNodes(func(n *node) bool {
-		return !n.IsRunning()
-	})
-}
-
-func (c *Cluster) Start() {
-	for _, n := range c.nodes {
-		n.Start()
-	}
-}
-
-func (c *Cluster) StartNode(name string) {
+func (c *Cluster) startNode(name string) {
 	c.nodes[name].Start()
-}
-
-func (c *Cluster) StopNode(name string) {
-	c.nodes[name].Stop()
-}
-
-func (c *Cluster) Stop() {
-	for _, n := range c.nodes {
-		if n.IsRunning() {
-			n.Stop()
-		}
-	}
-	if err := c.tracer.Shutdown(context.Background()); err != nil {
-		panic("failed to shutdown TracerProvider")
-	}
-}
-
-func (c *Cluster) GetTransportHook() transport.Hook {
-	return c.transport.GetHook()
 }
 
 func initTracer(name string) *sdktrace.TracerProvider {

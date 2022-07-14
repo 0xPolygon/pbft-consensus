@@ -296,7 +296,7 @@ func TestE2E_Partition_OneMajority(t *testing.T) {
 	assert.NoError(t, err)
 
 	// the partition with two nodes is stuck
-	c.IsStuck(10*time.Second, minorityPartition)
+	c.isStuck(10*time.Second, minorityPartition)
 
 	// reset all partitions
 	hook.Reset()

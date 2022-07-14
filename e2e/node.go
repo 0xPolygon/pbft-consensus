@@ -65,29 +65,12 @@ func newPBFTNode(name string, clusterConfig *ClusterConfig, nodes []string, trac
 	return n, nil
 }
 
-func (n *node) getSyncIndex() int64 {
-	return atomic.LoadInt64(&n.localSyncIndex)
+func (n *node) GetName() string {
+	return n.name
 }
 
-func (n *node) setSyncIndex(idx int64) {
-	atomic.StoreInt64(&n.localSyncIndex, idx)
-}
-
-func (n *node) isStuck(num uint64) (uint64, bool) {
-	// get max height in the network
-	height, _ := n.c.syncWithNetwork(n.name)
-	if height > num {
-		return height, true
-	}
-	return 0, false
-}
-
-func (n *node) insert(pp *pbft.SealedProposal) error {
-	err := n.c.insertFinalProposal(pp)
-	if err != nil {
-		panic(err)
-	}
-	return nil
+func (n *node) String() string {
+	return n.name
 }
 
 // GetNodeHeight returns node height depending on node index
@@ -95,22 +78,6 @@ func (n *node) insert(pp *pbft.SealedProposal) error {
 // first inserted proposal is on index 0 with height 1
 func (n *node) GetNodeHeight() uint64 {
 	return uint64(n.getSyncIndex()) + 1
-}
-
-// setFaultyNode sets flag indicating that the node should be faulty or not
-// 0 is for not being faulty
-func (n *node) setFaultyNode(b bool) {
-	if b {
-		atomic.StoreUint64(&n.faulty, 1)
-	} else {
-		atomic.StoreUint64(&n.faulty, 0)
-	}
-}
-
-// isFaulty checks if the node should be faulty or not depending on the stored value
-// 0 is for not being faulty
-func (n *node) isFaulty() bool {
-	return atomic.LoadUint64(&n.faulty) != 0
 }
 
 func (n *node) IsLocked() bool {
@@ -186,15 +153,48 @@ func (n *node) IsRunning() bool {
 	return atomic.LoadUint64(&n.running) != 0
 }
 
+func (n *node) getSyncIndex() int64 {
+	return atomic.LoadInt64(&n.localSyncIndex)
+}
+
+func (n *node) setSyncIndex(idx int64) {
+	atomic.StoreInt64(&n.localSyncIndex, idx)
+}
+
+func (n *node) isStuck(num uint64) (uint64, bool) {
+	// get max height in the network
+	height, _ := n.c.syncWithNetwork(n.name)
+	if height > num {
+		return height, true
+	}
+	return 0, false
+}
+
+func (n *node) insert(pp *pbft.SealedProposal) error {
+	err := n.c.insertFinalProposal(pp)
+	if err != nil {
+		panic(err)
+	}
+	return nil
+}
+
+// setFaultyNode sets flag indicating that the node should be faulty or not
+// 0 is for not being faulty
+func (n *node) setFaultyNode(b bool) {
+	if b {
+		atomic.StoreUint64(&n.faulty, 1)
+	} else {
+		atomic.StoreUint64(&n.faulty, 0)
+	}
+}
+
+// isFaulty checks if the node should be faulty or not depending on the stored value
+// 0 is for not being faulty
+func (n *node) isFaulty() bool {
+	return atomic.LoadUint64(&n.faulty) != 0
+}
+
 func (n *node) restart() {
 	n.Stop()
 	n.Start()
-}
-
-func (n *node) GetName() string {
-	return n.name
-}
-
-func (n *node) String() string {
-	return n.name
 }
