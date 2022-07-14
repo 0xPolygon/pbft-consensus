@@ -54,15 +54,14 @@ func newPBFTNode(name string, clusterConfig *ClusterConfig, nodes []string, trac
 		})
 	}
 
-	n := &node{
+	return &node{
 		nodes:   nodes,
 		name:    name,
 		pbft:    con,
 		running: 0,
 		// set to init index -1 so that zero value is not the same as first index
 		localSyncIndex: -1,
-	}
-	return n, nil
+	}, nil
 }
 
 func (n *node) GetName() string {
