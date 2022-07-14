@@ -6,11 +6,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/0xPolygon/pbft-consensus/e2e/helper"
-
 	"github.com/0xPolygon/pbft-consensus"
 	"github.com/0xPolygon/pbft-consensus/e2e"
 	"github.com/0xPolygon/pbft-consensus/e2e/action"
+	"github.com/0xPolygon/pbft-consensus/e2e/helper"
 )
 
 var (
@@ -25,7 +24,7 @@ type runner struct {
 }
 
 // newRunner is the constructor of runner
-func newRunner(initialNodesCount uint, replayMessageNotifier e2e.ReplayNotifier) *runner {
+func newRunner(initialNodesCount uint, replayMessageNotifier e2e.Notifier) *runner {
 	config := &e2e.ClusterConfig{
 		Count:                 int(initialNodesCount),
 		Name:                  "fuzz_cluster",
@@ -36,7 +35,6 @@ func newRunner(initialNodesCount uint, replayMessageNotifier e2e.ReplayNotifier)
 	return &runner{
 		availableActions: getAvailableActions(),
 		cluster:          e2e.NewPBFTCluster(nil, config),
-		wg:               sync.WaitGroup{},
 	}
 }
 

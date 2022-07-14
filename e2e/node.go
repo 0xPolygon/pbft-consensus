@@ -82,7 +82,7 @@ func (n *node) isStuck(num uint64) (uint64, bool) {
 	return 0, false
 }
 
-func (n *node) Insert(pp *pbft.SealedProposal) error {
+func (n *node) insert(pp *pbft.SealedProposal) error {
 	err := n.c.insertFinalProposal(pp)
 	if err != nil {
 		panic(err)
@@ -186,7 +186,7 @@ func (n *node) IsRunning() bool {
 	return atomic.LoadUint64(&n.running) != 0
 }
 
-func (n *node) Restart() {
+func (n *node) restart() {
 	n.Stop()
 	n.Start()
 }

@@ -22,6 +22,9 @@ import (
 	"github.com/0xPolygon/pbft-consensus/e2e/transport"
 )
 
+// CreateBackend is a delegate that creates a new instance of IntegrationBackend interface
+type CreateBackend func() IntegrationBackend
+
 // Notifier is an interface that expands the StateNotifier with additional methods for saving and loading replay messages
 type Notifier interface {
 	pbft.StateNotifier
@@ -70,7 +73,7 @@ func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transport.Hook)
 	}
 
 	if config.ReplayMessageNotifier == nil {
-		config.ReplayMessageNotifier = &replay.DefaultReplayNotifier{}
+		config.ReplayMessageNotifier = &replay.DefaultNotifier{}
 	}
 
 	if config.CreateBackend == nil {

@@ -2,6 +2,7 @@ package replay
 
 import (
 	"github.com/0xPolygon/pbft-consensus"
+	"github.com/0xPolygon/pbft-consensus/e2e/helper"
 )
 
 const (
@@ -54,7 +55,7 @@ func (r *MessagesMiddleware) ReadNextMessage(p *pbft.Pbft) (*pbft.MessageReq, []
 	msg, discards := p.ReadMessageWithDiscards()
 
 	if r.messageReader != nil && msg != nil {
-		if isTimeoutMessage(msg) {
+		if helper.IsTimeoutMessage(msg) {
 			return nil, nil
 		} else {
 			r.messageReader.checkIfDoneWithExecution(p.GetValidatorId(), msg)

@@ -9,16 +9,13 @@ import (
 	"github.com/0xPolygon/pbft-consensus/e2e/helper"
 )
 
-// CreateBackend is a delegate that creates a new instance of IntegrationBackend interface
-type CreateBackend func() IntegrationBackend
-
-// IntegrationBackend extends the pbft Backend interface with additional methods
+// IntegrationBackend extends the pbft.Backend interface with additional e2e-related method
 type IntegrationBackend interface {
 	pbft.Backend
 	SetBackendData(n *node)
 }
 
-// BackendFake implements pbft.Backend interface
+// BackendFake implements IntegrationBackend interface
 type BackendFake struct {
 	nodes           []string
 	height          uint64
@@ -79,9 +76,9 @@ func (bf *BackendFake) ValidatorSet() pbft.ValidatorSet {
 		valsAsNode = append(valsAsNode, pbft.NodeID(i))
 	}
 
-	return &valString{
-		nodes:        valsAsNode,
-		lastProposer: bf.lastProposer,
+	return &helper.NodeID{
+		Nodes:        valsAsNode,
+		LastProposer: bf.lastProposer,
 	}
 }
 
@@ -96,7 +93,7 @@ func (bf *BackendFake) SetBackendData(n *node) {
 	bf.height = n.GetNodeHeight() + 1
 	bf.proposalAddTime = 1 * time.Second
 	bf.isStuckFunc = n.isStuck
-	bf.insertFunc = n.Insert
+	bf.insertFunc = n.insert
 	bf.validateFunc = func(proposal *pbft.Proposal) error {
 		if n.isFaulty() {
 			return fmt.Errorf("validation error")
@@ -104,48 +101,4 @@ func (bf *BackendFake) SetBackendData(n *node) {
 
 		return nil
 	}
-}
-
-type valString struct {
-	nodes        []pbft.NodeID
-	lastProposer pbft.NodeID
-}
-
-func (v *valString) CalcProposer(round uint64) pbft.NodeID {
-	seed := uint64(0)
-	if v.lastProposer == "" {
-		seed = round
-	} else {
-		offset := 0
-		if indx := v.Index(v.lastProposer); indx != -1 {
-			offset = indx
-		}
-		seed = uint64(offset) + round + 1
-	}
-
-	pick := seed % uint64(v.Len())
-
-	return (v.nodes)[pick]
-}
-
-func (v *valString) Index(addr pbft.NodeID) int {
-	for indx, i := range v.nodes {
-		if i == addr {
-			return indx
-		}
-	}
-	return -1
-}
-
-func (v *valString) Includes(id pbft.NodeID) bool {
-	for _, i := range v.nodes {
-		if i == id {
-			return true
-		}
-	}
-	return false
-}
-
-func (v *valString) Len() int {
-	return len(v.nodes)
 }

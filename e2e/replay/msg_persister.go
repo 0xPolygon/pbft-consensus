@@ -126,3 +126,16 @@ func (r *messagePersister) saveMessages(fileWriter *os.File) error {
 	r.messages = nil
 	return nil
 }
+
+// convertToByteArrays converts ReplayMessage slice to JSON representation and return it back as slice of byte arrays
+func convertToByteArrays(messages []*message) ([][]byte, error) {
+	var allRawMessages [][]byte
+	for _, message := range messages {
+		currentRawMessage, err := json.Marshal(message)
+		if err != nil {
+			return allRawMessages, err
+		}
+		allRawMessages = append(allRawMessages, currentRawMessage)
+	}
+	return allRawMessages, nil
+}

@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/0xPolygon/pbft-consensus"
+	"github.com/0xPolygon/pbft-consensus/e2e/helper"
 )
 
 const (
@@ -122,7 +123,7 @@ LOOP:
 					node.PushMessageInternal(message.Message)
 					nodeMessages[message.To][message.Message.View.Sequence] = append(nodeMessages[message.To][message.Message.View.Sequence], message.Message)
 
-					if !isTimeoutMessage(message.Message) && message.Message.Type == pbft.MessageReq_Preprepare {
+					if !helper.IsTimeoutMessage(message.Message) && message.Message.Type == pbft.MessageReq_Preprepare {
 						if _, isPrePrepareAdded := r.prePrepareMessages[message.Message.View.Sequence]; !isPrePrepareAdded {
 							r.prePrepareMessages[message.Message.View.Sequence] = message.Message
 						}

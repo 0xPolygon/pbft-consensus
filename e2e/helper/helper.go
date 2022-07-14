@@ -129,3 +129,8 @@ func GetPredefinedTimeout(timeout time.Duration) pbft.RoundTimeout {
 		return time.NewTimer(timeout).C
 	}
 }
+
+// IsTimeoutMessage checks if message in .flow file represents a timeout
+func IsTimeoutMessage(message *pbft.MessageReq) bool {
+	return message.Hash == nil && message.Proposal == nil && message.Seal == nil && message.From == ""
+}
