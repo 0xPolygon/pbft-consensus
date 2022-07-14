@@ -22,12 +22,20 @@ import (
 	"github.com/0xPolygon/pbft-consensus/e2e/transport"
 )
 
+// Notifier is an interface that expands the StateNotifier with additional methods for saving and loading replay messages
+type Notifier interface {
+	pbft.StateNotifier
+	SaveMetaData(nodeNames *[]string) error
+	SaveState() error
+	HandleMessage(to pbft.NodeID, message *pbft.MessageReq)
+}
+
 type ClusterConfig struct {
 	Count                 int
 	Name                  string
 	Prefix                string
 	LogsDir               string
-	ReplayMessageNotifier replay.Notifier
+	ReplayMessageNotifier Notifier
 	TransportHandler      transport.Handler
 	RoundTimeout          pbft.RoundTimeout
 	CreateBackend         CreateBackend
@@ -40,10 +48,11 @@ type Cluster struct {
 	tracer                *sdktrace.TracerProvider
 	transport             *transport.Transport
 	sealedProposals       []*pbft.SealedProposal
-	replayMessageNotifier replay.Notifier
+	replayMessageNotifier Notifier
 	createBackend         CreateBackend
 }
 
+// NewPBFTCluster is the constructor of Cluster
 func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transport.Hook) *Cluster {
 	names := make([]string, config.Count)
 	for i := 0; i < config.Count; i++ {
@@ -65,7 +74,7 @@ func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transport.Hook)
 	}
 
 	if config.CreateBackend == nil {
-		config.CreateBackend = func() IntegrationBackend { return &Fsm{} }
+		config.CreateBackend = func() IntegrationBackend { return &BackendFake{} }
 	}
 
 	logsDir, err := helper.CreateLogsDir(directoryName)

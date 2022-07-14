@@ -92,7 +92,12 @@ func (c *Command) Run(args []string) int {
 
 	cluster := e2e.NewPBFTCluster(nil, config)
 
-	messageReader.ReadMessages(cluster)
+	nodes := make(map[string]replay.Node)
+	for name, node := range cluster.GetNodesMap() {
+		nodes[name] = node
+	}
+
+	messageReader.ReadMessages(nodes)
 	messageReader.CloseFile()
 
 	var wg sync.WaitGroup

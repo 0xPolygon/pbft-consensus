@@ -12,7 +12,7 @@ import (
 
 // backend implements the e2e.IntegrationBackend interface and implements its own pbft.BuildProposal method for replay
 type backend struct {
-	e2e.Fsm
+	e2e.BackendFake
 	messageReader *replay.MessageReader
 }
 

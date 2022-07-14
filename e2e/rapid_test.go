@@ -23,7 +23,7 @@ import (
 
 const waitDuration = 50 * time.Millisecond
 
-func TestPropertySeveralHonestNodesCanAchiveAgreement(t *testing.T) {
+func TestProperty_SeveralHonestNodesCanAchiveAgreement(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		numOfNodes := rapid.IntRange(4, 30).Draw(t, "num of nodes").(int)
 		ft := &pbft.TransportStub{}
@@ -55,7 +55,7 @@ func TestPropertySeveralHonestNodesCanAchiveAgreement(t *testing.T) {
 	})
 }
 
-func TestPropertySeveralNodesCanAchiveAgreementWithFailureNodes(t *testing.T) {
+func TestProperty_SeveralNodesCanAchiveAgreementWithFailureNodes(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		numOfNodes := rapid.IntRange(4, 30).Draw(t, "num of nodes").(int)
 		routingMapGenerator := rapid.MapOfN(
@@ -116,7 +116,7 @@ func TestPropertySeveralNodesCanAchiveAgreementWithFailureNodes(t *testing.T) {
 	})
 }
 
-func TestProperty4NodesCanAchiveAgreementIfWeLockButNotCommitProposer_Fails(t *testing.T) {
+func TestProperty_4NodesCanAchiveAgreementIfWeLockButNotCommitProposer_Fails(t *testing.T) {
 	t.Skip("Unskip when fix")
 	numOfNodes := 4
 	rounds := map[uint64]map[int][]int{
@@ -192,7 +192,7 @@ func TestProperty4NodesCanAchiveAgreementIfWeLockButNotCommitProposer_Fails(t *t
 	}
 }
 
-func TestPropertyFiveNodesCanAchiveAgreementIfWeLockTwoNodesOnDifferentProposals(t *testing.T) {
+func TestProperty_FiveNodesCanAchiveAgreementIfWeLockTwoNodesOnDifferentProposals(t *testing.T) {
 	numOfNodes := 5
 	rounds := map[uint64]map[int][]int{
 		0: {
@@ -249,7 +249,7 @@ func TestPropertyFiveNodesCanAchiveAgreementIfWeLockTwoNodesOnDifferentProposals
 	}
 }
 
-func TestPropertyNodeDoubleSign(t *testing.T) {
+func TestProperty_NodeDoubleSign(t *testing.T) {
 	t.Skip("Unskip when fix")
 	rapid.Check(t, func(t *rapid.T) {
 		numOfNodes := rapid.IntRange(4, 7).Draw(t, "num of nodes").(int)
@@ -311,7 +311,7 @@ func TestPropertyNodeDoubleSign(t *testing.T) {
 	})
 }
 
-func TestPropertySeveralHonestNodesWithVotingPowerCanAchiveAgreement(t *testing.T) {
+func TestProperty_SeveralHonestNodesWithVotingPowerCanAchiveAgreement(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		numOfNodes := rapid.IntRange(4, 10).Draw(t, "num of nodes").(int)
 		votingPowerSlice := rapid.SliceOfN(rapid.Uint64Range(1, math.MaxUint64/uint64(numOfNodes)), numOfNodes, numOfNodes).Draw(t, "voting power").([]uint64)
@@ -351,7 +351,7 @@ func TestPropertySeveralHonestNodesWithVotingPowerCanAchiveAgreement(t *testing.
 	})
 }
 
-func TestPropertyNodessWithMajorityOfVotingPowerCanAchiveAgreement(t *testing.T) {
+func TestProperty_NodesWithMajorityOfVotingPowerCanAchiveAgreement(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		numOfNodes := rapid.IntRange(4, 10).Draw(t, "num of nodes").(int)
 		stake := rapid.SliceOfN(rapid.Uint64Range(5, 10), numOfNodes, numOfNodes).Draw(t, "Generate stake").([]uint64)
@@ -479,7 +479,7 @@ func generateNode(id int, transport *pbft.TransportStub, votingPower map[pbft.No
 func generateCluster(numOfNodes int, transport *pbft.TransportStub, votingPower map[pbft.NodeID]uint64) ([]*pbft.Pbft, []chan time.Time) {
 	nodes := make([]string, numOfNodes)
 	timeoutsChan := make([]chan time.Time, numOfNodes)
-	var ip = &finalProposal{
+	ip := &finalProposal{
 		lock: sync.Mutex{},
 		bc:   make(map[uint64]pbft.Proposal),
 	}
@@ -489,28 +489,18 @@ func generateCluster(numOfNodes int, transport *pbft.TransportStub, votingPower 
 		nodes[i] = strconv.Itoa(i)
 	}
 
-	for i, node := range cluster {
-		i := i
-		node := node
-
-		valsAsNode := []pbft.NodeID{}
-		for _, i := range nodes {
-			valsAsNode = append(valsAsNode, pbft.NodeID(i))
-		}
-		vv := valString{
-			nodes: valsAsNode,
-		}
-
-		node.SetBackend(&BackendFake{
-			finalProposals: ip,
-			nodes:          nodes,
-			nodeId:         i,
-			IsStuckMock: func(num uint64) (uint64, bool) {
+	for _, nd := range cluster {
+		nd.SetBackend(&BackendFake{
+			nodes: nodes,
+			insertFunc: func(proposal *pbft.SealedProposal) error {
+				return ip.Insert(*proposal)
+			},
+			isStuckFunc: func(num uint64) (uint64, bool) {
 				return 0, false
 			},
-			ValidatorSetList: &vv,
 		})
 	}
+
 	return cluster, timeoutsChan
 }
 
@@ -640,4 +630,23 @@ func runCluster(ctx context.Context,
 
 		}
 	}
+}
+
+// finalProposal struct contains inserted final proposals for the node
+type finalProposal struct {
+	lock sync.Mutex
+	bc   map[uint64]pbft.Proposal
+}
+
+func (i *finalProposal) Insert(proposal pbft.SealedProposal) error {
+	i.lock.Lock()
+	defer i.lock.Unlock()
+	if p, ok := i.bc[proposal.Number]; ok {
+		if !p.Equal(proposal.Proposal) {
+			panic("wrong proposal inserted")
+		}
+	} else {
+		i.bc[proposal.Number] = *proposal.Proposal
+	}
+	return nil
 }

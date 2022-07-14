@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	"github.com/0xPolygon/pbft-consensus"
-	"github.com/0xPolygon/pbft-consensus/e2e"
 )
 
 const (
@@ -20,6 +19,12 @@ const (
 type sequenceMessages struct {
 	sequence uint64
 	messages []*pbft.MessageReq
+}
+
+// Node represents a behavior of a cluster node
+type Node interface {
+	GetName() string
+	PushMessageInternal(message *pbft.MessageReq)
 }
 
 // MessageReader encapsulates logic for reading messages from flow file
@@ -88,9 +93,7 @@ func (r *MessageReader) ReadNodeMetaData() ([]string, error) {
 }
 
 // ReadMessages reads messages from open .flow file and pushes them to appropriate nodes
-func (r *MessageReader) ReadMessages(cluster *e2e.Cluster) {
-	nodes := cluster.GetNodesMap()
-
+func (r *MessageReader) ReadMessages(nodes map[string]Node) {
 	nodesCount := len(nodes)
 	r.nodesDoneWithExecution = make(map[pbft.NodeID]bool, nodesCount)
 	r.lastSequenceMessages = make(map[pbft.NodeID]*sequenceMessages, nodesCount)
