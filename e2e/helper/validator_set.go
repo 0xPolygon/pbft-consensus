@@ -2,12 +2,12 @@ package helper
 
 import "github.com/0xPolygon/pbft-consensus"
 
-type NodeID struct {
+type ValidatorSet struct {
 	Nodes        []pbft.NodeID
 	LastProposer pbft.NodeID
 }
 
-func (n *NodeID) CalcProposer(round uint64) pbft.NodeID {
+func (n *ValidatorSet) CalcProposer(round uint64) pbft.NodeID {
 	seed := uint64(0)
 	if n.LastProposer == "" {
 		seed = round
@@ -24,7 +24,7 @@ func (n *NodeID) CalcProposer(round uint64) pbft.NodeID {
 	return (n.Nodes)[pick]
 }
 
-func (n *NodeID) Index(addr pbft.NodeID) int {
+func (n *ValidatorSet) Index(addr pbft.NodeID) int {
 	for indx, i := range n.Nodes {
 		if i == addr {
 			return indx
@@ -33,7 +33,7 @@ func (n *NodeID) Index(addr pbft.NodeID) int {
 	return -1
 }
 
-func (n *NodeID) Includes(id pbft.NodeID) bool {
+func (n *ValidatorSet) Includes(id pbft.NodeID) bool {
 	for _, i := range n.Nodes {
 		if i == id {
 			return true
@@ -42,6 +42,6 @@ func (n *NodeID) Includes(id pbft.NodeID) bool {
 	return false
 }
 
-func (n *NodeID) Len() int {
+func (n *ValidatorSet) Len() int {
 	return len(n.Nodes)
 }

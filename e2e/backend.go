@@ -76,7 +76,7 @@ func (bf *BackendFake) ValidatorSet() pbft.ValidatorSet {
 		valsAsNode = append(valsAsNode, pbft.NodeID(i))
 	}
 
-	return &helper.NodeID{
+	return &helper.ValidatorSet{
 		Nodes:        valsAsNode,
 		LastProposer: bf.lastProposer,
 	}
