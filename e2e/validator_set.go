@@ -1,4 +1,4 @@
-package helper
+package e2e
 
 import "github.com/0xPolygon/pbft-consensus"
 
