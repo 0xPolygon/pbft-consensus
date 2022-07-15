@@ -346,8 +346,8 @@ func TestMsgType_ToString(t *testing.T) {
 	}
 }
 
-func TestPbftState_ToString(t *testing.T) {
-	expectedMapping := map[PbftState]string{
+func TestState_ToString(t *testing.T) {
+	expectedMapping := map[State]string{
 		AcceptState:      "AcceptState",
 		RoundChangeState: "RoundChangeState",
 		ValidateState:    "ValidateState",
@@ -356,8 +356,8 @@ func TestPbftState_ToString(t *testing.T) {
 		DoneState:        "DoneState",
 	}
 
-	for pbftState, expected := range expectedMapping {
-		assert.Equal(t, expected, pbftState.String())
+	for st, expected := range expectedMapping {
+		assert.Equal(t, expected, st.String())
 	}
 }
 

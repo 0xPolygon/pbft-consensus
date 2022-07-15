@@ -72,14 +72,14 @@ func (s *state) getCommittedSeals() []CommittedSeal {
 }
 
 // getState returns the current state
-func (s *state) getState() PbftState {
+func (s *state) getState() State {
 	stateAddr := &s.state
 
-	return PbftState(atomic.LoadUint64(stateAddr))
+	return State(atomic.LoadUint64(stateAddr))
 }
 
 // setState sets the current state
-func (s *state) setState(st PbftState) {
+func (s *state) setState(st State) {
 	stateAddr := &s.state
 
 	atomic.StoreUint64(stateAddr, uint64(st))

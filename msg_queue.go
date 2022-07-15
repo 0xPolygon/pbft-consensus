@@ -29,17 +29,17 @@ func (m *msgQueue) pushMessage(message *MessageReq) {
 }
 
 // readMessage reads the message from a message queue, based on the current state and view
-func (m *msgQueue) readMessage(state PbftState, current *View) *MessageReq {
-	msg, _ := m.readMessageWithDiscards(state, current)
+func (m *msgQueue) readMessage(st State, current *View) *MessageReq {
+	msg, _ := m.readMessageWithDiscards(st, current)
 	return msg
 }
 
-func (m *msgQueue) readMessageWithDiscards(state PbftState, current *View) (*MessageReq, []*MessageReq) {
+func (m *msgQueue) readMessageWithDiscards(st State, current *View) (*MessageReq, []*MessageReq) {
 	m.queueLock.Lock()
 	defer m.queueLock.Unlock()
 
 	discarded := []*MessageReq{}
-	queue := m.getQueue(state)
+	queue := m.getQueue(st)
 
 	for {
 		if queue.Len() == 0 {
@@ -48,7 +48,7 @@ func (m *msgQueue) readMessageWithDiscards(state PbftState, current *View) (*Mes
 		msg := queue.head()
 
 		// check if the message is from the future
-		if state == RoundChangeState {
+		if st == RoundChangeState {
 			// if we are in RoundChangeState we only care about sequence
 			// since we are interested in knowing all the possible rounds
 			if msg.View.Sequence > current.Sequence {
@@ -79,11 +79,11 @@ func (m *msgQueue) readMessageWithDiscards(state PbftState, current *View) (*Mes
 }
 
 // getQueue checks the passed in state, and returns the corresponding message queue
-func (m *msgQueue) getQueue(state PbftState) *msgQueueImpl {
-	if state == RoundChangeState {
+func (m *msgQueue) getQueue(st State) *msgQueueImpl {
+	if st == RoundChangeState {
 		// round change
 		return &m.roundChangeStateQueue
-	} else if state == AcceptState {
+	} else if st == AcceptState {
 		// preprepare
 		return &m.acceptStateQueue
 	} else {
@@ -101,8 +101,8 @@ func newMsgQueue() *msgQueue {
 	}
 }
 
-// msgToState converts the message type to an PbftState
-func msgToState(msg MsgType) PbftState {
+// msgToState converts the message type to an State
+func msgToState(msg MsgType) State {
 	if msg == MessageReq_RoundChange {
 		// round change
 		return RoundChangeState
@@ -117,8 +117,8 @@ func msgToState(msg MsgType) PbftState {
 	panic("BUG: not expected")
 }
 
-func stateToMsg(pbftState PbftState) MsgType {
-	switch pbftState {
+func stateToMsg(st State) MsgType {
+	switch st {
 	case RoundChangeState:
 		return MessageReq_RoundChange
 	case AcceptState:

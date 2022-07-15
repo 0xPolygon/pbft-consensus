@@ -7,6 +7,33 @@ type ValidatorSet interface {
 	Len() int
 }
 
+// Logger represents logger behavior
+type Logger interface {
+	Printf(format string, args ...interface{})
+	Print(args ...interface{})
+}
+
+// Transport is a generic interface for a gossip transport protocol
+type Transport interface {
+	// Gossip broadcast the message to the network
+	Gossip(msg *MessageReq) error
+}
+
+// SignKey represents the behavior of the signing key
+type SignKey interface {
+	NodeID() NodeID
+	Sign(b []byte) ([]byte, error)
+}
+
+// StateNotifier enables custom logic encapsulation related to internal triggers within PBFT state machine (namely receiving timeouts).
+type StateNotifier interface {
+	// HandleTimeout notifies that a timeout occurred while getting next message
+	HandleTimeout(to NodeID, msgType MsgType, view *View)
+
+	// ReadNextMessage reads the next message from message queue of the state machine
+	ReadNextMessage(p *Pbft) (*MessageReq, []*MessageReq)
+}
+
 // Backend represents the backend behavior
 type Backend interface {
 	// BuildProposal builds a proposal for the current round (used if proposer)

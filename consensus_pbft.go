@@ -15,11 +15,11 @@ import (
 
 type NodeID string
 
-type PbftState uint32
+type State uint32
 
 // Define the states in PBFT
 const (
-	AcceptState PbftState = iota
+	AcceptState State = iota
 	RoundChangeState
 	ValidateState
 	CommitState
@@ -28,7 +28,7 @@ const (
 )
 
 // String returns the string representation of the passed in state
-func (i PbftState) String() string {
+func (i State) String() string {
 	switch i {
 	case AcceptState:
 		return "AcceptState"
@@ -44,33 +44,6 @@ func (i PbftState) String() string {
 		return "DoneState"
 	}
 	panic(fmt.Sprintf("BUG: Pbft state not found %d", i))
-}
-
-// Logger represents logger behavior
-type Logger interface {
-	Printf(format string, args ...interface{})
-	Print(args ...interface{})
-}
-
-// Transport is a generic interface for a gossip transport protocol
-type Transport interface {
-	// Gossip broadcast the message to the network
-	Gossip(msg *MessageReq) error
-}
-
-// SignKey represents the behavior of the signing key
-type SignKey interface {
-	NodeID() NodeID
-	Sign(b []byte) ([]byte, error)
-}
-
-// StateNotifier enables custom logic encapsulation related to internal triggers within PBFT state machine (namely receiving timeouts).
-type StateNotifier interface {
-	// HandleTimeout notifies that a timeout occurred while getting next message
-	HandleTimeout(to NodeID, msgType MsgType, view *View)
-
-	// ReadNextMessage reads the next message from message queue of the state machine
-	ReadNextMessage(p *Pbft) (*MessageReq, []*MessageReq)
 }
 
 type CommittedSeal struct {
@@ -733,26 +706,26 @@ func (p *Pbft) GetValidatorId() NodeID {
 }
 
 // GetState returns the current PBFT state
-func (p *Pbft) GetState() PbftState {
+func (p *Pbft) GetState() State {
 	return p.getState()
 }
 
 // getState returns the current PBFT state
-func (p *Pbft) getState() PbftState {
+func (p *Pbft) getState() State {
 	return p.state.getState()
 }
 
 // IsState checks if the node is in the passed in state
-func (p *Pbft) IsState(s PbftState) bool {
+func (p *Pbft) IsState(s State) bool {
 	return p.state.getState() == s
 }
 
-func (p *Pbft) SetState(s PbftState) {
+func (p *Pbft) SetState(s State) {
 	p.setState(s)
 }
 
 // setState sets the PBFT state
-func (p *Pbft) setState(s PbftState) {
+func (p *Pbft) setState(s State) {
 	p.logger.Printf("[DEBUG] state change: '%s'", s)
 	p.state.setState(s)
 }
