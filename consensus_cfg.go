@@ -101,20 +101,6 @@ func (c *Config) ApplyOps(opts ...ConfigOption) {
 	}
 }
 
-type SealedProposal struct {
-	Proposal       *Proposal
-	CommittedSeals []CommittedSeal
-	Proposer       NodeID
-	Number         uint64
-}
-
-// RoundInfo is the information about the round
-type RoundInfo struct {
-	IsProposer bool
-	Proposer   NodeID
-	Locked     bool
-}
-
 func exponentialTimeout(round uint64) <-chan time.Time {
 	return time.NewTimer(exponentialTimeoutDuration(round)).C
 }

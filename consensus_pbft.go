@@ -31,6 +31,21 @@ type SignKey interface {
 	Sign(b []byte) ([]byte, error)
 }
 
+// SealedProposal represents the sealed proposal model
+type SealedProposal struct {
+	Proposal       *Proposal
+	CommittedSeals []CommittedSeal
+	Proposer       NodeID
+	Number         uint64
+}
+
+// RoundInfo is the information about the round
+type RoundInfo struct {
+	IsProposer bool
+	Proposer   NodeID
+	Locked     bool
+}
+
 // Pbft represents the PBFT consensus mechanism object
 type Pbft struct {
 	// Output logger
