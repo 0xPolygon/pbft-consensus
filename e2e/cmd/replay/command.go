@@ -86,13 +86,18 @@ func (c *Command) Run(args []string) int {
 		RoundTimeout:          helper.GetPredefinedTimeout(time.Millisecond),
 		TransportHandler:      func(to pbft.NodeID, msg *pbft.MessageReq) { replayMessagesNotifier.HandleMessage(to, msg) },
 		CreateBackend: func() e2e.IntegrationBackend {
-			return replay.NewBackend(messageReader)
+			return newBackend(messageReader)
 		},
 	}
 
 	cluster := e2e.NewPBFTCluster(nil, config)
 
-	messageReader.ReadMessages(cluster)
+	nodes := make(map[string]replay.Node)
+	for name, node := range cluster.GetNodesMap() {
+		nodes[name] = node
+	}
+
+	messageReader.ReadMessages(nodes)
 	messageReader.CloseFile()
 
 	var wg sync.WaitGroup

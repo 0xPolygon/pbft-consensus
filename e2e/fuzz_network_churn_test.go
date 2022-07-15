@@ -41,7 +41,7 @@ func TestFuzz_NetworkChurn(t *testing.T) {
 			runningNodeCount--
 		} else if !node.IsRunning() {
 			// node is not running
-			c.StartNode(nodeID)
+			c.startNode(nodeID)
 			runningNodeCount++
 		}
 	})

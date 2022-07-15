@@ -2,6 +2,10 @@ package e2e
 
 import (
 	"testing"
+	"time"
+
+	"github.com/0xPolygon/pbft-consensus"
+	"github.com/0xPolygon/pbft-consensus/e2e/helper"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -41,4 +45,17 @@ func TestE2E_ClusterInsertFinalProposal(t *testing.T) {
 	seq2Proposal := newSealedProposal([]byte{0x2}, "N1", 2)
 	c.insertFinalProposal(seq2Proposal)
 	assert.Len(t, c.sealedProposals, 2)
+}
+
+func newSealedProposal(proposalData []byte, proposer pbft.NodeID, number uint64) *pbft.SealedProposal {
+	proposal := &pbft.Proposal{
+		Data: proposalData,
+		Time: time.Now(),
+	}
+	proposal.Hash = helper.Hash(proposal.Data)
+	return &pbft.SealedProposal{
+		Proposal: proposal,
+		Proposer: proposer,
+		Number:   number,
+	}
 }

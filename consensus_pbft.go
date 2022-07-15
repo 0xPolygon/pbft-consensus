@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"log"
-	"os"
 	"sync/atomic"
 	"time"
 
@@ -15,146 +13,53 @@ import (
 	"github.com/0xPolygon/pbft-consensus/stats"
 )
 
-type RoundTimeout func(round uint64) <-chan time.Time
+type NodeID string
 
-type Config struct {
-	// ProposalTimeout is the time to wait for the proposal
-	// from the validator. It defaults to Timeout
-	ProposalTimeout time.Duration
+type State uint32
 
-	// Timeout is the time to wait for validation and
-	// round change messages
-	Timeout time.Duration
-
-	// Logger is the logger to output info
-	Logger *log.Logger
-
-	// Tracer is the OpenTelemetry tracer to log traces
-	Tracer trace.Tracer
-
-	// RoundTimeout is a function that calculates timeout based on a round number
-	RoundTimeout RoundTimeout
-
-	// Notifier is a reference to the struct which encapsulates handling messages and timeouts
-	Notifier StateNotifier
-
-	StatsCallback StatsCallback
-
-	VotingPower map[NodeID]uint64
-}
-
-type ConfigOption func(*Config)
-
-type StatsCallback func(stats.Stats)
-
-func WithStats(s StatsCallback) ConfigOption {
-	return func(c *Config) {
-		c.StatsCallback = s
-	}
-}
-
-func WithTimeout(p time.Duration) ConfigOption {
-	return func(c *Config) {
-		c.Timeout = p
-	}
-}
-
-func WithProposalTimeout(p time.Duration) ConfigOption {
-	return func(c *Config) {
-		c.ProposalTimeout = p
-	}
-}
-
-func WithLogger(l *log.Logger) ConfigOption {
-	return func(c *Config) {
-		c.Logger = l
-	}
-}
-
-func WithTracer(t trace.Tracer) ConfigOption {
-	return func(c *Config) {
-		c.Tracer = t
-	}
-}
-
-func WithRoundTimeout(roundTimeout RoundTimeout) ConfigOption {
-	return func(c *Config) {
-		if roundTimeout != nil {
-			c.RoundTimeout = roundTimeout
-		}
-	}
-}
-
-func WithNotifier(notifier StateNotifier) ConfigOption {
-	return func(c *Config) {
-		if notifier != nil {
-			c.Notifier = notifier
-		}
-	}
-}
-
-func WithVotingPower(vp map[NodeID]uint64) ConfigOption {
-	return func(c *Config) {
-		if len(vp) > 0 {
-			c.VotingPower = vp
-		}
-	}
-}
-
+// Define the states in PBFT
 const (
-	defaultTimeout     = 2 * time.Second
-	maxTimeout         = 300 * time.Second
-	maxTimeoutExponent = 8
+	AcceptState State = iota
+	RoundChangeState
+	ValidateState
+	CommitState
+	SyncState
+	DoneState
 )
 
-func DefaultConfig() *Config {
-	return &Config{
-		Timeout:         defaultTimeout,
-		ProposalTimeout: defaultTimeout,
-		Logger:          log.New(os.Stderr, "", log.LstdFlags),
-		Tracer:          trace.NewNoopTracerProvider().Tracer(""),
-		RoundTimeout:    exponentialTimeout,
-		Notifier:        &DefaultStateNotifier{},
+// String returns the string representation of the passed in state
+func (i State) String() string {
+	switch i {
+	case AcceptState:
+		return "AcceptState"
+	case RoundChangeState:
+		return "RoundChangeState"
+	case ValidateState:
+		return "ValidateState"
+	case CommitState:
+		return "CommitState"
+	case SyncState:
+		return "SyncState"
+	case DoneState:
+		return "DoneState"
 	}
+	panic(fmt.Sprintf("BUG: Pbft state not found %d", i))
 }
 
-func (c *Config) ApplyOps(opts ...ConfigOption) {
-	for _, opt := range opts {
-		opt(c)
-	}
+type CommittedSeal struct {
+	// Signature value
+	Signature []byte
+
+	// Node that signed
+	NodeID NodeID
 }
 
+// SealedProposal represents the sealed proposal model
 type SealedProposal struct {
 	Proposal       *Proposal
 	CommittedSeals []CommittedSeal
 	Proposer       NodeID
 	Number         uint64
-}
-
-type Backend interface {
-	// BuildProposal builds a proposal for the current round (used if proposer)
-	BuildProposal() (*Proposal, error)
-
-	// Validate validates a raw proposal (used if non-proposer)
-	Validate(*Proposal) error
-
-	// Insert inserts the sealed proposal
-	Insert(p *SealedProposal) error
-
-	// Height returns the height for the current round
-	Height() uint64
-
-	// ValidatorSet returns the validator set for the current round
-	ValidatorSet() ValidatorSet
-
-	// Init is used to signal the backend that a new round is going to start.
-	Init(*RoundInfo)
-
-	// IsStuck returns whether the pbft is stucked
-	IsStuck(num uint64) (uint64, bool)
-
-	// ValidateCommit is used to validate that a given commit is valid
-	ValidateCommit(from NodeID, seal []byte) error
 }
 
 // RoundInfo is the information about the round
@@ -167,7 +72,7 @@ type RoundInfo struct {
 // Pbft represents the PBFT consensus mechanism object
 type Pbft struct {
 	// Output logger
-	logger *log.Logger
+	logger Logger
 
 	// Config is the configuration of the consensus
 	config *Config
@@ -176,7 +81,7 @@ type Pbft struct {
 	backend Backend
 
 	// state is the reference to the current state machine
-	state *currentState
+	state *state
 
 	// validator is the signing key for this instance
 	validator SignKey
@@ -203,11 +108,6 @@ type Pbft struct {
 	notifier StateNotifier
 
 	stats *stats.Stats
-}
-
-type SignKey interface {
-	NodeID() NodeID
-	Sign(b []byte) ([]byte, error)
 }
 
 // New creates a new instance of the PBFT state machine
@@ -245,7 +145,7 @@ func (p *Pbft) SetBackend(backend Backend) error {
 	return nil
 }
 
-// start starts the PBFT consensus state machine
+// Run starts the PBFT consensus state machine
 func (p *Pbft) Run(ctx context.Context) {
 	p.SetInitialState(ctx)
 
@@ -269,6 +169,14 @@ func (p *Pbft) Run(ctx context.Context) {
 	}
 }
 
+func (p *Pbft) SetInitialState(ctx context.Context) {
+	p.ctx = ctx
+
+	// the iteration always starts with the AcceptState.
+	// AcceptState stages will reset the rest of the message queues.
+	p.setState(AcceptState)
+}
+
 func (p *Pbft) emitStats() {
 	if p.config.StatsCallback != nil {
 		p.config.StatsCallback(p.stats.Snapshot())
@@ -277,13 +185,6 @@ func (p *Pbft) emitStats() {
 	}
 }
 
-func (p *Pbft) SetInitialState(ctx context.Context) {
-	p.ctx = ctx
-
-	// the iteration always starts with the AcceptState.
-	// AcceptState stages will reset the rest of the message queues.
-	p.setState(AcceptState)
-}
 func (p *Pbft) RunCycle(ctx context.Context) {
 	p.runCycle(ctx)
 }
@@ -805,26 +706,26 @@ func (p *Pbft) GetValidatorId() NodeID {
 }
 
 // GetState returns the current PBFT state
-func (p *Pbft) GetState() PbftState {
+func (p *Pbft) GetState() State {
 	return p.getState()
 }
 
 // getState returns the current PBFT state
-func (p *Pbft) getState() PbftState {
+func (p *Pbft) getState() State {
 	return p.state.getState()
 }
 
-// isState checks if the node is in the passed in state
-func (p *Pbft) IsState(s PbftState) bool {
+// IsState checks if the node is in the passed in state
+func (p *Pbft) IsState(s State) bool {
 	return p.state.getState() == s
 }
 
-func (p *Pbft) SetState(s PbftState) {
+func (p *Pbft) SetState(s State) {
 	p.setState(s)
 }
 
 // setState sets the PBFT state
-func (p *Pbft) setState(s PbftState) {
+func (p *Pbft) setState(s State) {
 	p.logger.Printf("[DEBUG] state change: '%s'", s)
 	p.state.setState(s)
 }
@@ -898,74 +799,11 @@ func (p *Pbft) PushMessage(msg *MessageReq) {
 	p.PushMessageInternal(msg)
 }
 
-// Reads next message with discards from message queue based on current state, sequence and round
+// ReadMessageWithDiscards reads next message with discards from message queue based on current state, sequence and round
 func (p *Pbft) ReadMessageWithDiscards() (*MessageReq, []*MessageReq) {
 	return p.msgQueue.readMessageWithDiscards(p.getState(), p.state.view)
 }
 
 func (p *Pbft) IsVotingPowerEnabled() bool {
 	return p.config.VotingPower != nil
-}
-
-// --- package-level helper functions ---
-// exponentialTimeout calculates the timeout duration depending on the current round.
-// Round acts as an exponent when determining timeout (2^round).
-func exponentialTimeoutDuration(round uint64) time.Duration {
-	timeout := defaultTimeout
-	// limit exponent to be in range of maxTimeout (<=8) otherwise use maxTimeout
-	// this prevents calculating timeout that is greater than maxTimeout and
-	// possible overflow for calculating timeout for rounds >33 since duration is in nanoseconds stored in int64
-	if round <= maxTimeoutExponent {
-		timeout += time.Duration(1<<round) * time.Second
-	} else {
-		timeout = maxTimeout
-	}
-	return timeout
-}
-func exponentialTimeout(round uint64) <-chan time.Time {
-	return time.NewTimer(exponentialTimeoutDuration(round)).C
-}
-
-// MaxFaultyNodes calculate max faulty nodes in order to have Byzantine-fault tollerant system.
-// Formula explanation:
-// N -> number of nodes in PBFT
-// F -> number of faulty nodes
-// N = 3 * F + 1 => F = (N - 1) / 3
-//
-// PBFT tolerates 1 failure with 4 nodes
-// 4 = 3 * 1 + 1
-// To tolerate 2 failures, PBFT requires 7 nodes
-// 7 = 3 * 2 + 1
-// It should always take the floor of the result
-func MaxFaultyNodes(nodesCount int) int {
-	if nodesCount <= 0 {
-		return 0
-	}
-	return (nodesCount - 1) / 3
-}
-
-// QuorumSize calculates quorum size (namely the number of required messages of some type in order to proceed to the next state in PolyBFT state machine).
-// It is calculated by formula:
-// 2 * F + 1, where F denotes maximum count of faulty nodes in order to have Byzantine fault tollerant property satisfied.
-func QuorumSize(nodesCount int) int {
-	return 2*MaxFaultyNodes(nodesCount) + 1
-}
-
-func TotalVotingPower(mp map[NodeID]uint64) uint64 {
-	var totalVotingPower uint64
-	for _, v := range mp {
-		totalVotingPower += v
-	}
-	return totalVotingPower
-}
-
-func MaxFaultyVP(vp uint64) uint64 {
-	if vp == 0 {
-		return 0
-	}
-	return (vp - 1) / 3
-}
-
-func QuorumSizeVP(totalVP uint64) uint64 {
-	return 2*MaxFaultyVP(totalVP) + 1
 }

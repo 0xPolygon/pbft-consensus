@@ -63,14 +63,14 @@ func TestMsgQueue_RoundChangeState(t *testing.T) {
 }
 
 func Test_msgToState(t *testing.T) {
-	expectedResult := map[MsgType]PbftState{
+	expectedResult := map[MsgType]State{
 		MessageReq_RoundChange: RoundChangeState,
 		MessageReq_Preprepare:  AcceptState,
 		MessageReq_Prepare:     ValidateState,
 		MessageReq_Commit:      ValidateState,
 	}
-	for msgType, pbftState := range expectedResult {
-		assert.Equal(t, pbftState, msgToState(msgType))
+	for msgType, st := range expectedResult {
+		assert.Equal(t, st, msgToState(msgType))
 	}
 }
 

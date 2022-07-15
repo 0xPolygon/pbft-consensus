@@ -29,7 +29,7 @@ func TestE2E_NodeDrop(t *testing.T) {
 	assert.NoError(t, err)
 
 	// sync dropped node by starting it again
-	c.StartNode("ptr_0")
+	c.startNode("ptr_0")
 	err = c.WaitForHeight(10, 15*time.Second)
 	assert.NoError(t, err)
 
@@ -58,11 +58,11 @@ func TestE2E_BulkNodeDrop(t *testing.T) {
 	for _, node := range dropNodes {
 		c.StopNode(node)
 	}
-	c.IsStuck(15*time.Second, dropNodes)
+	c.isStuck(15*time.Second, dropNodes)
 
 	// restart dropped nodes
 	for _, node := range dropNodes {
-		c.StartNode(node)
+		c.startNode(node)
 	}
 	err = c.WaitForHeight(5, 15*time.Second)
 	assert.NoError(t, err)

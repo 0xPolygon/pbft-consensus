@@ -947,7 +947,7 @@ func (m *mockPbft) setProposal(p *Proposal) {
 }
 
 type expectResult struct {
-	state    PbftState
+	state    State
 	sequence uint64
 	round    uint64
 	locked   bool

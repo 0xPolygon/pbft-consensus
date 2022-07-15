@@ -1,18 +1,15 @@
 package replay
 
 import (
-	"log"
-	"time"
-
 	"github.com/0xPolygon/pbft-consensus"
-	"github.com/0xPolygon/pbft-consensus/e2e"
+	"github.com/0xPolygon/pbft-consensus/e2e/helper"
 )
 
 const (
 	FileName = "messages"
 )
 
-// MessagesMiddleware is a struct that implements ReplayNotifier interface
+// MessagesMiddleware is a struct that implements Notifier interface
 type MessagesMiddleware struct {
 	messagePersister *messagePersister
 	messageReader    *MessageReader
@@ -58,7 +55,7 @@ func (r *MessagesMiddleware) ReadNextMessage(p *pbft.Pbft) (*pbft.MessageReq, []
 	msg, discards := p.ReadMessageWithDiscards()
 
 	if r.messageReader != nil && msg != nil {
-		if isTimeoutMessage(msg) {
+		if helper.IsTimeoutMessage(msg) {
 			return nil, nil
 		} else {
 			r.messageReader.checkIfDoneWithExecution(p.GetValidatorId(), msg)
@@ -71,35 +68,4 @@ func (r *MessagesMiddleware) ReadNextMessage(p *pbft.Pbft) (*pbft.MessageReq, []
 // CloseFile closes file created by the ReplayMessagesHandler if it is open
 func (r *MessagesMiddleware) CloseFile() error {
 	return r.messagePersister.closeFile()
-}
-
-// Backend implements the IntegrationBackend interface and implements its own BuildProposal method for replay
-type Backend struct {
-	e2e.Fsm
-	messageReader *MessageReader
-}
-
-// NewBackend is the constructor of Backend
-func NewBackend(messageReader *MessageReader) *Backend {
-	return &Backend{
-		messageReader: messageReader,
-	}
-}
-
-// BuildProposal builds the next proposal. If it has a preprepare message for given height in .flow file it will take the proposal from file, otherwise it will generate a new one
-func (f *Backend) BuildProposal() (*pbft.Proposal, error) {
-	var data []byte
-	sequence := f.Height()
-	if prePrepareMessage, exists := f.messageReader.prePrepareMessages[sequence]; exists && prePrepareMessage != nil {
-		data = prePrepareMessage.Proposal
-	} else {
-		log.Printf("[WARNING] Could not find PRE-PREPARE message for sequence: %v", sequence)
-		data = e2e.GenerateProposal()
-	}
-
-	return &pbft.Proposal{
-		Data: data,
-		Time: time.Now().Add(1 * time.Second),
-		Hash: e2e.Hash(data),
-	}, nil
 }

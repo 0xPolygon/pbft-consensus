@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	"github.com/0xPolygon/pbft-consensus"
-	"github.com/0xPolygon/pbft-consensus/e2e"
+	"github.com/0xPolygon/pbft-consensus/e2e/helper"
 )
 
 const (
@@ -20,6 +20,12 @@ const (
 type sequenceMessages struct {
 	sequence uint64
 	messages []*pbft.MessageReq
+}
+
+// Node represents a behavior of a cluster node
+type Node interface {
+	GetName() string
+	PushMessageInternal(message *pbft.MessageReq)
 }
 
 // MessageReader encapsulates logic for reading messages from flow file
@@ -88,9 +94,7 @@ func (r *MessageReader) ReadNodeMetaData() ([]string, error) {
 }
 
 // ReadMessages reads messages from open .flow file and pushes them to appropriate nodes
-func (r *MessageReader) ReadMessages(cluster *e2e.Cluster) {
-	nodes := cluster.GetNodesMap()
-
+func (r *MessageReader) ReadMessages(nodes map[string]Node) {
 	nodesCount := len(nodes)
 	r.nodesDoneWithExecution = make(map[pbft.NodeID]bool, nodesCount)
 	r.lastSequenceMessages = make(map[pbft.NodeID]*sequenceMessages, nodesCount)
@@ -119,7 +123,7 @@ LOOP:
 					node.PushMessageInternal(message.Message)
 					nodeMessages[message.To][message.Message.View.Sequence] = append(nodeMessages[message.To][message.Message.View.Sequence], message.Message)
 
-					if !isTimeoutMessage(message.Message) && message.Message.Type == pbft.MessageReq_Preprepare {
+					if !helper.IsTimeoutMessage(message.Message) && message.Message.Type == pbft.MessageReq_Preprepare {
 						if _, isPrePrepareAdded := r.prePrepareMessages[message.Message.View.Sequence]; !isPrePrepareAdded {
 							r.prePrepareMessages[message.Message.View.Sequence] = message.Message
 						}
@@ -145,6 +149,12 @@ LOOP:
 			break LOOP
 		}
 	}
+}
+
+// GetPrePrepareMessages reads messages from .flow file in chunks
+func (r *MessageReader) GetPrePrepareMessages(sequence uint64) (*pbft.MessageReq, bool) {
+	msg, ok := r.prePrepareMessages[sequence]
+	return msg, ok
 }
 
 // startChunkReading reads messages from .flow file in chunks
