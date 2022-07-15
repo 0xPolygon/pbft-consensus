@@ -1,101 +1,10 @@
 package pbft
 
 import (
-	"bytes"
 	"fmt"
 	"sync/atomic"
 	"time"
 )
-
-type MsgType int32
-
-const (
-	MessageReq_RoundChange MsgType = 0
-	MessageReq_Preprepare  MsgType = 1
-	MessageReq_Commit      MsgType = 2
-	MessageReq_Prepare     MsgType = 3
-)
-
-func (m MsgType) String() string {
-	switch m {
-	case MessageReq_RoundChange:
-		return "RoundChange"
-	case MessageReq_Preprepare:
-		return "Preprepare"
-	case MessageReq_Commit:
-		return "Commit"
-	case MessageReq_Prepare:
-		return "Prepare"
-	default:
-		panic(fmt.Sprintf("BUG: Bad msgtype %d", m))
-	}
-}
-
-type MessageReq struct {
-	// type is the type of the message
-	Type MsgType `json:"type"`
-
-	// from is the address of the sender
-	From NodeID `json:"from"`
-
-	// seal is the committed seal for the proposal (only for commit messages)
-	Seal []byte `json:"seal"`
-
-	// view is the view assigned to the message
-	View *View `json:"view"`
-
-	// hash of the proposal
-	Hash []byte `json:"hash"`
-
-	// proposal is the arbitrary data proposal (only for preprepare messages)
-	Proposal []byte `json:"proposal"`
-}
-
-func (m MessageReq) String() string {
-	return fmt.Sprintf("message - type: %s from: %s, view: %v, proposal: %v, hash: %v, seal: %v", m.Type, m.From, m.View, m.Proposal, m.Hash, m.Seal)
-}
-
-func (m *MessageReq) Validate() error {
-	// Hash field has to exist for state != RoundStateChange
-	if m.Type != MessageReq_RoundChange {
-		if m.Hash == nil {
-			return fmt.Errorf("hash is empty for type %s", m.Type.String())
-		}
-	}
-
-	// TODO
-	return nil
-}
-
-func (m *MessageReq) SetProposal(proposal []byte) {
-	m.Proposal = append([]byte{}, proposal...)
-}
-
-func (m *MessageReq) Copy() *MessageReq {
-	mm := new(MessageReq)
-	*mm = *m
-	if m.View != nil {
-		mm.View = m.View.Copy()
-	}
-	if m.Proposal != nil {
-		mm.SetProposal(m.Proposal)
-	}
-	if m.Seal != nil {
-		mm.Seal = append([]byte{}, m.Seal...)
-	}
-	return mm
-}
-
-// Equal compares if two messages are equal
-func (m *MessageReq) Equal(other *MessageReq) bool {
-	return other != nil &&
-		m.Type == other.Type && m.From == other.From &&
-		bytes.Equal(m.Proposal, other.Proposal) &&
-		bytes.Equal(m.Hash, other.Hash) &&
-		bytes.Equal(m.Seal, other.Seal) &&
-		m.View.Round == other.View.Round &&
-		m.View.Sequence == other.View.Sequence
-}
 
 type View struct {
 	// round is the current round/height being finalized
@@ -103,6 +12,13 @@ type View struct {
 
 	// Sequence is a sequence number inside the round
 	Sequence uint64 `json:"sequence"`
+}
+
+func ViewMsg(sequence, round uint64) *View {
+	return &View{
+		Round:    round,
+		Sequence: sequence,
+	}
 }
 
 func (v *View) Copy() *View {
@@ -113,13 +29,6 @@ func (v *View) Copy() *View {
 
 func (v *View) String() string {
 	return fmt.Sprintf("(Sequence=%d, Round=%d)", v.Sequence, v.Round)
-}
-
-func ViewMsg(sequence, round uint64) *View {
-	return &View{
-		Round:    round,
-		Sequence: sequence,
-	}
 }
 
 type NodeID string
@@ -153,32 +62,6 @@ func (i PbftState) String() string {
 		return "DoneState"
 	}
 	panic(fmt.Sprintf("BUG: Pbft state not found %d", i))
-}
-
-type Proposal struct {
-	// Data is an arbitrary set of data to approve in consensus
-	Data []byte
-
-	// Time is the time to create the proposal
-	Time time.Time
-
-	// Hash is the digest of the data to seal
-	Hash []byte
-}
-
-// Equal compares whether two proposals have the same hash
-func (p *Proposal) Equal(pp *Proposal) bool {
-	return bytes.Equal(p.Hash, pp.Hash)
-}
-
-// Copy makes a copy of the Proposal
-func (p *Proposal) Copy() *Proposal {
-	pp := new(Proposal)
-	*pp = *p
-
-	pp.Data = append([]byte{}, p.Data...)
-	pp.Hash = append([]byte{}, p.Hash...)
-	return pp
 }
 
 type CommittedSeal struct {
@@ -392,6 +275,7 @@ func (c *currentState) numCommitted() int {
 func (c *currentState) GetCurrentRound() uint64 {
 	return atomic.LoadUint64(&c.view.Round)
 }
+
 func (c *currentState) SetCurrentRound(round uint64) {
 	atomic.StoreUint64(&c.view.Round, round)
 }
@@ -402,30 +286,4 @@ func (c *currentState) calculateMessagesVotingPower(mp map[NodeID]*MessageReq, v
 		vp += votingPower[i]
 	}
 	return vp
-}
-
-type ValidatorSet interface {
-	CalcProposer(round uint64) NodeID
-	Includes(id NodeID) bool
-	Len() int
-}
-
-// StateNotifier enables custom logic encapsulation related to internal triggers within PBFT state machine (namely receiving timeouts).
-type StateNotifier interface {
-	// HandleTimeout notifies that a timeout occurred while getting next message
-	HandleTimeout(to NodeID, msgType MsgType, view *View)
-	// ReadNextMessage reads the next message from message queue of the state machine
-	ReadNextMessage(p *Pbft) (*MessageReq, []*MessageReq)
-}
-
-// DefaultStateNotifier is a null object implementation of StateNotifier interface
-type DefaultStateNotifier struct {
-}
-
-// HandleTimeout implements StateNotifier interface
-func (d *DefaultStateNotifier) HandleTimeout(to NodeID, msgType MsgType, view *View) {}
-
-// ReadNextMessage is an implementation of StateNotifier interface
-func (d *DefaultStateNotifier) ReadNextMessage(p *Pbft) (*MessageReq, []*MessageReq) {
-	return p.ReadMessageWithDiscards()
 }

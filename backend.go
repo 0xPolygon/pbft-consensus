@@ -1,5 +1,13 @@
 package pbft
 
+// ValidatorSet represents the validator set bahavior
+type ValidatorSet interface {
+	CalcProposer(round uint64) NodeID
+	Includes(id NodeID) bool
+	Len() int
+}
+
+// Backend represents the backend behavior
 type Backend interface {
 	// BuildProposal builds a proposal for the current round (used if proposer)
 	BuildProposal() (*Proposal, error)

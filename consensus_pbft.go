@@ -127,6 +127,14 @@ func (p *Pbft) Run(ctx context.Context) {
 	}
 }
 
+func (p *Pbft) SetInitialState(ctx context.Context) {
+	p.ctx = ctx
+
+	// the iteration always starts with the AcceptState.
+	// AcceptState stages will reset the rest of the message queues.
+	p.setState(AcceptState)
+}
+
 func (p *Pbft) emitStats() {
 	if p.config.StatsCallback != nil {
 		p.config.StatsCallback(p.stats.Snapshot())
@@ -135,13 +143,6 @@ func (p *Pbft) emitStats() {
 	}
 }
 
-func (p *Pbft) SetInitialState(ctx context.Context) {
-	p.ctx = ctx
-
-	// the iteration always starts with the AcceptState.
-	// AcceptState stages will reset the rest of the message queues.
-	p.setState(AcceptState)
-}
 func (p *Pbft) RunCycle(ctx context.Context) {
 	p.runCycle(ctx)
 }
@@ -763,23 +764,4 @@ func (p *Pbft) ReadMessageWithDiscards() (*MessageReq, []*MessageReq) {
 
 func (p *Pbft) IsVotingPowerEnabled() bool {
 	return p.config.VotingPower != nil
-}
-
-func TotalVotingPower(mp map[NodeID]uint64) uint64 {
-	var totalVotingPower uint64
-	for _, v := range mp {
-		totalVotingPower += v
-	}
-	return totalVotingPower
-}
-
-func MaxFaultyVP(vp uint64) uint64 {
-	if vp == 0 {
-		return 0
-	}
-	return (vp - 1) / 3
-}
-
-func QuorumSizeVP(totalVP uint64) uint64 {
-	return 2*MaxFaultyVP(totalVP) + 1
 }
