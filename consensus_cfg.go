@@ -22,7 +22,7 @@ type StatsCallback func(stats.Stats)
 
 type ConfigOption func(*Config)
 
-func WithLogger(l *log.Logger) ConfigOption {
+func WithLogger(l Logger) ConfigOption {
 	return func(c *Config) {
 		c.Logger = l
 	}
@@ -68,7 +68,7 @@ type Config struct {
 	Timeout time.Duration
 
 	// Logger is the logger to output info
-	Logger *log.Logger
+	Logger Logger
 
 	// Tracer is the OpenTelemetry tracer to log traces
 	Tracer trace.Tracer

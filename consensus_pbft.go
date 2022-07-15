@@ -4,16 +4,20 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"log"
 	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
-
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/0xPolygon/pbft-consensus/stats"
 )
+
+// Logger represents logger behavior
+type Logger interface {
+	Printf(format string, args ...interface{})
+	Print(args ...interface{})
+}
 
 // Transport is a generic interface for a gossip transport protocol
 type Transport interface {
@@ -30,7 +34,7 @@ type SignKey interface {
 // Pbft represents the PBFT consensus mechanism object
 type Pbft struct {
 	// Output logger
-	logger *log.Logger
+	logger Logger
 
 	// Config is the configuration of the consensus
 	config *Config
