@@ -101,6 +101,7 @@ func (c *Config) ApplyOps(opts ...ConfigOption) {
 	}
 }
 
+// exponentialTimeout is the default RoundTimeout function
 func exponentialTimeout(round uint64) <-chan time.Time {
 	return time.NewTimer(exponentialTimeoutDuration(round)).C
 }
@@ -118,5 +119,18 @@ func exponentialTimeoutDuration(round uint64) time.Duration {
 	} else {
 		timeout = maxTimeout
 	}
+
 	return timeout
+}
+
+// DefaultStateNotifier is a null object implementation of StateNotifier interface
+type DefaultStateNotifier struct {
+}
+
+// HandleTimeout implements StateNotifier interface
+func (d *DefaultStateNotifier) HandleTimeout(NodeID, MsgType, *View) {}
+
+// ReadNextMessage is an implementation of StateNotifier interface
+func (d *DefaultStateNotifier) ReadNextMessage(p *Pbft) (*MessageReq, []*MessageReq) {
+	return p.ReadMessageWithDiscards()
 }

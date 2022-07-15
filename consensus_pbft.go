@@ -13,6 +13,39 @@ import (
 	"github.com/0xPolygon/pbft-consensus/stats"
 )
 
+type NodeID string
+
+type PbftState uint32
+
+// Define the states in PBFT
+const (
+	AcceptState PbftState = iota
+	RoundChangeState
+	ValidateState
+	CommitState
+	SyncState
+	DoneState
+)
+
+// String returns the string representation of the passed in state
+func (i PbftState) String() string {
+	switch i {
+	case AcceptState:
+		return "AcceptState"
+	case RoundChangeState:
+		return "RoundChangeState"
+	case ValidateState:
+		return "ValidateState"
+	case CommitState:
+		return "CommitState"
+	case SyncState:
+		return "SyncState"
+	case DoneState:
+		return "DoneState"
+	}
+	panic(fmt.Sprintf("BUG: Pbft state not found %d", i))
+}
+
 // Logger represents logger behavior
 type Logger interface {
 	Printf(format string, args ...interface{})
@@ -29,6 +62,23 @@ type Transport interface {
 type SignKey interface {
 	NodeID() NodeID
 	Sign(b []byte) ([]byte, error)
+}
+
+// StateNotifier enables custom logic encapsulation related to internal triggers within PBFT state machine (namely receiving timeouts).
+type StateNotifier interface {
+	// HandleTimeout notifies that a timeout occurred while getting next message
+	HandleTimeout(to NodeID, msgType MsgType, view *View)
+
+	// ReadNextMessage reads the next message from message queue of the state machine
+	ReadNextMessage(p *Pbft) (*MessageReq, []*MessageReq)
+}
+
+type CommittedSeal struct {
+	// Signature value
+	Signature []byte
+
+	// Node that signed
+	NodeID NodeID
 }
 
 // SealedProposal represents the sealed proposal model
@@ -58,7 +108,7 @@ type Pbft struct {
 	backend Backend
 
 	// state is the reference to the current state machine
-	state *currentState
+	state *state
 
 	// validator is the signing key for this instance
 	validator SignKey
