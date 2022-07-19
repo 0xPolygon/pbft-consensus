@@ -5,6 +5,7 @@ import "github.com/0xPolygon/pbft-consensus"
 type ValidatorSet struct {
 	Nodes        []pbft.NodeID
 	LastProposer pbft.NodeID
+	VP           map[pbft.NodeID]uint64
 }
 
 func (n *ValidatorSet) CalcProposer(round uint64) pbft.NodeID {
@@ -44,4 +45,9 @@ func (n *ValidatorSet) Includes(id pbft.NodeID) bool {
 
 func (n *ValidatorSet) Len() int {
 	return len(n.Nodes)
+}
+
+//voting power stub
+func (n *ValidatorSet) VotingPower() map[pbft.NodeID]uint64 {
+	return n.VP
 }

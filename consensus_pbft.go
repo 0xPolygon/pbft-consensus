@@ -141,7 +141,6 @@ func (p *Pbft) SetBackend(backend Backend) error {
 
 	// set the current set of validators
 	p.state.validators = p.backend.ValidatorSet()
-
 	return nil
 }
 
@@ -427,15 +426,15 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 				p.setState(CommitState)
 			}
 		} else {
-			totalVotingPower := TotalVotingPower(p.config.VotingPower)
+			totalVotingPower := TotalVotingPower(p.state.validators.VotingPower())
 			validVotingPower := QuorumSizeVP(totalVotingPower)
 
-			if p.state.calculateMessagesVotingPower(p.state.prepared, p.config.VotingPower) >= validVotingPower {
+			if p.state.calculateMessagesVotingPower(p.state.prepared, p.state.validators.VotingPower()) >= validVotingPower {
 				// we have received enough prepare messages
 				sendCommit(span)
 			}
 
-			if p.state.calculateMessagesVotingPower(p.state.committed, p.config.VotingPower) >= validVotingPower {
+			if p.state.calculateMessagesVotingPower(p.state.committed, p.state.validators.VotingPower()) >= validVotingPower {
 				// we have received enough commit messages
 				sendCommit(span)
 
@@ -618,9 +617,9 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 				}
 			}
 		} else {
-			totalVotingPower := TotalVotingPower(p.config.VotingPower)
+			totalVotingPower := TotalVotingPower(p.state.validators.VotingPower())
 			validVotingPower := QuorumSizeVP(totalVotingPower)
-			roundVotingPower := p.state.calculateMessagesVotingPower(p.state.roundMessages[msg.View.Round], p.config.VotingPower)
+			roundVotingPower := p.state.calculateMessagesVotingPower(p.state.roundMessages[msg.View.Round], p.state.validators.VotingPower())
 			if roundVotingPower >= validVotingPower {
 				// start a new round inmediatly
 				p.state.SetCurrentRound(msg.View.Round)
@@ -805,5 +804,5 @@ func (p *Pbft) ReadMessageWithDiscards() (*MessageReq, []*MessageReq) {
 }
 
 func (p *Pbft) IsVotingPowerEnabled() bool {
-	return p.config.VotingPower != nil
+	return len(p.state.validators.VotingPower()) > 0
 }

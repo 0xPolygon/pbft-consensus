@@ -281,7 +281,7 @@ func TestProperty_NodeDoubleSign(t *testing.T) {
 				return nil
 			},
 		}
-		cluster, timeoutsChan := generateCluster(numOfNodes, ft, votingPower)
+		cluster, timeoutsChan := generateCluster(numOfNodes, ft, nil)
 		for i := range cluster {
 			cluster[i].SetInitialState(context.Background())
 		}
@@ -461,7 +461,7 @@ func getMaxClusterRound(cluster []*pbft.Pbft) uint64 {
 	return maxRound
 }
 
-func generateNode(id int, transport *pbft.TransportStub, votingPower map[pbft.NodeID]uint64) (*pbft.Pbft, chan time.Time) {
+func generateNode(id int, transport *pbft.TransportStub) (*pbft.Pbft, chan time.Time) {
 	timeoutChan := make(chan time.Time)
 	node := pbft.New(pbft.ValidatorKeyMock(strconv.Itoa(id)), transport,
 		pbft.WithTracer(trace.NewNoopTracerProvider().Tracer("")),
@@ -469,7 +469,6 @@ func generateNode(id int, transport *pbft.TransportStub, votingPower map[pbft.No
 		pbft.WithRoundTimeout(func(_ uint64) <-chan time.Time {
 			return timeoutChan
 		}),
-		pbft.WithVotingPower(votingPower),
 	)
 
 	transport.Nodes = append(transport.Nodes, node)
@@ -485,13 +484,14 @@ func generateCluster(numOfNodes int, transport *pbft.TransportStub, votingPower 
 	}
 	cluster := make([]*pbft.Pbft, numOfNodes)
 	for i := 0; i < numOfNodes; i++ {
-		cluster[i], timeoutsChan[i] = generateNode(i, transport, votingPower)
+		cluster[i], timeoutsChan[i] = generateNode(i, transport)
 		nodes[i] = strconv.Itoa(i)
 	}
 
 	for _, nd := range cluster {
 		nd.SetBackend(&BackendFake{
-			nodes: nodes,
+			nodes:       nodes,
+			votingPower: votingPower,
 			insertFunc: func(proposal *pbft.SealedProposal) error {
 				return ip.Insert(*proposal)
 			},

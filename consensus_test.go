@@ -776,13 +776,12 @@ func TestRoundChange_PropertyMajorityOfVotingPowerAggreement(t *testing.T) {
 		numberOfNodes := rapid.IntRange(4, 100).Draw(t, "Generate number of nodes").(int)
 		stake := rapid.SliceOfN(rapid.Uint64Range(1, 1000000), numberOfNodes, numberOfNodes).Draw(t, "Generate stake").([]uint64)
 		randomValidator := rapid.IntRange(0, 99).Draw(t, "Get random validator").(int)
-		validators := make(ValStringStub, numberOfNodes)
-		votingPower := make(map[NodeID]uint64)
+		validators := NewValStringStub(make([]NodeID, numberOfNodes), nil)
 
 		var totalVotingPower uint64
-		for i := range validators {
-			validators[i] = NodeID(strconv.Itoa(i))
-			votingPower[validators[i]] = stake[i]
+		for i := range validators.Validators {
+			validators.Validators[i] = NodeID(strconv.Itoa(i))
+			validators.VP[validators.Validators[i]] = stake[i]
 			totalVotingPower += stake[i]
 		}
 		quorumVotingPower := QuorumSizeVP(totalVotingPower)
@@ -803,8 +802,7 @@ func TestRoundChange_PropertyMajorityOfVotingPowerAggreement(t *testing.T) {
 				return nil
 			},
 		}, WithLogger(log.New(io.Discard, "", log.LstdFlags)))
-		node.state.validators = &validators
-		node.config.VotingPower = votingPower
+		node.state.validators = validators
 		node.state.view = &View{
 			1,
 			1,

@@ -50,14 +50,6 @@ func WithNotifier(notifier StateNotifier) ConfigOption {
 	}
 }
 
-func WithVotingPower(vp map[NodeID]uint64) ConfigOption {
-	return func(c *Config) {
-		if len(vp) > 0 {
-			c.VotingPower = vp
-		}
-	}
-}
-
 type Config struct {
 	// ProposalTimeout is the time to wait for the proposal
 	// from the validator. It defaults to Timeout
@@ -80,8 +72,6 @@ type Config struct {
 	Notifier StateNotifier
 
 	StatsCallback StatsCallback
-
-	VotingPower map[NodeID]uint64
 }
 
 func DefaultConfig() *Config {

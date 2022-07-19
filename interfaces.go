@@ -5,6 +5,7 @@ type ValidatorSet interface {
 	CalcProposer(round uint64) NodeID
 	Includes(id NodeID) bool
 	Len() int
+	VotingPower() map[NodeID]uint64
 }
 
 // Logger represents logger behavior

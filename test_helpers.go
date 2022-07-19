@@ -28,7 +28,17 @@ func (ft *TransportStub) Gossip(msg *MessageReq) error {
 	return nil
 }
 
-type ValStringStub []NodeID
+func NewValStringStub(validatorSet []NodeID, vp map[NodeID]uint64) *ValStringStub {
+	return &ValStringStub{
+		Validators: validatorSet,
+		VP:         map[NodeID]uint64{},
+	}
+}
+
+type ValStringStub struct {
+	Validators []NodeID
+	VP         map[NodeID]uint64
+}
 
 func (v *ValStringStub) CalcProposer(round uint64) NodeID {
 	seed := uint64(0)
@@ -39,11 +49,11 @@ func (v *ValStringStub) CalcProposer(round uint64) NodeID {
 	seed = uint64(offset) + round
 	pick := seed % uint64(v.Len())
 
-	return (*v)[pick]
+	return v.Validators[pick]
 }
 
 func (v *ValStringStub) Index(id NodeID) int {
-	for i, currentId := range *v {
+	for i, currentId := range v.Validators {
 		if currentId == id {
 			return i
 		}
@@ -53,7 +63,7 @@ func (v *ValStringStub) Index(id NodeID) int {
 }
 
 func (v *ValStringStub) Includes(id NodeID) bool {
-	for _, currentId := range *v {
+	for _, currentId := range v.Validators {
 		if currentId == id {
 			return true
 		}
@@ -62,5 +72,8 @@ func (v *ValStringStub) Includes(id NodeID) bool {
 }
 
 func (v *ValStringStub) Len() int {
-	return len(*v)
+	return len(v.Validators)
+}
+func (v *ValStringStub) VotingPower() map[NodeID]uint64 {
+	return v.VP
 }

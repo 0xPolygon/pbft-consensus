@@ -454,6 +454,5 @@ func newMockValidatorSet(validatorIds []string) ValidatorSet {
 }
 
 func convertToMockValidatorSet(validatorIds []NodeID) ValidatorSet {
-	validatorSet := ValStringStub(validatorIds)
-	return &validatorSet
+	return NewValStringStub(validatorIds, nil)
 }

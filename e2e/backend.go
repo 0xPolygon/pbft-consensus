@@ -18,6 +18,7 @@ type IntegrationBackend interface {
 // BackendFake implements IntegrationBackend interface
 type BackendFake struct {
 	nodes           []string
+	votingPower     map[pbft.NodeID]uint64
 	height          uint64
 	lastProposer    pbft.NodeID
 	proposalAddTime time.Duration
@@ -79,6 +80,7 @@ func (bf *BackendFake) ValidatorSet() pbft.ValidatorSet {
 	return &ValidatorSet{
 		Nodes:        valsAsNode,
 		LastProposer: bf.lastProposer,
+		VP:           bf.votingPower,
 	}
 }
 
