@@ -61,11 +61,8 @@ func (c *Command) Run(args []string) int {
 	replayMessageHandler := replay.NewMessagesMiddlewareWithPersister()
 
 	rnnr := newRunner(c.numberOfNodes, replayMessageHandler)
-	if err = rnnr.run(c.duration); err != nil {
-		c.UI.Error(fmt.Sprintf("Error while running PolyBFT fuzz runner: '%s'\n", err))
-	} else {
-		c.UI.Info("PolyBFT fuzz runner is stopped.")
-	}
+	rnnr.run(c.duration)
+	c.UI.Info("PolyBFT fuzz runner is stopped.")
 
 	if err = replayMessageHandler.CloseFile(); err != nil {
 		c.UI.Error(fmt.Sprintf("Error while closing .flow file: '%s'\n", err))

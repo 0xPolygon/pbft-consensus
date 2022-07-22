@@ -339,6 +339,23 @@ func (c *Cluster) startNode(name string) {
 	c.nodes[name].Start()
 }
 
+// MaxFaultyNodes is a wrapper function which invokes MaxFaultyNodes on PBFT consensus instance of the first node in cluster
+func (c *Cluster) MaxFaultyNodes() (uint64, error) {
+	nodes := c.getNodes()
+	if len(nodes) == 0 {
+		return 0, errors.New("unable to determine max faulty nodes: cluster is empty")
+	}
+	return nodes[0].pbft.MaxFaultyNodes()
+}
+
+func (c *Cluster) QuorumSize() (uint64, error) {
+	nodes := c.getNodes()
+	if len(nodes) == 0 {
+		return 0, errors.New("unable to determine max faulty nodes: cluster is empty")
+	}
+	return nodes[0].pbft.MaxFaultyNodes()
+}
+
 func initTracer(name string) *sdktrace.TracerProvider {
 	ctx := context.Background()
 

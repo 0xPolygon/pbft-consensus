@@ -255,7 +255,8 @@ func TestProperty_NodeDoubleSign(t *testing.T) {
 		numOfNodes := rapid.IntRange(4, 7).Draw(t, "num of nodes").(int)
 		// sign different message to up to 1/2 of the nodes
 		maliciousMessagesToNodes := rapid.IntRange(0, numOfNodes/2).Draw(t, "malicious message to nodes").(int)
-		faultyNodes := rapid.IntRange(1, pbft.MaxFaultyNodes(numOfNodes)).Draw(t, "malicious nodes").(int)
+		metadata := pbft.NewConsensusMetadata(nil, uint(numOfNodes))
+		faultyNodes := rapid.IntRange(1, int(metadata.MaxFaultyNodes())).Draw(t, "malicious nodes").(int)
 		maliciousNodes := generateMaliciousProposers(faultyNodes)
 		votingPower := make(map[pbft.NodeID]uint64, numOfNodes)
 
@@ -355,13 +356,12 @@ func TestProperty_NodesWithMajorityOfVotingPowerCanAchiveAgreement(t *testing.T)
 	rapid.Check(t, func(t *rapid.T) {
 		numOfNodes := rapid.IntRange(4, 10).Draw(t, "num of nodes").(int)
 		stake := rapid.SliceOfN(rapid.Uint64Range(5, 10), numOfNodes, numOfNodes).Draw(t, "Generate stake").([]uint64)
-		var totalVotingPower uint64
 		votingPower := make(map[pbft.NodeID]uint64, numOfNodes)
 		for i := range stake {
 			votingPower[pbft.NodeID(strconv.Itoa(i))] = stake[i]
-			totalVotingPower += stake[i]
 		}
-		quorumVotingPower := pbft.QuorumSizeVP(totalVotingPower)
+		metadata := pbft.NewConsensusMetadata(&pbft.Config{VotingPower: votingPower}, uint(numOfNodes))
+		quorumVotingPower := metadata.QuorumSize()
 		connectionsList := rapid.SliceOfDistinct(rapid.IntRange(0, numOfNodes-1), func(v int) int {
 			return v
 		}).Filter(func(votes []int) bool {

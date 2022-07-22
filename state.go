@@ -88,19 +88,6 @@ func (s *state) setState(st State) {
 	atomic.StoreUint64(stateAddr, uint64(st))
 }
 
-// MaxFaultyNodes returns the maximum number of allowed faulty nodes (F), based on the current validator set
-func (s *state) MaxFaultyNodes() int {
-	return MaxFaultyNodes(s.validators.Len())
-}
-
-// NumValid returns the number of required messages
-func (s *state) NumValid() int {
-	// 2 * F + 1
-	// + 1 is up to the caller to add
-	// the current node tallying the messages will include its own message
-	return QuorumSize(s.validators.Len()) - 1
-}
-
 // getErr returns the current error, if any, and consumes it
 func (s *state) getErr() error {
 	err := s.err
@@ -109,8 +96,8 @@ func (s *state) getErr() error {
 	return err
 }
 
-func (s *state) maxRound() (maxRound uint64, found bool) {
-	num := s.MaxFaultyNodes() + 1
+func (s *state) maxRound(metadata ConsensusMetadata) (maxRound uint64, found bool) {
+	num := int(metadata.MaxFaultyNodes()) + 1
 
 	for currentRound, messages := range s.roundMessages {
 		if len(messages) < num {
@@ -225,12 +212,4 @@ func (s *state) GetPreviousRound() uint64 {
 func (s *state) SetCurrentRound(round uint64) {
 	atomic.StoreUint64(&s.previousRound, s.view.Round)
 	atomic.StoreUint64(&s.view.Round, round)
-}
-
-func (s *state) calculateMessagesVotingPower(mp map[NodeID]*MessageReq, votingPower map[NodeID]uint64) uint64 {
-	var vp uint64
-	for i := range mp {
-		vp += votingPower[i]
-	}
-	return vp
 }

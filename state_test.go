@@ -18,16 +18,6 @@ func init() {
 	mrand.Seed(time.Now().UnixNano())
 }
 
-// Generate predefined number of validator node ids.
-// Node id is generated with a given prefixNodeId, followed by underscore and an index.
-func generateValidatorNodes(nodesCount int, prefixNodeId string) []NodeID {
-	validatorNodeIds := []NodeID{}
-	for i := 0; i < nodesCount; i++ {
-		validatorNodeIds = append(validatorNodeIds, NodeID(fmt.Sprintf("%s_%d", prefixNodeId, i)))
-	}
-	return validatorNodeIds
-}
-
 // Helper function which enables creation of MessageReq.
 func createMessage(sender string, messageType MsgType, round ...uint64) *MessageReq {
 	seal := make([]byte, 2)
@@ -48,9 +38,9 @@ func createMessage(sender string, messageType MsgType, round ...uint64) *Message
 	return msg
 }
 
-func TestState_FaultyNodesCount(t *testing.T) {
+func TestNodesCountConsensusMetadata_MaxFaultyNodesCount(t *testing.T) {
 	cases := []struct {
-		TotalNodesCount, FaultyNodesCount int
+		TotalNodesCount, FaultyNodesCount uint
 	}{
 		{0, 0},
 		{1, 0},
@@ -67,16 +57,14 @@ func TestState_FaultyNodesCount(t *testing.T) {
 		{100, 33},
 	}
 	for _, c := range cases {
-		s := newState()
-		s.validators = convertToMockValidatorSet(generateValidatorNodes(c.TotalNodesCount, "validator"))
-
-		assert.Equal(t, c.FaultyNodesCount, s.MaxFaultyNodes())
+		metadata := &NodesCountConsensusMetadata{nodesCount: c.TotalNodesCount}
+		assert.Equal(t, c.FaultyNodesCount, uint(metadata.MaxFaultyNodes()))
 	}
 }
 
-func Test_QuorumSize(t *testing.T) {
+func TestNodesCountConsensusMetadata_QuorumSize(t *testing.T) {
 	cases := []struct {
-		TotalNodesCount, QuorumSize int
+		TotalNodesCount, QuorumSize uint64
 	}{
 		{1, 1},
 		{2, 1},
@@ -92,13 +80,15 @@ func Test_QuorumSize(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		assert.Equal(t, c.QuorumSize, QuorumSize(c.TotalNodesCount))
+		metadata := &NodesCountConsensusMetadata{nodesCount: uint(c.TotalNodesCount)}
+		assert.Equal(t, c.QuorumSize, metadata.QuorumSize())
 	}
 }
 
-func TestState_ValidNodesCount(t *testing.T) {
+func TestNodesCountConsensusMetadata_ValidNodesCount(t *testing.T) {
+
 	cases := []struct {
-		TotalNodesCount, ValidNodesCount int
+		TotalNodesCount, RequiredMsgsCount int
 	}{
 		{1, 0},
 		{2, 0},
@@ -113,10 +103,8 @@ func TestState_ValidNodesCount(t *testing.T) {
 		{100, 66},
 	}
 	for _, c := range cases {
-		s := newState()
-		s.validators = convertToMockValidatorSet(generateValidatorNodes(c.TotalNodesCount, "validator"))
-
-		assert.Equal(t, c.ValidNodesCount, s.NumValid())
+		metadata := &NodesCountConsensusMetadata{nodesCount: uint(c.TotalNodesCount)}
+		assert.Equal(t, c.RequiredMsgsCount, metadata.getRequiredMessagesCount())
 	}
 }
 
@@ -185,7 +173,7 @@ func TestState_MaxRound_Found(t *testing.T) {
 		}
 	}
 
-	maxRound, found := s.maxRound()
+	maxRound, found := s.maxRound(&NodesCountConsensusMetadata{nodesCount: uint(s.validators.Len())})
 	assert.Equal(t, uint64(5), maxRound)
 	assert.Equal(t, true, found)
 }
@@ -203,7 +191,8 @@ func TestState_MaxRound_NotFound(t *testing.T) {
 	// Send wrong message type from some validator, whereas roundMessages map is empty
 	s.addMessage(createMessage(validatorIds[0], MessageReq_Preprepare))
 
-	maxRound, found := s.maxRound()
+	metadata := &NodesCountConsensusMetadata{nodesCount: uint(s.validators.Len())}
+	maxRound, found := s.maxRound(metadata)
 	assert.Equal(t, maxRound, uint64(0))
 	assert.Equal(t, found, false)
 
@@ -211,7 +200,7 @@ func TestState_MaxRound_NotFound(t *testing.T) {
 	for round := range validatorIds {
 		if round%2 == 0 {
 			// Each even round should populate more than one "RoundChange" messages, but just enough that we don't reach census (max faulty nodes+1)
-			for i := 0; i < s.MaxFaultyNodes(); i++ {
+			for i := 0; i < int(metadata.MaxFaultyNodes()); i++ {
 				s.addMessage(createMessage(validatorIds[mrand.Intn(validatorsCount)], MessageReq_RoundChange, uint64(round)))
 			}
 		} else {
@@ -219,7 +208,7 @@ func TestState_MaxRound_NotFound(t *testing.T) {
 		}
 	}
 
-	maxRound, found = s.maxRound()
+	maxRound, found = s.maxRound(metadata)
 	assert.Equal(t, uint64(0), maxRound)
 	assert.Equal(t, false, found)
 }

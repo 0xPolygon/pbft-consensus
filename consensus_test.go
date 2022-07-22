@@ -779,13 +779,13 @@ func TestRoundChange_PropertyMajorityOfVotingPowerAggreement(t *testing.T) {
 		validators := make(ValStringStub, numberOfNodes)
 		votingPower := make(map[NodeID]uint64)
 
-		var totalVotingPower uint64
 		for i := range validators {
-			validators[i] = NodeID(strconv.Itoa(i))
-			votingPower[validators[i]] = stake[i]
-			totalVotingPower += stake[i]
+			nodeId := NodeID(strconv.Itoa(i))
+			validators[i] = nodeId
+			votingPower[nodeId] = stake[i]
 		}
-		quorumVotingPower := QuorumSizeVP(totalVotingPower)
+		metadata := NewConsensusMetadata(&Config{VotingPower: votingPower}, uint(numberOfNodes))
+		quorumVotingPower := metadata.QuorumSize()
 
 		maxNodeID := numberOfNodes - 1
 		votes := rapid.SliceOfDistinct(rapid.IntRange(0, maxNodeID), func(v int) int {
@@ -809,6 +809,7 @@ func TestRoundChange_PropertyMajorityOfVotingPowerAggreement(t *testing.T) {
 			1,
 			1,
 		}
+		node.metadata = metadata
 		for _, voterID := range votes {
 			node.PushMessage(&MessageReq{Type: MessageReq_RoundChange, From: NodeID(strconv.Itoa(voterID)), View: ViewMsg(1, 2)})
 		}

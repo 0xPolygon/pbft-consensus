@@ -3,6 +3,7 @@ package pbft
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -76,8 +77,11 @@ type Pbft struct {
 	// Output logger
 	logger Logger
 
-	// Config is the configuration of the consensus
+	// config is the configuration of the consensus
 	config *Config
+
+	// metadata encapsulates consensus metadata (such as quorum size calculation, max faulty nodes etc.)
+	metadata ConsensusMetadata
 
 	// inter is the interface with the runtime
 	backend Backend
@@ -144,6 +148,9 @@ func (p *Pbft) SetBackend(backend Backend) error {
 
 	// set the current set of validators
 	p.state.validators = p.backend.ValidatorSet()
+
+	// set consensus metadata based on provided configuration and validator set count
+	p.metadata = NewConsensusMetadata(p.config, uint(p.state.validators.Len()))
 
 	return nil
 }
@@ -417,35 +424,38 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 			panic(fmt.Errorf("BUG: Unexpected message type: %s in %s", msg.Type, p.getState()))
 		}
 
-		//if voting power is disabled - count number of votes
-		if !p.IsVotingPowerEnabled() {
-			if p.state.numPrepared() > p.state.NumValid() {
-				// we have received enough prepare messages
-				sendCommit(span)
+		switch consensusMetadata := p.metadata.(type) {
+		case *NodesCountConsensusMetadata:
+			{
+				if p.state.numPrepared() > consensusMetadata.getRequiredMessagesCount() {
+					// we have received enough prepare messages
+					sendCommit(span)
+				}
+
+				if p.state.numCommitted() > consensusMetadata.getRequiredMessagesCount() {
+					// we have received enough commit messages
+					sendCommit(span)
+
+					// change to commit state just to get out of the loop
+					p.setState(CommitState)
+				}
 			}
 
-			if p.state.numCommitted() > p.state.NumValid() {
-				// we have received enough commit messages
-				sendCommit(span)
+		case *VotingPowerConsensusMetadata:
+			{
+				requiredVotingPower := consensusMetadata.QuorumSize()
+				if consensusMetadata.calculateMessagesVotingPower(p.state.prepared) >= requiredVotingPower {
+					// we have received enough prepare messages
+					sendCommit(span)
+				}
 
-				// change to commit state just to get out of the loop
-				p.setState(CommitState)
-			}
-		} else {
-			totalVotingPower := TotalVotingPower(p.config.VotingPower)
-			validVotingPower := QuorumSizeVP(totalVotingPower)
+				if consensusMetadata.calculateMessagesVotingPower(p.state.committed) >= requiredVotingPower {
+					// we have received enough commit messages
+					sendCommit(span)
 
-			if p.state.calculateMessagesVotingPower(p.state.prepared, p.config.VotingPower) >= validVotingPower {
-				// we have received enough prepare messages
-				sendCommit(span)
-			}
-
-			if p.state.calculateMessagesVotingPower(p.state.committed, p.config.VotingPower) >= validVotingPower {
-				// we have received enough commit messages
-				sendCommit(span)
-
-				// change to commit state just to get out of the loop
-				p.setState(CommitState)
+					// change to commit state just to get out of the loop
+					p.setState(CommitState)
+				}
 			}
 		}
 
@@ -577,7 +587,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 	} else {
 		// otherwise, it is due to a timeout in any stage
 		// First, we try to sync up with any max round already available
-		if maxRound, ok := p.state.maxRound(); ok {
+		if maxRound, ok := p.state.maxRound(p.metadata); ok {
 			p.logger.Printf("[DEBUG] round change, max round=%d", maxRound)
 			sendRoundChange(maxRound)
 		} else {
@@ -609,32 +619,36 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 		// we only expect RoundChange messages right now
 		num := p.state.AddRoundMessage(msg)
 
-		//if voting power is disabled - count number of votes
-		if !p.IsVotingPowerEnabled() {
-			if num == p.state.NumValid() {
-				// start a new round inmediatly
-				p.state.SetCurrentRound(msg.View.Round)
-				p.setState(AcceptState)
-			} else if num == p.state.MaxFaultyNodes()+1 {
-				// weak certificate, try to catch up if our round number is smaller
-				if p.state.GetCurrentRound() < msg.View.Round {
-					// update timer
-					sendRoundChange(msg.View.Round)
+		switch consensusMetadata := p.metadata.(type) {
+		case *NodesCountConsensusMetadata:
+			{
+				if num == consensusMetadata.getRequiredMessagesCount() {
+					// start a new round immediately
+					p.state.SetCurrentRound(msg.View.Round)
+					p.setState(AcceptState)
+				} else if num == int(consensusMetadata.MaxFaultyNodes()+1) {
+					// weak certificate, try to catch up if our round number is smaller
+					if p.state.GetCurrentRound() < msg.View.Round {
+						// update timer
+						sendRoundChange(msg.View.Round)
+					}
 				}
 			}
-		} else {
-			totalVotingPower := TotalVotingPower(p.config.VotingPower)
-			validVotingPower := QuorumSizeVP(totalVotingPower)
-			roundVotingPower := p.state.calculateMessagesVotingPower(p.state.roundMessages[msg.View.Round], p.config.VotingPower)
-			if roundVotingPower >= validVotingPower {
-				// start a new round inmediatly
-				p.state.SetCurrentRound(msg.View.Round)
-				p.setState(AcceptState)
-			} else if roundVotingPower >= MaxFaultyVP(totalVotingPower)+1 {
-				// weak certificate, try to catch up if our round number is smaller
-				if p.state.GetCurrentRound() < msg.View.Round {
-					// update timer
-					sendRoundChange(msg.View.Round)
+
+		case *VotingPowerConsensusMetadata:
+			{
+				requiredVotingPower := consensusMetadata.QuorumSize()
+				roundVotingPower := consensusMetadata.calculateMessagesVotingPower(p.state.roundMessages[msg.View.Round])
+				if roundVotingPower >= requiredVotingPower {
+					// start a new round immediately
+					p.state.SetCurrentRound(msg.View.Round)
+					p.setState(AcceptState)
+				} else if roundVotingPower >= consensusMetadata.MaxFaultyNodes()+1 {
+					// weak certificate, try to catch up if our round number is smaller
+					if p.state.GetCurrentRound() < msg.View.Round {
+						// update timer
+						sendRoundChange(msg.View.Round)
+					}
 				}
 			}
 		}
@@ -809,6 +823,18 @@ func (p *Pbft) ReadMessageWithDiscards() (*MessageReq, []*MessageReq) {
 	return p.msgQueue.readMessageWithDiscards(p.getState(), p.state.view)
 }
 
-func (p *Pbft) IsVotingPowerEnabled() bool {
-	return p.config.VotingPower != nil
+// MaxFaultyNodes is a wrapper function around ConsensusMetadata.MaxFaultyNodes
+func (p *Pbft) MaxFaultyNodes() (uint64, error) {
+	if p.metadata == nil {
+		return 0, errors.New("unable to determine max faulty nodes: consensus metadata is not defined")
+	}
+	return p.metadata.MaxFaultyNodes(), nil
+}
+
+// QuorumSize is a wrapper function around ConsensusMetadata.QuorumSize
+func (p *Pbft) QuorumSize() (uint64, error) {
+	if p.metadata == nil {
+		return 0, errors.New("unable to determine quorum size: consensus metadata is not defined")
+	}
+	return p.metadata.QuorumSize(), nil
 }

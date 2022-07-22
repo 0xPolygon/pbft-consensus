@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/0xPolygon/pbft-consensus"
 	"github.com/0xPolygon/pbft-consensus/e2e"
 	"github.com/0xPolygon/pbft-consensus/e2e/helper"
 	"github.com/0xPolygon/pbft-consensus/e2e/notifier"
@@ -38,7 +37,7 @@ func newRunner(initialNodesCount uint, replayMessageNotifier notifier.Notifier) 
 	}
 }
 
-func (r *runner) run(d time.Duration) error {
+func (r *runner) run(d time.Duration) {
 	r.cluster.Start()
 	defer r.cluster.Stop()
 	done := time.After(d)
@@ -64,7 +63,7 @@ func (r *runner) run(d time.Duration) error {
 
 			case <-applyTicker.C:
 				log.Printf("[RUNNER] Applying action.")
-				actionIndex := rand.Intn(len(r.availableActions))
+				actionIndex := rand.Intn(len(r.availableActions)) //nolint:golint,gosec
 				action := r.availableActions[actionIndex]
 				if action.CanApply(r.cluster) {
 					revertFn := action.Apply(r.cluster)
@@ -78,7 +77,7 @@ func (r *runner) run(d time.Duration) error {
 				}
 
 				if helper.ShouldApply(revertProbabilityThreshold) {
-					revertIndex := rand.Intn(len(reverts))
+					revertIndex := rand.Intn(len(reverts)) //nolint:golint,gosec
 					revertFn := reverts[revertIndex]
 					reverts = append(reverts[:revertIndex], reverts[revertIndex+1:]...)
 					revertFn()
@@ -92,8 +91,6 @@ func (r *runner) run(d time.Duration) error {
 	}()
 
 	r.wg.Wait()
-
-	return nil
 }
 
 // validateNodes checks if there is progress on the node height after the scenario run
@@ -121,7 +118,6 @@ func validateNodes(c *e2e.Cluster) {
 
 // validateCluster checks if there is enough running nodes that can make consensus
 func validateCluster(c *e2e.Cluster) ([]string, bool) {
-	totalNodesCount := len(c.Nodes())
 	var runningNodes []string
 	var partitions map[string][]string
 	// running nodes in majority partition
@@ -152,5 +148,13 @@ func validateCluster(c *e2e.Cluster) ([]string, bool) {
 			runningNodes = append(runningNodes, n.GetName())
 		}
 	}
-	return runningNodes, len(runningNodes) >= pbft.QuorumSize(totalNodesCount)
+	quorumSize, err := c.QuorumSize()
+	var enoughRunningNodes bool
+	if err != nil {
+		enoughRunningNodes = false
+		log.Printf("[ERROR] failed to validate cluster. Error: %v", err)
+	} else {
+		enoughRunningNodes = len(runningNodes) >= int(quorumSize)
+	}
+	return runningNodes, enoughRunningNodes
 }
