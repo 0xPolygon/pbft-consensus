@@ -784,7 +784,7 @@ func TestRoundChange_PropertyMajorityOfVotingPowerAggreement(t *testing.T) {
 			validators[i] = nodeId
 			votingPower[nodeId] = stake[i]
 		}
-		metadata := NewConsensusMetadata(&Config{VotingPower: votingPower}, uint(numberOfNodes))
+		metadata := NewVotingMetadata(&Config{VotingPower: votingPower}, uint(numberOfNodes))
 		quorumVotingPower := metadata.QuorumSize()
 
 		maxNodeID := numberOfNodes - 1
@@ -809,7 +809,7 @@ func TestRoundChange_PropertyMajorityOfVotingPowerAggreement(t *testing.T) {
 			1,
 			1,
 		}
-		node.metadata = metadata
+		node.votingMetadata = metadata
 		for _, voterID := range votes {
 			node.PushMessage(&MessageReq{Type: MessageReq_RoundChange, From: NodeID(strconv.Itoa(voterID)), View: ViewMsg(1, 2)})
 		}

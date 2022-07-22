@@ -38,7 +38,7 @@ func createMessage(sender string, messageType MsgType, round ...uint64) *Message
 	return msg
 }
 
-func TestNodesCountConsensusMetadata_MaxFaultyNodesCount(t *testing.T) {
+func TestNodesCountVotingMetadata_MaxFaultyNodesCount(t *testing.T) {
 	cases := []struct {
 		TotalNodesCount, FaultyNodesCount uint
 	}{
@@ -57,12 +57,12 @@ func TestNodesCountConsensusMetadata_MaxFaultyNodesCount(t *testing.T) {
 		{100, 33},
 	}
 	for _, c := range cases {
-		metadata := &NodesCountConsensusMetadata{nodesCount: c.TotalNodesCount}
+		metadata := &NonWeightedVotingMetadata{nodesCount: c.TotalNodesCount}
 		assert.Equal(t, c.FaultyNodesCount, uint(metadata.MaxFaultyNodes()))
 	}
 }
 
-func TestNodesCountConsensusMetadata_QuorumSize(t *testing.T) {
+func TestNonWeightedVotingMetadata_QuorumSize(t *testing.T) {
 	cases := []struct {
 		TotalNodesCount, QuorumSize uint64
 	}{
@@ -80,12 +80,12 @@ func TestNodesCountConsensusMetadata_QuorumSize(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		metadata := &NodesCountConsensusMetadata{nodesCount: uint(c.TotalNodesCount)}
+		metadata := &NonWeightedVotingMetadata{nodesCount: uint(c.TotalNodesCount)}
 		assert.Equal(t, c.QuorumSize, metadata.QuorumSize())
 	}
 }
 
-func TestNodesCountConsensusMetadata_ValidNodesCount(t *testing.T) {
+func TestNonWeightedVotingMetadata_ValidNodesCount(t *testing.T) {
 
 	cases := []struct {
 		TotalNodesCount, RequiredMsgsCount int
@@ -103,7 +103,7 @@ func TestNodesCountConsensusMetadata_ValidNodesCount(t *testing.T) {
 		{100, 66},
 	}
 	for _, c := range cases {
-		metadata := &NodesCountConsensusMetadata{nodesCount: uint(c.TotalNodesCount)}
+		metadata := &NonWeightedVotingMetadata{nodesCount: uint(c.TotalNodesCount)}
 		assert.Equal(t, c.RequiredMsgsCount, metadata.getRequiredMessagesCount())
 	}
 }
@@ -173,7 +173,7 @@ func TestState_MaxRound_Found(t *testing.T) {
 		}
 	}
 
-	maxRound, found := s.maxRound(&NodesCountConsensusMetadata{nodesCount: uint(s.validators.Len())})
+	maxRound, found := s.maxRound(&NonWeightedVotingMetadata{nodesCount: uint(s.validators.Len())})
 	assert.Equal(t, uint64(5), maxRound)
 	assert.Equal(t, true, found)
 }
@@ -191,7 +191,7 @@ func TestState_MaxRound_NotFound(t *testing.T) {
 	// Send wrong message type from some validator, whereas roundMessages map is empty
 	s.addMessage(createMessage(validatorIds[0], MessageReq_Preprepare))
 
-	metadata := &NodesCountConsensusMetadata{nodesCount: uint(s.validators.Len())}
+	metadata := &NonWeightedVotingMetadata{nodesCount: uint(s.validators.Len())}
 	maxRound, found := s.maxRound(metadata)
 	assert.Equal(t, maxRound, uint64(0))
 	assert.Equal(t, found, false)

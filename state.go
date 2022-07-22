@@ -96,7 +96,7 @@ func (s *state) getErr() error {
 	return err
 }
 
-func (s *state) maxRound(metadata ConsensusMetadata) (maxRound uint64, found bool) {
+func (s *state) maxRound(metadata VotingMetadata) (maxRound uint64, found bool) {
 	num := int(metadata.MaxFaultyNodes()) + 1
 
 	for currentRound, messages := range s.roundMessages {
