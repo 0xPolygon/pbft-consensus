@@ -134,3 +134,47 @@ func (d *DefaultStateNotifier) HandleTimeout(NodeID, MsgType, *View) {}
 func (d *DefaultStateNotifier) ReadNextMessage(p *Pbft) (*MessageReq, []*MessageReq) {
 	return p.ReadMessageWithDiscards()
 }
+
+type ConsensusMetadata interface {
+	// QuorumSize returns PBFT message count needed to perform a single PBFT state transition
+	QuorumSize() uint64
+	// MaxFaultyNodes returns maximum number of faulty nodes,
+	// in order to meet practical Byzantine conditions
+	MaxFaultyNodes() uint64
+}
+
+type NodesCountConsensusMetadata struct {
+	nodesCount uint
+}
+
+func (n *NodesCountConsensusMetadata) QuorumSize() uint64 {
+	return 2*n.MaxFaultyNodes() + 1
+}
+
+func (n *NodesCountConsensusMetadata) MaxFaultyNodes() uint64 {
+	return uint64((n.nodesCount - 1) / 3)
+}
+
+type VotingPowerConsensusMetadata struct {
+	votingPowers map[NodeID]uint64
+}
+
+func (v *VotingPowerConsensusMetadata) QuorumSize() uint64 {
+	return 2*v.MaxFaultyNodes() + 1
+}
+
+func (v *VotingPowerConsensusMetadata) MaxFaultyNodes() uint64 {
+	votingPower := v.TotalVotingPower()
+	if votingPower == 0 {
+		return 0
+	}
+	return (votingPower - 1) / 3
+}
+
+func (v *VotingPowerConsensusMetadata) TotalVotingPower() uint64 {
+	var totalVotingPower uint64
+	for _, v := range v.votingPowers {
+		totalVotingPower += v
+	}
+	return totalVotingPower
+}

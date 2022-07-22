@@ -109,6 +109,7 @@ type Pbft struct {
 	// notifier is a reference to the struct which encapsulates handling messages and timeouts
 	notifier StateNotifier
 
+	// stats encapsulates logic for statistics reporting
 	stats *stats.Stats
 }
 
