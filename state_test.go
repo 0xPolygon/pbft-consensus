@@ -103,7 +103,8 @@ func TestState_MaxRound_Found(t *testing.T) {
 		}
 	}
 
-	maxRound, found := s.maxRound(NewVotingMetadata(nil, uint(s.validators.Len())))
+	votingMetadata := &NonWeightedVotingMetadata{nodesCount: uint(s.validators.Len())}
+	maxRound, found := s.maxRound(votingMetadata.MaxFaultyNodes() + 1)
 	assert.Equal(t, uint64(5), maxRound)
 	assert.Equal(t, true, found)
 }
@@ -122,7 +123,7 @@ func TestState_MaxRound_NotFound(t *testing.T) {
 	s.addMessage(createMessage(validatorIds[0], MessageReq_Preprepare))
 
 	metadata := NewVotingMetadata(nil, uint(s.validators.Len()))
-	maxRound, found := s.maxRound(metadata)
+	maxRound, found := s.maxRound(metadata.MaxFaultyNodes() + 1)
 	assert.Equal(t, maxRound, uint64(0))
 	assert.Equal(t, found, false)
 
@@ -138,7 +139,7 @@ func TestState_MaxRound_NotFound(t *testing.T) {
 		}
 	}
 
-	maxRound, found = s.maxRound(metadata)
+	maxRound, found = s.maxRound(metadata.MaxFaultyNodes() + 1)
 	assert.Equal(t, uint64(0), maxRound)
 	assert.Equal(t, false, found)
 }

@@ -587,7 +587,8 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 	} else {
 		// otherwise, it is due to a timeout in any stage
 		// First, we try to sync up with any max round already available
-		if maxRound, ok := p.state.maxRound(p.votingMetadata); ok {
+		// F + 1 round change messages for given round, where F denotes MaxFaultyNodes is expected, in order to fast-track to maxRound
+		if maxRound, ok := p.state.maxRound(p.votingMetadata.MaxFaultyNodes() + 1); ok {
 			p.logger.Printf("[DEBUG] round change, max round=%d", maxRound)
 			sendRoundChange(maxRound)
 		} else {

@@ -406,10 +406,7 @@ func TestProperty_NodesWithMajorityOfVotingPowerCanAchiveAgreement(t *testing.T)
 			sendTimeoutIfNNodesStucked(t, timeoutsChan, numOfNodes),
 			func(doneList *helper.BoolSlice) bool {
 				// everything done. All nodes in done state
-				if doneList.CalculateNum(true) >= len(connections) {
-					return true
-				}
-				return false
+				return doneList.CalculateNum(true) >= len(connections)
 			}, func(maxRound uint64) bool {
 				// something went wrong.
 				if maxRound > 3 {

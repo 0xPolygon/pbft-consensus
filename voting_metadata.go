@@ -3,7 +3,7 @@ package pbft
 type VotingMetadata interface {
 	// QuorumSize returns PBFT message count needed to perform a single PBFT state transition
 	QuorumSize() uint64
-	// MaxFaultyNodes returns maximum number of faulty nodes,
+	// MaxFaultyNodes returns maximum number of faulty nodes quantity (either count of nodes, or weighted votes quantity),
 	// in order to meet practical Byzantine conditions
 	MaxFaultyNodes() uint64
 }
@@ -71,20 +71,14 @@ func (v *WeightedVotingMetadata) QuorumSize() uint64 {
 
 // MaxFaultyNodes is calculated as at most 1/3 of total voting power of the entire validator set.
 func (v *WeightedVotingMetadata) MaxFaultyNodes() uint64 {
-	totalVotingPower := v.calculateTotalVotingPower()
+	totalVotingPower := uint64(0)
+	for _, v := range v.votingPowerMap {
+		totalVotingPower += v
+	}
 	if totalVotingPower == 0 {
 		return 0
 	}
 	return (totalVotingPower - 1) / 3
-}
-
-// calculateTotalVotingPower calculates sum of voting powers of single validator node.
-func (v *WeightedVotingMetadata) calculateTotalVotingPower() uint64 {
-	var totalVotingPower uint64
-	for _, v := range v.votingPowerMap {
-		totalVotingPower += v
-	}
-	return totalVotingPower
 }
 
 // calculateMessagesVotingPower calculates voting power of validators which are registered in the provided messages map.

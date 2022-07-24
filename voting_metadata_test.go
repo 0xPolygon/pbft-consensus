@@ -32,7 +32,8 @@ func TestNonWeightedVotingMetadata_MaxFaultyNodesCount(t *testing.T) {
 
 func TestNonWeightedVotingMetadata_QuorumSize(t *testing.T) {
 	cases := []struct {
-		TotalNodesCount, QuorumSize uint64
+		TotalNodesCount uint
+		QuorumSize      uint64
 	}{
 		{1, 1},
 		{2, 1},
@@ -48,30 +49,22 @@ func TestNonWeightedVotingMetadata_QuorumSize(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		metadata := &NonWeightedVotingMetadata{nodesCount: uint(c.TotalNodesCount)}
+		metadata := &NonWeightedVotingMetadata{nodesCount: c.TotalNodesCount}
 		assert.Equal(t, c.QuorumSize, metadata.QuorumSize())
 	}
 }
 
-func TestNonWeightedVotingMetadata_GetRequiredMessagesCount(t *testing.T) {
+func TestWeightedVotingMetadata_MaxFaultyNodes(t *testing.T) {
 
 	cases := []struct {
-		TotalNodesCount, RequiredMsgsCount int
+		votingPower    map[NodeID]uint64
+		maxFaultyNodes uint64
 	}{
-		{1, 0},
-		{2, 0},
-		{3, 0},
-		{4, 2},
-		{5, 2},
-		{6, 2},
-		{7, 4},
-		{8, 4},
-		{9, 4},
-		{10, 6},
-		{100, 66},
+		{map[NodeID]uint64{"A": 5, "B": 5, "C": 5, "D": 5}, 6},
+		{map[NodeID]uint64{"A": 50, "B": 25, "C": 10, "D": 15}, 33},
 	}
 	for _, c := range cases {
-		metadata := &NonWeightedVotingMetadata{nodesCount: uint(c.TotalNodesCount)}
-		assert.Equal(t, c.RequiredMsgsCount, metadata.getRequiredMessagesCount())
+		metadata := &WeightedVotingMetadata{votingPowerMap: c.votingPower}
+		assert.Equal(t, c.maxFaultyNodes, metadata.MaxFaultyNodes())
 	}
 }

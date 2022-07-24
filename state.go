@@ -96,11 +96,9 @@ func (s *state) getErr() error {
 	return err
 }
 
-func (s *state) maxRound(metadata VotingMetadata) (maxRound uint64, found bool) {
-	num := int(metadata.MaxFaultyNodes()) + 1
-
+func (s *state) maxRound(minRequiredMessages uint64) (maxRound uint64, found bool) {
 	for currentRound, messages := range s.roundMessages {
-		if len(messages) < num {
+		if uint64(len(messages)) < minRequiredMessages {
 			continue
 		}
 		if maxRound < currentRound {
