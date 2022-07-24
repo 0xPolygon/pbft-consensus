@@ -64,9 +64,11 @@ type SealedProposal struct {
 
 // RoundInfo is the information about the round
 type RoundInfo struct {
-	IsProposer bool
-	Proposer   NodeID
-	Locked     bool
+	IsProposer    bool
+	Proposer      NodeID
+	Locked        bool
+	CurrentRound  uint64
+	PreviousRound uint64
 }
 
 // Pbft represents the PBFT consensus mechanism object
