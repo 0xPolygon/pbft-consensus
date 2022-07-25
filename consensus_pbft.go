@@ -587,8 +587,8 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 	} else {
 		// otherwise, it is due to a timeout in any stage
 		// First, we try to sync up with any max round already available
-		// F + 1 round change messages for given round, where F denotes MaxFaultyNodes is expected, in order to fast-track to maxRound
-		if maxRound, ok := p.state.maxRound(p.votingMetadata.MaxFaultyNodes() + 1); ok {
+		// F + 1 round change messages for given round, where F denotes MaxFaulty is expected, in order to fast-track to maxRound
+		if maxRound, ok := p.state.maxRound(p.votingMetadata.MaxFaulty() + 1); ok {
 			p.logger.Printf("[DEBUG] round change, max round=%d", maxRound)
 			sendRoundChange(maxRound)
 		} else {
@@ -627,7 +627,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 					// start a new round immediately
 					p.state.SetCurrentRound(msg.View.Round)
 					p.setState(AcceptState)
-				} else if num == int(votingMetadata.MaxFaultyNodes()+1) {
+				} else if num == int(votingMetadata.MaxFaulty()+1) {
 					// weak certificate, try to catch up if our round number is smaller
 					if p.state.GetCurrentRound() < msg.View.Round {
 						// update timer
@@ -644,7 +644,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 					// start a new round immediately
 					p.state.SetCurrentRound(msg.View.Round)
 					p.setState(AcceptState)
-				} else if roundVotingPower >= votingMetadata.MaxFaultyNodes()+1 {
+				} else if roundVotingPower >= votingMetadata.MaxFaulty()+1 {
 					// weak certificate, try to catch up if our round number is smaller
 					if p.state.GetCurrentRound() < msg.View.Round {
 						// update timer
@@ -824,12 +824,12 @@ func (p *Pbft) ReadMessageWithDiscards() (*MessageReq, []*MessageReq) {
 	return p.msgQueue.readMessageWithDiscards(p.getState(), p.state.view)
 }
 
-// MaxFaultyNodes is a wrapper function around VotingMetadata.MaxFaultyNodes
-func (p *Pbft) MaxFaultyNodes() (uint64, error) {
+// MaxFaulty is a wrapper function around VotingMetadata.MaxFaulty
+func (p *Pbft) MaxFaulty() (uint64, error) {
 	if p.votingMetadata == nil {
 		return 0, errors.New("unable to determine max faulty nodes: consensus metadata is not defined")
 	}
-	return p.votingMetadata.MaxFaultyNodes(), nil
+	return p.votingMetadata.MaxFaulty(), nil
 }
 
 // QuorumSize is a wrapper function around VotingMetadata.QuorumSize

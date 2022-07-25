@@ -25,7 +25,7 @@ func (dn *DropNode) CanApply(c *e2e.Cluster) bool {
 	if runningNodes <= 0 {
 		return false
 	}
-	maxFaultyNodes, err := c.MaxFaultyNodes()
+	maxFaultyNodes, err := c.MaxFaulty()
 	if err != nil {
 		log.Printf("[ERROR] %v", err)
 		return false

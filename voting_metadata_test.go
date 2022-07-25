@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNonWeightedVotingMetadata_MaxFaultyNodesCount(t *testing.T) {
+func TestNonWeightedVotingMetadata_MaxFaulty(t *testing.T) {
 	cases := []struct {
 		TotalNodesCount, FaultyNodesCount uint
 	}{
@@ -26,7 +26,7 @@ func TestNonWeightedVotingMetadata_MaxFaultyNodesCount(t *testing.T) {
 	}
 	for _, c := range cases {
 		metadata := &NonWeightedVotingMetadata{nodesCount: c.TotalNodesCount}
-		assert.Equal(t, c.FaultyNodesCount, uint(metadata.MaxFaultyNodes()))
+		assert.Equal(t, c.FaultyNodesCount, uint(metadata.MaxFaulty()))
 	}
 }
 
@@ -54,7 +54,7 @@ func TestNonWeightedVotingMetadata_QuorumSize(t *testing.T) {
 	}
 }
 
-func TestWeightedVotingMetadata_MaxFaultyNodes(t *testing.T) {
+func TestWeightedVotingMetadata_MaxFaulty(t *testing.T) {
 
 	cases := []struct {
 		votingPower    map[NodeID]uint64
@@ -65,6 +65,6 @@ func TestWeightedVotingMetadata_MaxFaultyNodes(t *testing.T) {
 	}
 	for _, c := range cases {
 		metadata := &WeightedVotingMetadata{votingPowerMap: c.votingPower}
-		assert.Equal(t, c.maxFaultyNodes, metadata.MaxFaultyNodes())
+		assert.Equal(t, c.maxFaultyNodes, metadata.MaxFaulty())
 	}
 }

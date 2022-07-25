@@ -256,7 +256,7 @@ func TestProperty_NodeDoubleSign(t *testing.T) {
 		// sign different message to up to 1/2 of the nodes
 		maliciousMessagesToNodes := rapid.IntRange(0, numOfNodes/2).Draw(t, "malicious message to nodes").(int)
 		metadata := pbft.NewVotingMetadata(nil, uint(numOfNodes))
-		faultyNodes := rapid.IntRange(1, int(metadata.MaxFaultyNodes())).Draw(t, "malicious nodes").(int)
+		faultyNodes := rapid.IntRange(1, int(metadata.MaxFaulty())).Draw(t, "malicious nodes").(int)
 		maliciousNodes := generateMaliciousProposers(faultyNodes)
 		votingPower := make(map[pbft.NodeID]uint64, numOfNodes)
 
@@ -294,10 +294,7 @@ func TestProperty_NodeDoubleSign(t *testing.T) {
 			cluster,
 			sendTimeoutIfNNodesStucked(t, timeoutsChan, numOfNodes),
 			func(doneList *helper.BoolSlice) bool {
-				if doneList.CalculateNum(true) >= 2*numOfNodes/3+1 {
-					return true
-				}
-				return false
+				return doneList.CalculateNum(true) >= 2*numOfNodes/3+1
 			}, func(maxRound uint64) bool {
 				if maxRound > 10 {
 					t.Error("Infinite rounds")
@@ -334,10 +331,7 @@ func TestProperty_SeveralHonestNodesWithVotingPowerCanAchiveAgreement(t *testing
 			sendTimeoutIfNNodesStucked(t, timeoutsChan, numOfNodes),
 			func(doneList *helper.BoolSlice) bool {
 				// everything done. All nodes in done state
-				if doneList.CalculateNum(true) == numOfNodes {
-					return true
-				}
-				return false
+				return doneList.CalculateNum(true) == numOfNodes
 			}, func(maxRound uint64) bool {
 				// something went wrong.
 				if maxRound > 3 {
@@ -487,7 +481,7 @@ func generateCluster(numOfNodes int, transport *pbft.TransportStub, votingPower 
 	}
 
 	for _, nd := range cluster {
-		nd.SetBackend(&BackendFake{
+		_ = nd.SetBackend(&BackendFake{
 			nodes: nodes,
 			insertFunc: func(proposal *pbft.SealedProposal) error {
 				return ip.Insert(*proposal)

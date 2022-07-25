@@ -104,7 +104,7 @@ func TestState_MaxRound_Found(t *testing.T) {
 	}
 
 	votingMetadata := &NonWeightedVotingMetadata{nodesCount: uint(s.validators.Len())}
-	maxRound, found := s.maxRound(votingMetadata.MaxFaultyNodes() + 1)
+	maxRound, found := s.maxRound(votingMetadata.MaxFaulty() + 1)
 	assert.Equal(t, uint64(5), maxRound)
 	assert.Equal(t, true, found)
 }
@@ -123,7 +123,7 @@ func TestState_MaxRound_NotFound(t *testing.T) {
 	s.addMessage(createMessage(validatorIds[0], MessageReq_Preprepare))
 
 	metadata := NewVotingMetadata(nil, uint(s.validators.Len()))
-	maxRound, found := s.maxRound(metadata.MaxFaultyNodes() + 1)
+	maxRound, found := s.maxRound(metadata.MaxFaulty() + 1)
 	assert.Equal(t, maxRound, uint64(0))
 	assert.Equal(t, found, false)
 
@@ -131,7 +131,7 @@ func TestState_MaxRound_NotFound(t *testing.T) {
 	for round := range validatorIds {
 		if round%2 == 0 {
 			// Each even round should populate more than one "RoundChange" messages, but just enough that we don't reach census (max faulty nodes+1)
-			for i := 0; i < int(metadata.MaxFaultyNodes()); i++ {
+			for i := 0; i < int(metadata.MaxFaulty()); i++ {
 				s.addMessage(createMessage(validatorIds[mrand.Intn(validatorsCount)], MessageReq_RoundChange, uint64(round)))
 			}
 		} else {
@@ -139,7 +139,7 @@ func TestState_MaxRound_NotFound(t *testing.T) {
 		}
 	}
 
-	maxRound, found = s.maxRound(metadata.MaxFaultyNodes() + 1)
+	maxRound, found = s.maxRound(metadata.MaxFaulty() + 1)
 	assert.Equal(t, uint64(0), maxRound)
 	assert.Equal(t, false, found)
 }
