@@ -256,7 +256,7 @@ func TestProperty_NodeDoubleSign(t *testing.T) {
 		// sign different message to up to 1/2 of the nodes
 		maliciousMessagesToNodes := rapid.IntRange(0, numOfNodes/2).Draw(t, "malicious message to nodes").(int)
 		metadata := pbft.NewVotingMetadata(nil, uint(numOfNodes))
-		faultyNodes := rapid.IntRange(1, int(metadata.MaxFaulty())).Draw(t, "malicious nodes").(int)
+		faultyNodes := rapid.IntRange(1, int(metadata.MaxFaultyWeight())).Draw(t, "malicious nodes").(int)
 		maliciousNodes := generateMaliciousProposers(faultyNodes)
 		votingPower := make(map[pbft.NodeID]uint64, numOfNodes)
 

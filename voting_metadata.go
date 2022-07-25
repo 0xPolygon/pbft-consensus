@@ -3,9 +3,11 @@ package pbft
 type VotingMetadata interface {
 	// QuorumSize returns PBFT message count needed to perform a single PBFT state transition
 	QuorumSize() uint64
-	// MaxFaulty returns maximum number of faulty quantity (either count of nodes, or weighted votes quantity),
+	// MaxFaultyWeight returns maximum quantity of faulty weight (either count of nodes, or weighted votes quantity),
 	// in order to meet practical Byzantine conditions
-	MaxFaulty() uint64
+	MaxFaultyWeight() uint64
+	// CalculateWeight returns sum of weights for given messages senders
+	CalculateWeight(messages map[NodeID]*MessageReq) uint64
 }
 
 // NewVotingMetadata initializes instance of VotingMetadata based on provided configuration
@@ -27,7 +29,7 @@ type NonWeightedVotingMetadata struct {
 // It is calculated by formula:
 // 2 * F + 1, where F denotes maximum count of faulty nodes in order to have Byzantine fault tollerant property satisfied.
 func (n *NonWeightedVotingMetadata) QuorumSize() uint64 {
-	return 2*n.MaxFaulty() + 1
+	return 2*n.MaxFaultyWeight() + 1
 }
 
 // MaxFaulty calculate max faulty nodes in order to have Byzantine-fault tollerant system.
@@ -41,19 +43,15 @@ func (n *NonWeightedVotingMetadata) QuorumSize() uint64 {
 // To tolerate 2 failures, PBFT requires 7 nodes
 // 7 = 3 * 2 + 1
 // It should always take the floor of the result
-func (n *NonWeightedVotingMetadata) MaxFaulty() uint64 {
+func (n *NonWeightedVotingMetadata) MaxFaultyWeight() uint64 {
 	if n.nodesCount == 0 {
 		return 0
 	}
 	return uint64((n.nodesCount - 1) / 3)
 }
 
-// getRequiredMessagesCount returns the number of required messages based on the quorum size
-func (n *NonWeightedVotingMetadata) getRequiredMessagesCount() int {
-	// 2 * F + 1
-	// + 1 is up to the caller to add
-	// the current node tallying the messages will include its own message
-	return int(n.QuorumSize() - 1)
+func (n *NonWeightedVotingMetadata) CalculateWeight(messages map[NodeID]*MessageReq) uint64 {
+	return uint64(len(messages))
 }
 
 // WeightedVotingMetadata implements VotingMetadata interface,
@@ -66,11 +64,11 @@ type WeightedVotingMetadata struct {
 // It is calculated by formula:
 // 2 * F + 1, where F denotes maximum count of faulty nodes in order to have Byzantine fault tollerant property satisfied.
 func (v *WeightedVotingMetadata) QuorumSize() uint64 {
-	return 2*v.MaxFaulty() + 1
+	return 2*v.MaxFaultyWeight() + 1
 }
 
 // MaxFaulty is calculated as at most 1/3 of total voting power of the entire validator set.
-func (v *WeightedVotingMetadata) MaxFaulty() uint64 {
+func (v *WeightedVotingMetadata) MaxFaultyWeight() uint64 {
 	totalVotingPower := uint64(0)
 	for _, v := range v.votingPowerMap {
 		totalVotingPower += v
@@ -82,8 +80,8 @@ func (v *WeightedVotingMetadata) MaxFaulty() uint64 {
 }
 
 // calculateMessagesVotingPower calculates voting power of validators which are registered in the provided messages map.
-func (v *WeightedVotingMetadata) calculateMessagesVotingPower(messages map[NodeID]*MessageReq) uint64 {
-	var roundVotingPower uint64
+func (v *WeightedVotingMetadata) CalculateWeight(messages map[NodeID]*MessageReq) uint64 {
+	roundVotingPower := uint64(0)
 	for nodeId := range messages {
 		roundVotingPower += v.votingPowerMap[nodeId]
 	}

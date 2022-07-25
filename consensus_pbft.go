@@ -424,39 +424,18 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 			panic(fmt.Errorf("BUG: Unexpected message type: %s in %s", msg.Type, p.getState()))
 		}
 
-		switch votingMetadata := p.votingMetadata.(type) {
-		case *NonWeightedVotingMetadata:
-			{
-				if p.state.numPrepared() > votingMetadata.getRequiredMessagesCount() {
-					// we have received enough prepare messages
-					sendCommit(span)
-				}
+		quorum := p.votingMetadata.QuorumSize()
+		if p.votingMetadata.CalculateWeight(p.state.prepared) >= quorum {
+			// we have received enough prepare messages
+			sendCommit(span)
+		}
 
-				if p.state.numCommitted() > votingMetadata.getRequiredMessagesCount() {
-					// we have received enough commit messages
-					sendCommit(span)
+		if p.votingMetadata.CalculateWeight(p.state.committed) >= quorum {
+			// we have received enough commit messages
+			sendCommit(span)
 
-					// change to commit state just to get out of the loop
-					p.setState(CommitState)
-				}
-			}
-
-		case *WeightedVotingMetadata:
-			{
-				requiredVotingPower := votingMetadata.QuorumSize()
-				if votingMetadata.calculateMessagesVotingPower(p.state.prepared) >= requiredVotingPower {
-					// we have received enough prepare messages
-					sendCommit(span)
-				}
-
-				if votingMetadata.calculateMessagesVotingPower(p.state.committed) >= requiredVotingPower {
-					// we have received enough commit messages
-					sendCommit(span)
-
-					// change to commit state just to get out of the loop
-					p.setState(CommitState)
-				}
-			}
+			// change to commit state just to get out of the loop
+			p.setState(CommitState)
 		}
 
 		// set the attributes of this span once it is done
@@ -588,7 +567,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 		// otherwise, it is due to a timeout in any stage
 		// First, we try to sync up with any max round already available
 		// F + 1 round change messages for given round, where F denotes MaxFaulty is expected, in order to fast-track to maxRound
-		if maxRound, ok := p.state.maxRound(p.votingMetadata.MaxFaulty() + 1); ok {
+		if maxRound, ok := p.state.maxRound(p.votingMetadata.MaxFaultyWeight() + 1); ok {
 			p.logger.Printf("[DEBUG] round change, max round=%d", maxRound)
 			sendRoundChange(maxRound)
 		} else {
@@ -618,39 +597,20 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 		}
 
 		// we only expect RoundChange messages right now
-		num := p.state.AddRoundMessage(msg)
+		_ = p.state.AddRoundMessage(msg)
 
-		switch votingMetadata := p.votingMetadata.(type) {
-		case *NonWeightedVotingMetadata:
-			{
-				if num == votingMetadata.getRequiredMessagesCount() {
-					// start a new round immediately
-					p.state.SetCurrentRound(msg.View.Round)
-					p.setState(AcceptState)
-				} else if num == int(votingMetadata.MaxFaulty()+1) {
-					// weak certificate, try to catch up if our round number is smaller
-					if p.state.GetCurrentRound() < msg.View.Round {
-						// update timer
-						sendRoundChange(msg.View.Round)
-					}
-				}
-			}
-
-		case *WeightedVotingMetadata:
-			{
-				requiredVotingPower := votingMetadata.QuorumSize()
-				roundVotingPower := votingMetadata.calculateMessagesVotingPower(p.state.roundMessages[msg.View.Round])
-				if roundVotingPower >= requiredVotingPower {
-					// start a new round immediately
-					p.state.SetCurrentRound(msg.View.Round)
-					p.setState(AcceptState)
-				} else if roundVotingPower >= votingMetadata.MaxFaulty()+1 {
-					// weak certificate, try to catch up if our round number is smaller
-					if p.state.GetCurrentRound() < msg.View.Round {
-						// update timer
-						sendRoundChange(msg.View.Round)
-					}
-				}
+		currentWeight := p.votingMetadata.CalculateWeight(p.state.roundMessages[msg.View.Round])
+		// Round change quorum is 2*F round change messages (F denotes max faulty weight)
+		roundChangeQuorum := 2 * p.votingMetadata.MaxFaultyWeight()
+		if currentWeight >= roundChangeQuorum {
+			// start a new round immediately
+			p.state.SetCurrentRound(msg.View.Round)
+			p.setState(AcceptState)
+		} else if currentWeight >= p.votingMetadata.MaxFaultyWeight()+1 {
+			// weak certificate, try to catch up if our round number is smaller
+			if p.state.GetCurrentRound() < msg.View.Round {
+				// update timer
+				sendRoundChange(msg.View.Round)
 			}
 		}
 
@@ -829,7 +789,7 @@ func (p *Pbft) MaxFaulty() (uint64, error) {
 	if p.votingMetadata == nil {
 		return 0, errors.New("unable to determine max faulty nodes: consensus metadata is not defined")
 	}
-	return p.votingMetadata.MaxFaulty(), nil
+	return p.votingMetadata.MaxFaultyWeight(), nil
 }
 
 // QuorumSize is a wrapper function around VotingMetadata.QuorumSize
