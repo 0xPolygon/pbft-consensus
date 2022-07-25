@@ -259,9 +259,11 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 
 	isProposer := p.state.proposer == p.validator.NodeID()
 	p.backend.Init(&RoundInfo{
-		Proposer:   p.state.proposer,
-		IsProposer: isProposer,
-		Locked:     p.state.IsLocked(),
+		Proposer:      p.state.proposer,
+		IsProposer:    isProposer,
+		Locked:        p.state.IsLocked(),
+		CurrentRound:  p.state.GetCurrentRound(),
+		PreviousRound: p.state.GetPreviousRound(),
 	})
 
 	// log the current state of this span
