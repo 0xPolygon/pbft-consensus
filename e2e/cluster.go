@@ -339,21 +339,22 @@ func (c *Cluster) startNode(name string) {
 	c.nodes[name].Start()
 }
 
-// MaxFaulty is a wrapper function which invokes MaxFaulty on PBFT consensus instance of the first node in cluster
+// MaxFaulty is a wrapper function which invokes MaxFaultyVotingPower on PBFT consensus instance of the first node in cluster
 func (c *Cluster) MaxFaulty() (uint64, error) {
 	nodes := c.getNodes()
 	if len(nodes) == 0 {
 		return 0, errors.New("unable to determine max faulty nodes: cluster is empty")
 	}
-	return nodes[0].pbft.MaxFaulty()
+	return nodes[0].pbft.MaxFaultyVotingPower()
 }
 
+// QuorumSize is a wrapper function which invokes QuorumSize on PBFT consensus instance of the first node in cluster
 func (c *Cluster) QuorumSize() (uint64, error) {
 	nodes := c.getNodes()
 	if len(nodes) == 0 {
 		return 0, errors.New("unable to determine max faulty nodes: cluster is empty")
 	}
-	return nodes[0].pbft.MaxFaulty()
+	return nodes[0].pbft.QuorumSize()
 }
 
 func initTracer(name string) *sdktrace.TracerProvider {

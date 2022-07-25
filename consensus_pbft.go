@@ -784,8 +784,8 @@ func (p *Pbft) ReadMessageWithDiscards() (*MessageReq, []*MessageReq) {
 	return p.msgQueue.readMessageWithDiscards(p.getState(), p.state.view)
 }
 
-// MaxFaulty is a wrapper function around VotingMetadata.MaxFaulty
-func (p *Pbft) MaxFaulty() (uint64, error) {
+// MaxFaultyVotingPower is a wrapper function around VotingMetadata.MaxFaultyVotingPower
+func (p *Pbft) MaxFaultyVotingPower() (uint64, error) {
 	if p.votingMetadata == nil {
 		return 0, errors.New("unable to determine max faulty nodes: consensus metadata is not defined")
 	}
