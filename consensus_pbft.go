@@ -599,14 +599,14 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 		// we only expect RoundChange messages right now
 		_ = p.state.AddRoundMessage(msg)
 
-		currentWeight := p.votingMetadata.CalculateVotingPower(p.state.roundMessages[msg.View.Round])
-		// Round change quorum is 2*F round change messages (F denotes max faulty weight)
-		roundChangeQuorum := 2 * p.votingMetadata.MaxFaultyVotingPower()
-		if currentWeight >= roundChangeQuorum {
+		currentVotingPower := p.votingMetadata.CalculateVotingPower(p.state.roundMessages[msg.View.Round])
+		// Round change quorum is 2*F round change messages (F denotes max faulty voting power)
+		requiredVotingPower := 2 * p.votingMetadata.MaxFaultyVotingPower()
+		if currentVotingPower >= requiredVotingPower {
 			// start a new round immediately
 			p.state.SetCurrentRound(msg.View.Round)
 			p.setState(AcceptState)
-		} else if currentWeight >= p.votingMetadata.MaxFaultyVotingPower()+1 {
+		} else if currentVotingPower >= p.votingMetadata.MaxFaultyVotingPower()+1 {
 			// weak certificate, try to catch up if our round number is smaller
 			if p.state.GetCurrentRound() < msg.View.Round {
 				// update timer
