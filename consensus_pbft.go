@@ -149,8 +149,8 @@ func (p *Pbft) SetBackend(backend Backend) error {
 	// set the current set of validators
 	p.state.validators = p.backend.ValidatorSet()
 
-	// set consensus metadata based on provided configuration and validator set count
-	p.votingMetadata = NewVotingMetadata(p.config, uint(p.state.validators.Len()))
+	// set voting metadata
+	p.votingMetadata = backend.GetVotingMetadata()
 
 	return nil
 }
@@ -425,12 +425,12 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 		}
 
 		quorum := p.votingMetadata.QuorumSize()
-		if p.votingMetadata.CalculateWeight(p.state.prepared) >= quorum {
+		if p.votingMetadata.CalculateVotingPower(p.state.prepared) >= quorum {
 			// we have received enough prepare messages
 			sendCommit(span)
 		}
 
-		if p.votingMetadata.CalculateWeight(p.state.committed) >= quorum {
+		if p.votingMetadata.CalculateVotingPower(p.state.committed) >= quorum {
 			// we have received enough commit messages
 			sendCommit(span)
 
@@ -567,7 +567,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 		// otherwise, it is due to a timeout in any stage
 		// First, we try to sync up with any max round already available
 		// F + 1 round change messages for given round, where F denotes MaxFaulty is expected, in order to fast-track to maxRound
-		if maxRound, ok := p.state.maxRound(p.votingMetadata.MaxFaultyWeight() + 1); ok {
+		if maxRound, ok := p.state.maxRound(p.votingMetadata.MaxFaultyVotingPower() + 1); ok {
 			p.logger.Printf("[DEBUG] round change, max round=%d", maxRound)
 			sendRoundChange(maxRound)
 		} else {
@@ -599,14 +599,14 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 		// we only expect RoundChange messages right now
 		_ = p.state.AddRoundMessage(msg)
 
-		currentWeight := p.votingMetadata.CalculateWeight(p.state.roundMessages[msg.View.Round])
+		currentWeight := p.votingMetadata.CalculateVotingPower(p.state.roundMessages[msg.View.Round])
 		// Round change quorum is 2*F round change messages (F denotes max faulty weight)
-		roundChangeQuorum := 2 * p.votingMetadata.MaxFaultyWeight()
+		roundChangeQuorum := 2 * p.votingMetadata.MaxFaultyVotingPower()
 		if currentWeight >= roundChangeQuorum {
 			// start a new round immediately
 			p.state.SetCurrentRound(msg.View.Round)
 			p.setState(AcceptState)
-		} else if currentWeight >= p.votingMetadata.MaxFaultyWeight()+1 {
+		} else if currentWeight >= p.votingMetadata.MaxFaultyVotingPower()+1 {
 			// weak certificate, try to catch up if our round number is smaller
 			if p.state.GetCurrentRound() < msg.View.Round {
 				// update timer
@@ -789,7 +789,7 @@ func (p *Pbft) MaxFaulty() (uint64, error) {
 	if p.votingMetadata == nil {
 		return 0, errors.New("unable to determine max faulty nodes: consensus metadata is not defined")
 	}
-	return p.votingMetadata.MaxFaultyWeight(), nil
+	return p.votingMetadata.MaxFaultyVotingPower(), nil
 }
 
 // QuorumSize is a wrapper function around VotingMetadata.QuorumSize

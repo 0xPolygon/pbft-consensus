@@ -64,3 +64,12 @@ func (v *ValStringStub) Includes(id NodeID) bool {
 func (v *ValStringStub) Len() int {
 	return len(*v)
 }
+
+// CreateEqualWeightValidatorsMap is a helper function which creates map with same weight for every validator id in the provided slice
+func CreateEqualWeightValidatorsMap(validatorIds []NodeID) map[NodeID]uint64 {
+	weightedValidators := make(map[NodeID]uint64, len(validatorIds))
+	for _, validatorId := range validatorIds {
+		weightedValidators[validatorId] = 1
+	}
+	return weightedValidators
+}

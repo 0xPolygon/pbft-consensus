@@ -59,4 +59,7 @@ type Backend interface {
 
 	// ValidateCommit is used to validate that a given commit is valid
 	ValidateCommit(from NodeID, seal []byte) error
+
+	// GetVotingMetadata is used to retrieve voting metadata, which abstracts votes counting calculation
+	GetVotingMetadata() VotingMetadata
 }

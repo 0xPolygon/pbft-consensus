@@ -780,7 +780,6 @@ func TestGossip_SignProposalFailed(t *testing.T) {
 }
 
 func TestRoundChange_PropertyMajorityOfVotingPowerAggreement(t *testing.T) {
-	t.Skip()
 	rapid.Check(t, func(t *rapid.T) {
 		numberOfNodes := rapid.IntRange(4, 100).Draw(t, "Generate number of nodes").(int)
 		stake := rapid.SliceOfN(rapid.Uint64Range(1, 1000000), numberOfNodes, numberOfNodes).Draw(t, "Generate stake").([]uint64)
@@ -793,7 +792,7 @@ func TestRoundChange_PropertyMajorityOfVotingPowerAggreement(t *testing.T) {
 			validators[i] = nodeId
 			votingPower[nodeId] = stake[i]
 		}
-		metadata := NewVotingMetadata(&Config{VotingPower: votingPower}, uint(numberOfNodes))
+		metadata := NewVotingMetadata(votingPower)
 		quorumVotingPower := metadata.QuorumSize()
 
 		maxNodeID := numberOfNodes - 1
@@ -813,7 +812,6 @@ func TestRoundChange_PropertyMajorityOfVotingPowerAggreement(t *testing.T) {
 			},
 		}, WithLogger(log.New(io.Discard, "", log.LstdFlags)))
 		node.state.validators = &validators
-		node.config.VotingPower = votingPower
 		node.state.view = &View{
 			1,
 			1,
@@ -1082,4 +1080,8 @@ func (m *mockBackend) ValidatorSet() ValidatorSet {
 }
 
 func (m *mockBackend) Init(*RoundInfo) {
+}
+
+func (m *mockBackend) GetVotingMetadata() VotingMetadata {
+	return NewVotingMetadata(CreateEqualWeightValidatorsMap([]NodeID(*m.validators)))
 }

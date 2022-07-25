@@ -87,9 +87,11 @@ func TestState_MaxRound_Found(t *testing.T) {
 	s := newState()
 
 	validatorIds := make([]string, validatorsCount)
+	pbftValidatorIds := make([]NodeID, validatorsCount)
 	for i := 0; i < validatorsCount; i++ {
 		validatorId := fmt.Sprintf("validator_%d", i)
 		validatorIds[i] = validatorId
+		pbftValidatorIds[i] = NodeID(validatorId)
 	}
 	s.validators = newMockValidatorSet(validatorIds)
 
@@ -103,8 +105,8 @@ func TestState_MaxRound_Found(t *testing.T) {
 		}
 	}
 
-	votingMetadata := &NonWeightedVotingMetadata{nodesCount: uint(s.validators.Len())}
-	maxRound, found := s.maxRound(votingMetadata.MaxFaultyWeight() + 1)
+	votingMetadata := NewVotingMetadata(CreateEqualWeightValidatorsMap(pbftValidatorIds))
+	maxRound, found := s.maxRound(votingMetadata.MaxFaultyVotingPower() + 1)
 	assert.Equal(t, uint64(5), maxRound)
 	assert.Equal(t, true, found)
 }
@@ -114,16 +116,18 @@ func TestState_MaxRound_NotFound(t *testing.T) {
 	s := newState()
 
 	validatorIds := make([]string, validatorsCount)
+	pbftValidatorIds := make([]NodeID, validatorsCount)
 	for i := 0; i < validatorsCount; i++ {
 		validatorIds[i] = fmt.Sprintf("validator_%d", i)
+		pbftValidatorIds[i] = NodeID(validatorIds[i])
 	}
 	s.validators = newMockValidatorSet(validatorIds)
 
 	// Send wrong message type from some validator, whereas roundMessages map is empty
 	s.addMessage(createMessage(validatorIds[0], MessageReq_Preprepare))
 
-	metadata := NewVotingMetadata(nil, uint(s.validators.Len()))
-	maxRound, found := s.maxRound(metadata.MaxFaultyWeight() + 1)
+	metadata := NewVotingMetadata(CreateEqualWeightValidatorsMap(pbftValidatorIds))
+	maxRound, found := s.maxRound(metadata.MaxFaultyVotingPower() + 1)
 	assert.Equal(t, maxRound, uint64(0))
 	assert.Equal(t, found, false)
 
@@ -131,7 +135,7 @@ func TestState_MaxRound_NotFound(t *testing.T) {
 	for round := range validatorIds {
 		if round%2 == 0 {
 			// Each even round should populate more than one "RoundChange" messages, but just enough that we don't reach census (max faulty nodes+1)
-			for i := 0; i < int(metadata.MaxFaultyWeight()); i++ {
+			for i := 0; i < int(metadata.MaxFaultyVotingPower()); i++ {
 				s.addMessage(createMessage(validatorIds[mrand.Intn(validatorsCount)], MessageReq_RoundChange, uint64(round)))
 			}
 		} else {
@@ -139,7 +143,7 @@ func TestState_MaxRound_NotFound(t *testing.T) {
 		}
 	}
 
-	maxRound, found = s.maxRound(metadata.MaxFaultyWeight() + 1)
+	maxRound, found = s.maxRound(metadata.MaxFaultyVotingPower() + 1)
 	assert.Equal(t, uint64(0), maxRound)
 	assert.Equal(t, false, found)
 }

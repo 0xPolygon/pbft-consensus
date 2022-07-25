@@ -3,74 +3,34 @@ package pbft
 type VotingMetadata interface {
 	// QuorumSize returns PBFT message count needed to perform a single PBFT state transition
 	QuorumSize() uint64
-	// MaxFaultyWeight returns maximum quantity of faulty weight (either count of nodes, or weighted votes quantity),
-	// in order to meet practical Byzantine conditions
-	MaxFaultyWeight() uint64
-	// CalculateWeight returns sum of weights for given messages senders
-	CalculateWeight(messages map[NodeID]*MessageReq) uint64
+	// MaxFaultyVotingPower returns maximum quantity of faulty voting power, in order to meet practical Byzantine conditions
+	MaxFaultyVotingPower() uint64
+	// CalculateVotingPower returns sum of weights for given messages senders
+	CalculateVotingPower(messages map[NodeID]*MessageReq) uint64
 }
 
-// NewVotingMetadata initializes instance of VotingMetadata based on provided configuration
-func NewVotingMetadata(config *Config, validatorsCount uint) VotingMetadata {
-	if IsVotingPowerEnabled(config) {
-		return &WeightedVotingMetadata{votingPowerMap: config.VotingPower}
-	}
-	return &NonWeightedVotingMetadata{nodesCount: validatorsCount}
-}
-
-// NonWeightedVotingMetadata implements VotingMetadata interface,
-// where each validator has same weight during vote process
-// (namely its vote counts the same as the vote of other peers).
-type NonWeightedVotingMetadata struct {
-	nodesCount uint
-}
-
-// QuorumSize calculates quorum size (namely the number of required messages of some type in order to proceed to the next state in PolyBFT state machine).
-// It is calculated by formula:
-// 2 * F + 1, where F denotes maximum count of faulty nodes in order to have Byzantine fault tollerant property satisfied.
-func (n *NonWeightedVotingMetadata) QuorumSize() uint64 {
-	return 2*n.MaxFaultyWeight() + 1
-}
-
-// MaxFaulty calculate max faulty nodes in order to have Byzantine-fault tollerant system.
-// Formula explanation:
-// N -> number of nodes in PBFT
-// F -> number of faulty nodes
-// N = 3 * F + 1 => F = (N - 1) / 3
-//
-// PBFT tolerates 1 failure with 4 nodes
-// 4 = 3 * 1 + 1
-// To tolerate 2 failures, PBFT requires 7 nodes
-// 7 = 3 * 2 + 1
-// It should always take the floor of the result
-func (n *NonWeightedVotingMetadata) MaxFaultyWeight() uint64 {
-	if n.nodesCount == 0 {
-		return 0
-	}
-	return uint64((n.nodesCount - 1) / 3)
-}
-
-func (n *NonWeightedVotingMetadata) CalculateWeight(messages map[NodeID]*MessageReq) uint64 {
-	return uint64(len(messages))
+// NewVotingMetadata initializes instance of VotingMetadata
+func NewVotingMetadata(votingPower map[NodeID]uint64) VotingMetadata {
+	return &WeightedVotingMetadata{votingPower: votingPower}
 }
 
 // WeightedVotingMetadata implements VotingMetadata interface,
 // where each validator has weighted vote based on its voting power (e.g. stake amount)
 type WeightedVotingMetadata struct {
-	votingPowerMap map[NodeID]uint64
+	votingPower map[NodeID]uint64
 }
 
-// QuorumSize calculates quorum size (namely the number of required messages of some type in order to proceed to the next state in PolyBFT state machine).
+// QuorumSize calculates quorum size (namely the number of required messages of some type in order to proceed to the next state in PBFT state machine).
 // It is calculated by formula:
 // 2 * F + 1, where F denotes maximum count of faulty nodes in order to have Byzantine fault tollerant property satisfied.
 func (v *WeightedVotingMetadata) QuorumSize() uint64 {
-	return 2*v.MaxFaultyWeight() + 1
+	return 2*v.MaxFaultyVotingPower() + 1
 }
 
 // MaxFaulty is calculated as at most 1/3 of total voting power of the entire validator set.
-func (v *WeightedVotingMetadata) MaxFaultyWeight() uint64 {
+func (v *WeightedVotingMetadata) MaxFaultyVotingPower() uint64 {
 	totalVotingPower := uint64(0)
-	for _, v := range v.votingPowerMap {
+	for _, v := range v.votingPower {
 		totalVotingPower += v
 	}
 	if totalVotingPower == 0 {
@@ -79,11 +39,11 @@ func (v *WeightedVotingMetadata) MaxFaultyWeight() uint64 {
 	return (totalVotingPower - 1) / 3
 }
 
-// calculateMessagesVotingPower calculates voting power of validators which are registered in the provided messages map.
-func (v *WeightedVotingMetadata) CalculateWeight(messages map[NodeID]*MessageReq) uint64 {
+// CalculateVotingPower calculates voting power of validators which are found in the provided messages map.
+func (v *WeightedVotingMetadata) CalculateVotingPower(messages map[NodeID]*MessageReq) uint64 {
 	roundVotingPower := uint64(0)
 	for nodeId := range messages {
-		roundVotingPower += v.votingPowerMap[nodeId]
+		roundVotingPower += v.votingPower[nodeId]
 	}
 	return roundVotingPower
 }

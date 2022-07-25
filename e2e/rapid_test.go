@@ -255,8 +255,12 @@ func TestProperty_NodeDoubleSign(t *testing.T) {
 		numOfNodes := rapid.IntRange(4, 7).Draw(t, "num of nodes").(int)
 		// sign different message to up to 1/2 of the nodes
 		maliciousMessagesToNodes := rapid.IntRange(0, numOfNodes/2).Draw(t, "malicious message to nodes").(int)
-		metadata := pbft.NewVotingMetadata(nil, uint(numOfNodes))
-		faultyNodes := rapid.IntRange(1, int(metadata.MaxFaultyWeight())).Draw(t, "malicious nodes").(int)
+		weightedNodes := make(map[pbft.NodeID]uint64, numOfNodes)
+		for i := 0; i < numOfNodes; i++ {
+			weightedNodes[pbft.NodeID(fmt.Sprintf("NODE_%s", strconv.Itoa(i)))] = 1
+		}
+		metadata := pbft.NewVotingMetadata(weightedNodes)
+		faultyNodes := rapid.IntRange(1, int(metadata.MaxFaultyVotingPower())).Draw(t, "malicious nodes").(int)
 		maliciousNodes := generateMaliciousProposers(faultyNodes)
 		votingPower := make(map[pbft.NodeID]uint64, numOfNodes)
 
@@ -354,7 +358,7 @@ func TestProperty_NodesWithMajorityOfVotingPowerCanAchiveAgreement(t *testing.T)
 		for i := range stake {
 			votingPower[pbft.NodeID(strconv.Itoa(i))] = stake[i]
 		}
-		metadata := pbft.NewVotingMetadata(&pbft.Config{VotingPower: votingPower}, uint(numOfNodes))
+		metadata := pbft.NewVotingMetadata(votingPower)
 		quorumVotingPower := metadata.QuorumSize()
 		connectionsList := rapid.SliceOfDistinct(rapid.IntRange(0, numOfNodes-1), func(v int) int {
 			return v
@@ -452,7 +456,7 @@ func getMaxClusterRound(cluster []*pbft.Pbft) uint64 {
 	return maxRound
 }
 
-func generateNode(id int, transport *pbft.TransportStub, votingPower map[pbft.NodeID]uint64) (*pbft.Pbft, chan time.Time) {
+func generateNode(id int, transport *pbft.TransportStub) (*pbft.Pbft, chan time.Time) {
 	timeoutChan := make(chan time.Time)
 	node := pbft.New(pbft.ValidatorKeyMock(strconv.Itoa(id)), transport,
 		pbft.WithTracer(trace.NewNoopTracerProvider().Tracer("")),
@@ -460,7 +464,6 @@ func generateNode(id int, transport *pbft.TransportStub, votingPower map[pbft.No
 		pbft.WithRoundTimeout(func(_ uint64) <-chan time.Time {
 			return timeoutChan
 		}),
-		pbft.WithVotingPower(votingPower),
 	)
 
 	transport.Nodes = append(transport.Nodes, node)
@@ -476,13 +479,14 @@ func generateCluster(numOfNodes int, transport *pbft.TransportStub, votingPower 
 	}
 	cluster := make([]*pbft.Pbft, numOfNodes)
 	for i := 0; i < numOfNodes; i++ {
-		cluster[i], timeoutsChan[i] = generateNode(i, transport, votingPower)
+		cluster[i], timeoutsChan[i] = generateNode(i, transport)
 		nodes[i] = strconv.Itoa(i)
 	}
 
 	for _, nd := range cluster {
 		_ = nd.SetBackend(&BackendFake{
-			nodes: nodes,
+			nodes:          nodes,
+			votingPowerMap: votingPower,
 			insertFunc: func(proposal *pbft.SealedProposal) error {
 				return ip.Insert(*proposal)
 			},

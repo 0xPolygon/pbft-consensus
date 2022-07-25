@@ -18,6 +18,7 @@ type IntegrationBackend interface {
 // BackendFake implements IntegrationBackend interface
 type BackendFake struct {
 	nodes           []string
+	votingPowerMap  map[pbft.NodeID]uint64
 	height          uint64
 	lastProposer    pbft.NodeID
 	proposalAddTime time.Duration
@@ -84,6 +85,21 @@ func (bf *BackendFake) ValidatorSet() pbft.ValidatorSet {
 
 func (bf *BackendFake) ValidateCommit(from pbft.NodeID, seal []byte) error {
 	return nil
+}
+
+func (bf *BackendFake) GetVotingMetadata() pbft.VotingMetadata {
+	var votingPower map[pbft.NodeID]uint64
+	if len(bf.votingPowerMap) > 0 && len(bf.votingPowerMap) == len(bf.nodes) {
+		votingPower = bf.votingPowerMap
+	} else {
+		pbftNodeIds := make([]pbft.NodeID, len(bf.nodes))
+		for i, nodeId := range bf.nodes {
+			pbftNodeIds[i] = pbft.NodeID(nodeId)
+		}
+		votingPower = pbft.CreateEqualWeightValidatorsMap(pbftNodeIds)
+	}
+
+	return pbft.NewVotingMetadata(votingPower)
 }
 
 // SetBackendData implements IntegrationBackend interface and sets the data needed for backend

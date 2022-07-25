@@ -1,14 +1,16 @@
 package pbft
 
 import (
+	"fmt"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNonWeightedVotingMetadata_MaxFaulty(t *testing.T) {
+func TestVotingMetadata_MaxFaultyVotingPower_EqualVotingPower(t *testing.T) {
 	cases := []struct {
-		TotalNodesCount, FaultyNodesCount uint
+		nodesCount, faultyNodesCount uint
 	}{
 		{0, 0},
 		{1, 0},
@@ -25,15 +27,16 @@ func TestNonWeightedVotingMetadata_MaxFaulty(t *testing.T) {
 		{100, 33},
 	}
 	for _, c := range cases {
-		metadata := &NonWeightedVotingMetadata{nodesCount: c.TotalNodesCount}
-		assert.Equal(t, c.FaultyNodesCount, uint(metadata.MaxFaultyWeight()))
+		votingPowers := CreateEqualWeightValidatorsMap(createValidatorIds(c.nodesCount))
+		metadata := NewVotingMetadata(votingPowers)
+		assert.Equal(t, c.faultyNodesCount, uint(metadata.MaxFaultyVotingPower()))
 	}
 }
 
-func TestNonWeightedVotingMetadata_QuorumSize(t *testing.T) {
+func TestVotingMetadata_QuorumSize_EqualVotingPower(t *testing.T) {
 	cases := []struct {
-		TotalNodesCount uint
-		QuorumSize      uint64
+		nodesCount uint
+		quorumSize uint64
 	}{
 		{1, 1},
 		{2, 1},
@@ -49,12 +52,35 @@ func TestNonWeightedVotingMetadata_QuorumSize(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		metadata := &NonWeightedVotingMetadata{nodesCount: c.TotalNodesCount}
-		assert.Equal(t, c.QuorumSize, metadata.QuorumSize())
+		votingPowers := CreateEqualWeightValidatorsMap(createValidatorIds(c.nodesCount))
+		metadata := NewVotingMetadata(votingPowers)
+		assert.Equal(t, c.quorumSize, metadata.QuorumSize())
 	}
 }
 
-func TestWeightedVotingMetadata_MaxFaultyWeight(t *testing.T) {
+func TestVotingMetadata_CalculateWeight_EqualVotingPower(t *testing.T) {
+	cases := []struct {
+		nodesCount uint
+		weight     uint64
+	}{
+		{1, 1},
+		{3, 3},
+		{4, 4},
+		{100, 100},
+	}
+
+	for _, c := range cases {
+		votingPower := CreateEqualWeightValidatorsMap(createValidatorIds(c.nodesCount))
+		metadata := NewVotingMetadata(votingPower)
+		messages := make(map[NodeID]*MessageReq, len(votingPower))
+		for nodeId := range votingPower {
+			messages[nodeId] = &MessageReq{}
+		}
+		assert.Equal(t, c.weight, metadata.CalculateVotingPower(messages))
+	}
+}
+
+func TestVotingMetadata_MaxFaultyVotingPower_MixedVotingPower(t *testing.T) {
 	cases := []struct {
 		votingPower    map[NodeID]uint64
 		maxFaultyNodes uint64
@@ -65,41 +91,49 @@ func TestWeightedVotingMetadata_MaxFaultyWeight(t *testing.T) {
 		{map[NodeID]uint64{"A": 50, "B": 25, "C": 10, "D": 15}, 33},
 	}
 	for _, c := range cases {
-		metadata := &WeightedVotingMetadata{votingPowerMap: c.votingPower}
-		assert.Equal(t, c.maxFaultyNodes, metadata.MaxFaultyWeight())
+		metadata := &WeightedVotingMetadata{votingPower: c.votingPower}
+		assert.Equal(t, c.maxFaultyNodes, metadata.MaxFaultyVotingPower())
 	}
 }
 
-func TestWeightedVotingMetadata_QuorumSize(t *testing.T) {
+func TestVotingMetadata_QuorumSize_MixedVotingPower(t *testing.T) {
 	cases := []struct {
 		votingPower map[NodeID]uint64
 		quorumSize  uint64
 	}{
-		{map[NodeID]uint64{"A": 5, "B": 5, "C": 6}, 11},
 		{map[NodeID]uint64{"A": 5, "B": 5, "C": 5, "D": 5}, 13},
+		{map[NodeID]uint64{"A": 5, "B": 5, "C": 6}, 11},
 		{map[NodeID]uint64{"A": 50, "B": 25, "C": 10, "D": 15}, 67},
 	}
 	for _, c := range cases {
-		metadata := &WeightedVotingMetadata{votingPowerMap: c.votingPower}
+		metadata := NewVotingMetadata(c.votingPower)
 		assert.Equal(t, c.quorumSize, metadata.QuorumSize())
 	}
 }
 
-func TestWeightedVotingMetadata_CalculateWeight(t *testing.T) {
+func TestVotingMetadata_CalculateWeight_MixedVotingPower(t *testing.T) {
 	cases := []struct {
 		votingPower map[NodeID]uint64
 		quorumSize  uint64
 	}{
-		{map[NodeID]uint64{"A": 5, "B": 5, "C": 6}, 16},
 		{map[NodeID]uint64{"A": 5, "B": 5, "C": 5, "D": 5}, 20},
+		{map[NodeID]uint64{"A": 5, "B": 5, "C": 6}, 16},
 		{map[NodeID]uint64{"A": 50, "B": 25, "C": 10, "D": 15}, 100},
 	}
 	for _, c := range cases {
-		metadata := &WeightedVotingMetadata{votingPowerMap: c.votingPower}
+		metadata := NewVotingMetadata(c.votingPower)
 		messages := make(map[NodeID]*MessageReq, len(c.votingPower))
 		for nodeId := range c.votingPower {
 			messages[nodeId] = &MessageReq{}
 		}
-		assert.Equal(t, c.quorumSize, metadata.CalculateWeight(messages))
+		assert.Equal(t, c.quorumSize, metadata.CalculateVotingPower(messages))
 	}
+}
+
+func createValidatorIds(validatorsCount uint) []NodeID {
+	validatorIds := make([]NodeID, validatorsCount)
+	for i := uint(0); i < validatorsCount; i++ {
+		validatorIds[i] = NodeID(fmt.Sprintf("NODE_%s", strconv.Itoa(int(i+1))))
+	}
+	return validatorIds
 }
