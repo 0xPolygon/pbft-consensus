@@ -150,7 +150,13 @@ func (p *Pbft) SetBackend(backend Backend) error {
 	p.state.validators = p.backend.ValidatorSet()
 
 	// set voting metadata
-	p.votingMetadata = backend.GetVotingMetadata()
+	p.votingMetadata = p.backend.GetVotingMetadata()
+	if p.votingMetadata == nil {
+		panic(errors.New("voting metadata implementation not provided"))
+	}
+	if p.votingMetadata.MaxFaultyVotingPower() >= p.votingMetadata.QuorumSize() {
+		panic(errors.New("invalid voting metadata implementation provided. QuorumSize must be larger than MaxFaultyVotingPower."))
+	}
 
 	return nil
 }
@@ -567,7 +573,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 		// otherwise, it is due to a timeout in any stage
 		// First, we try to sync up with any max round already available
 		// F + 1 round change messages for given round, where F denotes MaxFaulty is expected, in order to fast-track to maxRound
-		if maxRound, ok := p.state.maxRound(p.votingMetadata.MaxFaultyVotingPower() + 1); ok {
+		if maxRound, ok := p.state.maxRound(p.votingMetadata); ok {
 			p.logger.Printf("[DEBUG] round change, max round=%d", maxRound)
 			sendRoundChange(maxRound)
 		} else {

@@ -106,7 +106,7 @@ func TestState_MaxRound_Found(t *testing.T) {
 	}
 
 	votingMetadata := NewVotingMetadata(CreateEqualWeightValidatorsMap(pbftValidatorIds))
-	maxRound, found := s.maxRound(votingMetadata.MaxFaultyVotingPower() + 1)
+	maxRound, found := s.maxRound(votingMetadata)
 	assert.Equal(t, uint64(5), maxRound)
 	assert.Equal(t, true, found)
 }
@@ -127,7 +127,7 @@ func TestState_MaxRound_NotFound(t *testing.T) {
 	s.addMessage(createMessage(validatorIds[0], MessageReq_Preprepare))
 
 	metadata := NewVotingMetadata(CreateEqualWeightValidatorsMap(pbftValidatorIds))
-	maxRound, found := s.maxRound(metadata.MaxFaultyVotingPower() + 1)
+	maxRound, found := s.maxRound(metadata)
 	assert.Equal(t, maxRound, uint64(0))
 	assert.Equal(t, found, false)
 
@@ -143,7 +143,7 @@ func TestState_MaxRound_NotFound(t *testing.T) {
 		}
 	}
 
-	maxRound, found = s.maxRound(metadata.MaxFaultyVotingPower() + 1)
+	maxRound, found = s.maxRound(metadata)
 	assert.Equal(t, uint64(0), maxRound)
 	assert.Equal(t, false, found)
 }

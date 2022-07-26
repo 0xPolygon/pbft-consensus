@@ -96,9 +96,12 @@ func (s *state) getErr() error {
 	return err
 }
 
-func (s *state) maxRound(minRequiredMessages uint64) (maxRound uint64, found bool) {
+// maxRound tries to resolve the round node should fast-track, based on round change messages.
+// Quorum size for round change messages is F+1 (where F denotes max faulty voting power)
+func (s *state) maxRound(votingMetadata VotingMetadata) (maxRound uint64, found bool) {
 	for currentRound, messages := range s.roundMessages {
-		if uint64(len(messages)) < minRequiredMessages {
+		accumulatedVotingPower := votingMetadata.CalculateVotingPower(messages.extractNodeIds())
+		if accumulatedVotingPower < votingMetadata.MaxFaultyVotingPower()+1 {
 			continue
 		}
 		if maxRound < currentRound {
