@@ -26,13 +26,13 @@ type state struct {
 	previousRound uint64
 
 	// List of prepared messages
-	prepared map[NodeID]*MessageReq
+	prepared messages
 
 	// List of committed messages
-	committed map[NodeID]*MessageReq
+	committed messages
 
 	// List of round change messages
-	roundMessages map[uint64]map[NodeID]*MessageReq
+	roundMessages map[uint64]messages
 
 	// Locked signals whether the proposal is locked
 	locked uint64
@@ -114,7 +114,7 @@ func (s *state) maxRound(minRequiredMessages uint64) (maxRound uint64, found boo
 func (s *state) resetRoundMsgs() {
 	s.prepared = map[NodeID]*MessageReq{}
 	s.committed = map[NodeID]*MessageReq{}
-	s.roundMessages = map[uint64]map[NodeID]*MessageReq{}
+	s.roundMessages = map[uint64]messages{}
 }
 
 // CalcProposer calculates the proposer and sets it to the state
@@ -212,11 +212,13 @@ func (s *state) SetCurrentRound(round uint64) {
 	atomic.StoreUint64(&s.view.Round, round)
 }
 
+type messages map[NodeID]*MessageReq
+
 // extractNodeIds returns slice of message senders
-func extractNodeIds(messages map[NodeID]*MessageReq) []NodeID {
-	nodeIds := make([]NodeID, len(messages))
+func (m messages) extractNodeIds() []NodeID {
+	nodeIds := make([]NodeID, len(m))
 	i := 0
-	for nodeId := range messages {
+	for nodeId := range m {
 		nodeIds[i] = nodeId
 		i++
 	}
