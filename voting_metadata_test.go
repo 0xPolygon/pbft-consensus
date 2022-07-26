@@ -72,11 +72,13 @@ func TestVotingMetadata_CalculateWeight_EqualVotingPower(t *testing.T) {
 	for _, c := range cases {
 		votingPower := CreateEqualWeightValidatorsMap(createValidatorIds(c.nodesCount))
 		metadata := NewVotingMetadata(votingPower)
-		messages := make(map[NodeID]*MessageReq, len(votingPower))
+		senders := make([]NodeID, len(votingPower))
+		i := 0
 		for nodeId := range votingPower {
-			messages[nodeId] = &MessageReq{}
+			senders[i] = nodeId
+			i++
 		}
-		assert.Equal(t, c.weight, metadata.CalculateVotingPower(messages))
+		assert.Equal(t, c.weight, metadata.CalculateVotingPower(senders))
 	}
 }
 
@@ -122,11 +124,13 @@ func TestVotingMetadata_CalculateWeight_MixedVotingPower(t *testing.T) {
 	}
 	for _, c := range cases {
 		metadata := NewVotingMetadata(c.votingPower)
-		messages := make(map[NodeID]*MessageReq, len(c.votingPower))
+		senders := make([]NodeID, len(c.votingPower))
+		i := 0
 		for nodeId := range c.votingPower {
-			messages[nodeId] = &MessageReq{}
+			senders[i] = nodeId
+			i++
 		}
-		assert.Equal(t, c.quorumSize, metadata.CalculateVotingPower(messages))
+		assert.Equal(t, c.quorumSize, metadata.CalculateVotingPower(senders))
 	}
 }
 

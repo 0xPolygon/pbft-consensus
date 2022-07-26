@@ -6,7 +6,7 @@ type VotingMetadata interface {
 	// MaxFaultyVotingPower returns maximum quantity of faulty voting power, in order to meet practical Byzantine conditions
 	MaxFaultyVotingPower() uint64
 	// CalculateVotingPower returns sum of weights for given messages senders
-	CalculateVotingPower(messages map[NodeID]*MessageReq) uint64
+	CalculateVotingPower(senders []NodeID) uint64
 }
 
 // NewVotingMetadata initializes instance of VotingMetadata
@@ -39,11 +39,11 @@ func (v *WeightedVotingMetadata) MaxFaultyVotingPower() uint64 {
 	return (totalVotingPower - 1) / 3
 }
 
-// CalculateVotingPower calculates voting power of validators which are found in the provided messages map.
-func (v *WeightedVotingMetadata) CalculateVotingPower(messages map[NodeID]*MessageReq) uint64 {
-	roundVotingPower := uint64(0)
-	for nodeId := range messages {
-		roundVotingPower += v.votingPower[nodeId]
+// CalculateVotingPower calculates voting power of provided senders
+func (v *WeightedVotingMetadata) CalculateVotingPower(senders []NodeID) uint64 {
+	accumulatedVotingPower := uint64(0)
+	for _, nodeId := range senders {
+		accumulatedVotingPower += v.votingPower[nodeId]
 	}
-	return roundVotingPower
+	return accumulatedVotingPower
 }

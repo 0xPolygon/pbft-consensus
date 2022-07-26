@@ -425,12 +425,12 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 		}
 
 		quorum := p.votingMetadata.QuorumSize()
-		if p.votingMetadata.CalculateVotingPower(p.state.prepared) >= quorum {
+		if p.votingMetadata.CalculateVotingPower(extractNodeIds(p.state.prepared)) >= quorum {
 			// we have received enough prepare messages
 			sendCommit(span)
 		}
 
-		if p.votingMetadata.CalculateVotingPower(p.state.committed) >= quorum {
+		if p.votingMetadata.CalculateVotingPower(extractNodeIds(p.state.committed)) >= quorum {
 			// we have received enough commit messages
 			sendCommit(span)
 
@@ -599,7 +599,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 		// we only expect RoundChange messages right now
 		_ = p.state.AddRoundMessage(msg)
 
-		currentVotingPower := p.votingMetadata.CalculateVotingPower(p.state.roundMessages[msg.View.Round])
+		currentVotingPower := p.votingMetadata.CalculateVotingPower(extractNodeIds(p.state.roundMessages[msg.View.Round]))
 		// Round change quorum is 2*F round change messages (F denotes max faulty voting power)
 		requiredVotingPower := 2 * p.votingMetadata.MaxFaultyVotingPower()
 		if currentVotingPower >= requiredVotingPower {

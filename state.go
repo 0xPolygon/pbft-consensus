@@ -211,3 +211,14 @@ func (s *state) SetCurrentRound(round uint64) {
 	atomic.StoreUint64(&s.previousRound, s.view.Round)
 	atomic.StoreUint64(&s.view.Round, round)
 }
+
+// extractNodeIds returns slice of message senders
+func extractNodeIds(messages map[NodeID]*MessageReq) []NodeID {
+	nodeIds := make([]NodeID, len(messages))
+	i := 0
+	for nodeId := range messages {
+		nodeIds[i] = nodeId
+		i++
+	}
+	return nodeIds
+}
