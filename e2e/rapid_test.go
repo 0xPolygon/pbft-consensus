@@ -352,14 +352,13 @@ func TestProperty_SeveralHonestNodesWithVotingPowerCanAchiveAgreement(t *testing
 
 func TestProperty_NodesWithMajorityOfVotingPowerCanAchiveAgreement(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		numOfNodes := rapid.IntRange(4, 10).Draw(t, "num of nodes").(int)
+		numOfNodes := rapid.IntRange(5, 12).Draw(t, "num of nodes").(int)
 		stake := rapid.SliceOfN(rapid.Uint64Range(5, 10), numOfNodes, numOfNodes).Draw(t, "Generate stake").([]uint64)
 		votingPower := make(map[pbft.NodeID]uint64, numOfNodes)
 		for i := range stake {
 			votingPower[pbft.NodeID(strconv.Itoa(i))] = stake[i]
 		}
 		metadata := pbft.NewVotingMetadata(votingPower)
-		quorumVotingPower := metadata.QuorumSize()
 		connectionsList := rapid.SliceOfDistinct(rapid.IntRange(0, numOfNodes-1), func(v int) int {
 			return v
 		}).Filter(func(votes []int) bool {
@@ -367,7 +366,7 @@ func TestProperty_NodesWithMajorityOfVotingPowerCanAchiveAgreement(t *testing.T)
 			for i := range votes {
 				votesVP += stake[votes[i]]
 			}
-			return votesVP >= quorumVotingPower
+			return votesVP >= metadata.QuorumSize()
 		}).Draw(t, "Select arbitrary nodes that have majority of voting power").([]int)
 
 		connections := map[pbft.NodeID]struct{}{}
