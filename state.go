@@ -34,6 +34,9 @@ type state struct {
 	// List of round change messages
 	roundMessages map[uint64]messages
 
+	// votingMetadata is a reference which encapsulates logic for quorum determination
+	votingMetadata *VotingMetadata
+
 	// Locked signals whether the proposal is locked
 	locked uint64
 
@@ -98,7 +101,7 @@ func (s *state) getErr() error {
 
 // maxRound tries to resolve the round node should fast-track, based on round change messages.
 // Quorum size for round change messages is F+1 (where F denotes max faulty voting power)
-func (s *state) maxRound(votingMetadata VotingMetadata) (maxRound uint64, found bool) {
+func (s *state) maxRound(votingMetadata *VotingMetadata) (maxRound uint64, found bool) {
 	for currentRound, messages := range s.roundMessages {
 		accumulatedVotingPower := votingMetadata.CalculateVotingPower(messages.extractNodeIds())
 		if accumulatedVotingPower < votingMetadata.MaxFaultyVotingPower()+1 {

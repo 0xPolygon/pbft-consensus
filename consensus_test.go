@@ -816,7 +816,7 @@ func TestRoundChange_PropertyMajorityOfVotingPowerAggreement(t *testing.T) {
 			1,
 			1,
 		}
-		node.votingMetadata = metadata
+		node.state.votingMetadata = metadata
 		for _, voterID := range votes {
 			node.PushMessage(&MessageReq{Type: MessageReq_RoundChange, From: NodeID(strconv.Itoa(voterID)), View: ViewMsg(1, 2)})
 		}
@@ -1080,8 +1080,4 @@ func (m *mockBackend) ValidatorSet() ValidatorSet {
 }
 
 func (m *mockBackend) Init(*RoundInfo) {
-}
-
-func (m *mockBackend) GetVotingMetadata() VotingMetadata {
-	return NewVotingMetadata(CreateEqualWeightValidatorsMap([]NodeID(*m.validators)))
 }

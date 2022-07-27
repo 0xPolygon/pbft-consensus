@@ -5,6 +5,7 @@ type ValidatorSet interface {
 	CalcProposer(round uint64) NodeID
 	Includes(id NodeID) bool
 	Len() int
+	VotingPower() map[NodeID]uint64
 }
 
 // Logger represents logger behavior
@@ -59,7 +60,4 @@ type Backend interface {
 
 	// ValidateCommit is used to validate that a given commit is valid
 	ValidateCommit(from NodeID, seal []byte) error
-
-	// GetVotingMetadata is used to retrieve voting metadata, which abstracts votes counting calculation
-	GetVotingMetadata() VotingMetadata
 }

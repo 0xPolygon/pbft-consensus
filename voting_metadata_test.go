@@ -93,7 +93,7 @@ func TestVotingMetadata_MaxFaultyVotingPower_MixedVotingPower(t *testing.T) {
 		{map[NodeID]uint64{"A": 50, "B": 25, "C": 10, "D": 15}, 33},
 	}
 	for _, c := range cases {
-		metadata := &WeightedVotingMetadata{votingPower: c.votingPower}
+		metadata := NewVotingMetadata(c.votingPower)
 		assert.Equal(t, c.maxFaultyNodes, metadata.MaxFaultyVotingPower())
 	}
 }

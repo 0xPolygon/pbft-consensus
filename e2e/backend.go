@@ -87,21 +87,6 @@ func (bf *BackendFake) ValidateCommit(from pbft.NodeID, seal []byte) error {
 	return nil
 }
 
-func (bf *BackendFake) GetVotingMetadata() pbft.VotingMetadata {
-	var votingPower map[pbft.NodeID]uint64
-	if len(bf.votingPowerMap) > 0 && len(bf.votingPowerMap) == len(bf.nodes) {
-		votingPower = bf.votingPowerMap
-	} else {
-		pbftNodeIds := make([]pbft.NodeID, len(bf.nodes))
-		for i, nodeId := range bf.nodes {
-			pbftNodeIds[i] = pbft.NodeID(nodeId)
-		}
-		votingPower = pbft.CreateEqualWeightValidatorsMap(pbftNodeIds)
-	}
-
-	return pbft.NewVotingMetadata(votingPower)
-}
-
 // SetBackendData implements IntegrationBackend interface and sets the data needed for backend
 func (bf *BackendFake) SetBackendData(n *node) {
 	bf.nodes = n.nodes

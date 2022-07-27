@@ -65,6 +65,10 @@ func (v *ValStringStub) Len() int {
 	return len(*v)
 }
 
+func (v *ValStringStub) VotingPower() map[NodeID]uint64 {
+	return CreateEqualWeightValidatorsMap(*v)
+}
+
 // CreateEqualWeightValidatorsMap is a helper function which creates map with same weight for every validator id in the provided slice
 func CreateEqualWeightValidatorsMap(validatorIds []NodeID) map[NodeID]uint64 {
 	weightedValidators := make(map[NodeID]uint64, len(validatorIds))
