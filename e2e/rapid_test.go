@@ -403,7 +403,7 @@ func TestProperty_NodesWithMajorityOfVotingPowerCanAchiveAgreement(t *testing.T)
 			sendTimeoutIfNNodesStucked(t, timeoutsChan, numOfNodes),
 			func(doneList *helper.BoolSlice) bool {
 				accumulatedVotingPower := uint64(0)
-				// everything done. All nodes in done state
+				// enough nodes (by their respective voting power) are in done state
 				doneList.Iterate(func(index int, isDone bool) {
 					if isDone {
 						accumulatedVotingPower += votingPower[cluster[index].GetValidatorId()]
