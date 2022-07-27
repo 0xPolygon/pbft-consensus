@@ -343,7 +343,7 @@ func (c *Cluster) startNode(name string) {
 func (c *Cluster) MaxFaulty() (uint64, error) {
 	nodes := c.getNodes()
 	if len(nodes) == 0 {
-		return 0, errors.New("unable to determine max faulty nodes: cluster is empty")
+		return 0, errors.New("unable to determine max faulty nodes, because cluster is empty")
 	}
 	return nodes[0].pbft.MaxFaultyVotingPower(), nil
 }
@@ -352,7 +352,7 @@ func (c *Cluster) MaxFaulty() (uint64, error) {
 func (c *Cluster) QuorumSize() (uint64, error) {
 	nodes := c.getNodes()
 	if len(nodes) == 0 {
-		return 0, errors.New("unable to determine max faulty nodes: cluster is empty")
+		return 0, errors.New("unable to determine quorum size, because cluster is empty")
 	}
 	return nodes[0].pbft.QuorumSize(), nil
 }

@@ -370,10 +370,10 @@ func TestProperty_NodesWithMajorityOfVotingPowerCanAchiveAgreement(t *testing.T)
 		}).Draw(t, "Select arbitrary nodes that have majority of voting power").([]int)
 
 		connections := map[pbft.NodeID]struct{}{}
-		var connectionsStake uint64
+		var topologyVotingPower uint64
 		for _, nodeIDInt := range connectionsList {
 			connections[pbft.NodeID(strconv.Itoa(nodeIDInt))] = struct{}{}
-			connectionsStake += stake[nodeIDInt]
+			topologyVotingPower += stake[nodeIDInt]
 		}
 
 		ft := &pbft.TransportStub{
@@ -402,8 +402,14 @@ func TestProperty_NodesWithMajorityOfVotingPowerCanAchiveAgreement(t *testing.T)
 			cluster,
 			sendTimeoutIfNNodesStucked(t, timeoutsChan, numOfNodes),
 			func(doneList *helper.BoolSlice) bool {
+				accumulatedVotingPower := uint64(0)
 				// everything done. All nodes in done state
-				return doneList.CalculateNum(true) >= len(connections)
+				doneList.Iterate(func(index int, isDone bool) {
+					if isDone {
+						accumulatedVotingPower += votingPower[cluster[index].GetValidatorId()]
+					}
+				})
+				return accumulatedVotingPower >= topologyVotingPower
 			}, func(maxRound uint64) bool {
 				// something went wrong.
 				if maxRound > 3 {

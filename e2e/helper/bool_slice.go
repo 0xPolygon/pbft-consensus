@@ -29,7 +29,7 @@ func (bs *BoolSlice) Get(i int) bool {
 }
 
 func (bs *BoolSlice) Iterate(f func(k int, v bool)) {
-	bs.mtx.RUnlock()
+	bs.mtx.RLock()
 	defer bs.mtx.RUnlock()
 	for k, v := range bs.slice {
 		f(k, v)
