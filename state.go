@@ -34,8 +34,11 @@ type state struct {
 	// List of round change messages
 	roundMessages map[uint64]messages
 
-	// votingMetadata is a reference which encapsulates logic for quorum determination
-	votingMetadata *VotingMetadata
+	// maxFaultyVotingPower represents max tolerable faulty voting power in order to have Byzantine fault tollerance property satisfied
+	maxFaultyVotingPower uint64
+
+	// quorumSize represents minimum accumulated voting power needed to proceed to next PBFT state
+	quorumSize uint64
 
 	// Locked signals whether the proposal is locked
 	locked uint64
@@ -58,6 +61,39 @@ func newState() *state {
 	c.resetRoundMsgs()
 
 	return c
+}
+
+// initializeVotingInfo populates voting information: maximum faulty voting power and quorum size,
+// based on the provided voting power map from ValidatorSet
+func (s *state) initializeVotingInfo() error {
+	maxFaultyVotingPower, quorumSize, err := CalculateQuorum(s.validators.VotingPower())
+	if err != nil {
+		return err
+	}
+	s.maxFaultyVotingPower = maxFaultyVotingPower
+	s.quorumSize = quorumSize
+	return nil
+}
+
+// CalculateVotingPower calculates voting power of provided senders
+func (s *state) CalculateVotingPower(senders []NodeID) uint64 {
+	accumulatedVotingPower := uint64(0)
+	for _, nodeId := range senders {
+		accumulatedVotingPower += s.validators.VotingPower()[nodeId]
+	}
+	return accumulatedVotingPower
+}
+
+// QuorumSize calculates quorum size (namely the number of required messages of some type in order to proceed to the next state in PBFT state machine).
+// It is calculated by formula:
+// 2 * F + 1, where F denotes maximum count of faulty nodes in order to have Byzantine fault tollerant property satisfied.
+func (s *state) QuorumSize() uint64 {
+	return s.quorumSize
+}
+
+// MaxFaultyVotingPower is calculated as at most 1/3 of total voting power of the entire validator set.
+func (s *state) MaxFaultyVotingPower() uint64 {
+	return s.maxFaultyVotingPower
 }
 
 func (s *state) IsLocked() bool {
@@ -101,10 +137,10 @@ func (s *state) getErr() error {
 
 // maxRound tries to resolve the round node should fast-track, based on round change messages.
 // Quorum size for round change messages is F+1 (where F denotes max faulty voting power)
-func (s *state) maxRound(votingMetadata *VotingMetadata) (maxRound uint64, found bool) {
+func (s *state) maxRound() (maxRound uint64, found bool) {
 	for currentRound, messages := range s.roundMessages {
-		accumulatedVotingPower := votingMetadata.CalculateVotingPower(messages.extractNodeIds())
-		if accumulatedVotingPower < votingMetadata.MaxFaultyVotingPower()+1 {
+		accumulatedVotingPower := s.CalculateVotingPower(messages.extractNodeIds())
+		if accumulatedVotingPower < s.MaxFaultyVotingPower()+1 {
 			continue
 		}
 		if maxRound < currentRound {

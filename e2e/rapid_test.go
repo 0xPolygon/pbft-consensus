@@ -19,6 +19,7 @@ import (
 
 	"github.com/0xPolygon/pbft-consensus"
 	"github.com/0xPolygon/pbft-consensus/e2e/helper"
+	"github.com/stretchr/testify/require"
 )
 
 const waitDuration = 50 * time.Millisecond
@@ -259,8 +260,9 @@ func TestProperty_NodeDoubleSign(t *testing.T) {
 		for i := 0; i < numOfNodes; i++ {
 			weightedNodes[pbft.NodeID(fmt.Sprintf("NODE_%s", strconv.Itoa(i)))] = 1
 		}
-		metadata := pbft.NewVotingMetadata(weightedNodes)
-		faultyNodes := rapid.IntRange(1, int(metadata.MaxFaultyVotingPower())).Draw(t, "malicious nodes").(int)
+		maxFaultyVotingPower, _, err := pbft.CalculateQuorum(weightedNodes)
+		require.NoError(t, err)
+		faultyNodes := rapid.IntRange(1, int(maxFaultyVotingPower)).Draw(t, "malicious nodes").(int)
 		maliciousNodes := generateMaliciousProposers(faultyNodes)
 		votingPower := make(map[pbft.NodeID]uint64, numOfNodes)
 
@@ -294,7 +296,7 @@ func TestProperty_NodeDoubleSign(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 
-		err := runCluster(ctx,
+		err = runCluster(ctx,
 			cluster,
 			sendTimeoutIfNNodesStucked(t, timeoutsChan, numOfNodes),
 			func(doneList *helper.BoolSlice) bool {
@@ -358,7 +360,9 @@ func TestProperty_NodesWithMajorityOfVotingPowerCanAchiveAgreement(t *testing.T)
 		for i := range stake {
 			votingPower[pbft.NodeID(strconv.Itoa(i))] = stake[i]
 		}
-		metadata := pbft.NewVotingMetadata(votingPower)
+		_, quorumSize, err := pbft.CalculateQuorum(votingPower)
+		require.NoError(t, err)
+
 		connectionsList := rapid.SliceOfDistinct(rapid.IntRange(0, numOfNodes-1), func(v int) int {
 			return v
 		}).Filter(func(votes []int) bool {
@@ -366,7 +370,7 @@ func TestProperty_NodesWithMajorityOfVotingPowerCanAchiveAgreement(t *testing.T)
 			for i := range votes {
 				votesVP += stake[votes[i]]
 			}
-			return votesVP >= metadata.QuorumSize()
+			return votesVP >= quorumSize
 		}).Draw(t, "Select arbitrary nodes that have majority of voting power").([]int)
 
 		connections := map[pbft.NodeID]struct{}{}
@@ -398,7 +402,7 @@ func TestProperty_NodesWithMajorityOfVotingPowerCanAchiveAgreement(t *testing.T)
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 
-		err := runCluster(ctx,
+		err = runCluster(ctx,
 			cluster,
 			sendTimeoutIfNNodesStucked(t, timeoutsChan, numOfNodes),
 			func(doneList *helper.BoolSlice) bool {

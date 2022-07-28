@@ -794,19 +794,7 @@ func TestRoundChange_PropertyMajorityOfVotingPowerAggreement(t *testing.T) {
 		}
 		validatorSet := NewValStringStub(validators, votingPower)
 
-		metadata := NewVotingMetadata(votingPower)
-		quorumVotingPower := metadata.QuorumSize()
-
 		maxNodeID := numberOfNodes - 1
-		votes := rapid.SliceOfDistinct(rapid.IntRange(0, maxNodeID), func(v int) int {
-			return v
-		}).Filter(func(votes []int) bool {
-			var votesVP uint64
-			for i := range votes {
-				votesVP += stake[votes[i]]
-			}
-			return votesVP >= quorumVotingPower
-		}).Draw(t, "Select arbitrary nodes that have majority of voting power").([]int)
 
 		node := New(ValidatorKeyMock(strconv.Itoa(randomValidator)), &TransportStub{
 			GossipFunc: func(ft *TransportStub, msg *MessageReq) error {
@@ -818,7 +806,19 @@ func TestRoundChange_PropertyMajorityOfVotingPowerAggreement(t *testing.T) {
 			1,
 			1,
 		}
-		node.state.votingMetadata = metadata
+		err := node.state.initializeVotingInfo()
+		require.NoError(t, err)
+
+		votes := rapid.SliceOfDistinct(rapid.IntRange(0, maxNodeID), func(v int) int {
+			return v
+		}).Filter(func(votes []int) bool {
+			var votesVP uint64
+			for i := range votes {
+				votesVP += stake[votes[i]]
+			}
+			return votesVP >= node.state.QuorumSize()
+		}).Draw(t, "Select arbitrary nodes that have majority of voting power").([]int)
+
 		for _, voterID := range votes {
 			node.PushMessage(&MessageReq{Type: MessageReq_RoundChange, From: NodeID(strconv.Itoa(voterID)), View: ViewMsg(1, 2)})
 		}
