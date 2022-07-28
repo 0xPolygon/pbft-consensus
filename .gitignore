@@ -1,3 +1,5 @@
+.DS_Store
+*/**/.DS_Store
 SavedState/
 **/launch.json
 **/*.flow
@@ -6,3 +8,4 @@ SavedState/
 log*/
 e2e/*.fail
 *.fail
+coverage.out

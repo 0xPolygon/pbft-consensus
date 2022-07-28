@@ -43,7 +43,8 @@ func TestE2E_ClusterInsertFinalProposal(t *testing.T) {
 
 	// valid proposal => insert it
 	seq2Proposal := newSealedProposal([]byte{0x2}, "N1", 2)
-	c.insertFinalProposal(seq2Proposal)
+	err = c.insertFinalProposal(seq2Proposal)
+	assert.NoError(t, err)
 	assert.Len(t, c.sealedProposals, 2)
 }
 

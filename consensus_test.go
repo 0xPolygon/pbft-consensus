@@ -442,7 +442,7 @@ func TestTransition_RoundChangeState_WeakCertificate(t *testing.T) {
 func TestTransition_RoundChangeState_ErrStartNewRound(t *testing.T) {
 	// if we start a round change because there was an error we start
 	// a new round right away
-	m := newMockPbft(t, []string{"A", "B"}, "A")
+	m := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
 	m.Close()
 
 	m.state.err = errVerificationFailed
@@ -461,7 +461,7 @@ func TestTransition_RoundChangeState_ErrStartNewRound(t *testing.T) {
 func TestTransition_RoundChangeState_StartNewRound(t *testing.T) {
 	// if we start round change due to a state timeout and we are on the
 	// correct sequence, we start a new round
-	m := newMockPbft(t, []string{"A", "B"}, "A")
+	m := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
 	m.Close()
 
 	m.setState(RoundChangeState)
@@ -478,11 +478,19 @@ func TestTransition_RoundChangeState_StartNewRound(t *testing.T) {
 func TestTransition_RoundChangeState_MaxRound(t *testing.T) {
 	// if we start round change due to a state timeout we try to catch up
 	// with the highest round seen.
-	m := newMockPbft(t, []string{"A", "B", "C"}, "A")
+	m := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
 	m.Close()
 
 	m.addMessage(&MessageReq{
 		From: "B",
+		Type: MessageReq_RoundChange,
+		View: &View{
+			Round:    10,
+			Sequence: 1,
+		},
+	})
+	m.addMessage(&MessageReq{
+		From: "C",
 		Type: MessageReq_RoundChange,
 		View: &View{
 			Round:    10,
@@ -776,18 +784,31 @@ func TestRoundChange_PropertyMajorityOfVotingPowerAggreement(t *testing.T) {
 		numberOfNodes := rapid.IntRange(4, 100).Draw(t, "Generate number of nodes").(int)
 		stake := rapid.SliceOfN(rapid.Uint64Range(1, 1000000), numberOfNodes, numberOfNodes).Draw(t, "Generate stake").([]uint64)
 		randomValidator := rapid.IntRange(0, 99).Draw(t, "Get random validator").(int)
-		validators := make(ValStringStub, numberOfNodes)
+		validators := make([]NodeID, numberOfNodes)
 		votingPower := make(map[NodeID]uint64)
 
-		var totalVotingPower uint64
 		for i := range validators {
-			validators[i] = NodeID(strconv.Itoa(i))
-			votingPower[validators[i]] = stake[i]
-			totalVotingPower += stake[i]
+			nodeId := NodeID(strconv.Itoa(i))
+			validators[i] = nodeId
+			votingPower[nodeId] = stake[i]
 		}
-		quorumVotingPower := QuorumSizeVP(totalVotingPower)
+		validatorSet := NewValStringStub(validators, votingPower)
 
 		maxNodeID := numberOfNodes - 1
+
+		node := New(ValidatorKeyMock(strconv.Itoa(randomValidator)), &TransportStub{
+			GossipFunc: func(ft *TransportStub, msg *MessageReq) error {
+				return nil
+			},
+		}, WithLogger(log.New(io.Discard, "", log.LstdFlags)))
+		node.state.validators = validatorSet
+		node.state.view = &View{
+			1,
+			1,
+		}
+		err := node.state.initializeVotingInfo()
+		require.NoError(t, err)
+
 		votes := rapid.SliceOfDistinct(rapid.IntRange(0, maxNodeID), func(v int) int {
 			return v
 		}).Filter(func(votes []int) bool {
@@ -795,20 +816,9 @@ func TestRoundChange_PropertyMajorityOfVotingPowerAggreement(t *testing.T) {
 			for i := range votes {
 				votesVP += stake[votes[i]]
 			}
-			return votesVP >= quorumVotingPower
+			return votesVP >= node.state.QuorumSize()
 		}).Draw(t, "Select arbitrary nodes that have majority of voting power").([]int)
 
-		node := New(ValidatorKeyMock(strconv.Itoa(randomValidator)), &TransportStub{
-			GossipFunc: func(ft *TransportStub, msg *MessageReq) error {
-				return nil
-			},
-		}, WithLogger(log.New(io.Discard, "", log.LstdFlags)))
-		node.state.validators = &validators
-		node.config.VotingPower = votingPower
-		node.state.view = &View{
-			1,
-			1,
-		}
 		for _, voterID := range votes {
 			node.PushMessage(&MessageReq{Type: MessageReq_RoundChange, From: NodeID(strconv.Itoa(voterID)), View: ViewMsg(1, 2)})
 		}

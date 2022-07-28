@@ -28,7 +28,17 @@ func (ft *TransportStub) Gossip(msg *MessageReq) error {
 	return nil
 }
 
-type ValStringStub []NodeID
+func NewValStringStub(nodes []NodeID, votingPowerMap map[NodeID]uint64) *ValStringStub {
+	return &ValStringStub{
+		Nodes:          nodes,
+		VotingPowerMap: votingPowerMap,
+	}
+}
+
+type ValStringStub struct {
+	Nodes          []NodeID
+	VotingPowerMap map[NodeID]uint64
+}
 
 func (v *ValStringStub) CalcProposer(round uint64) NodeID {
 	seed := uint64(0)
@@ -39,11 +49,11 @@ func (v *ValStringStub) CalcProposer(round uint64) NodeID {
 	seed = uint64(offset) + round
 	pick := seed % uint64(v.Len())
 
-	return (*v)[pick]
+	return (v.Nodes)[pick]
 }
 
 func (v *ValStringStub) Index(id NodeID) int {
-	for i, currentId := range *v {
+	for i, currentId := range v.Nodes {
 		if currentId == id {
 			return i
 		}
@@ -53,7 +63,7 @@ func (v *ValStringStub) Index(id NodeID) int {
 }
 
 func (v *ValStringStub) Includes(id NodeID) bool {
-	for _, currentId := range *v {
+	for _, currentId := range v.Nodes {
 		if currentId == id {
 			return true
 		}
@@ -62,5 +72,18 @@ func (v *ValStringStub) Includes(id NodeID) bool {
 }
 
 func (v *ValStringStub) Len() int {
-	return len(*v)
+	return len(v.Nodes)
+}
+
+func (v *ValStringStub) VotingPower() map[NodeID]uint64 {
+	return v.VotingPowerMap
+}
+
+// CreateEqualWeightValidatorsMap is a helper function which creates map with same weight for every validator id in the provided slice
+func CreateEqualWeightValidatorsMap(validatorIds []NodeID) map[NodeID]uint64 {
+	weightedValidators := make(map[NodeID]uint64, len(validatorIds))
+	for _, validatorId := range validatorIds {
+		weightedValidators[validatorId] = 1
+	}
+	return weightedValidators
 }

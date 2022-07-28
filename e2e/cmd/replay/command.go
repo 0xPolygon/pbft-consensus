@@ -98,7 +98,11 @@ func (c *Command) Run(args []string) int {
 	}
 
 	messageReader.ReadMessages(nodes)
-	messageReader.CloseFile()
+	err = messageReader.CloseFile()
+	if err != nil {
+		c.UI.Error(err.Error())
+		return 1
+	}
 
 	var wg sync.WaitGroup
 	wg.Add(1)

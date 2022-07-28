@@ -19,6 +19,7 @@ import (
 
 	"github.com/0xPolygon/pbft-consensus"
 	"github.com/0xPolygon/pbft-consensus/e2e/helper"
+	"github.com/stretchr/testify/require"
 )
 
 const waitDuration = 50 * time.Millisecond
@@ -255,7 +256,13 @@ func TestProperty_NodeDoubleSign(t *testing.T) {
 		numOfNodes := rapid.IntRange(4, 7).Draw(t, "num of nodes").(int)
 		// sign different message to up to 1/2 of the nodes
 		maliciousMessagesToNodes := rapid.IntRange(0, numOfNodes/2).Draw(t, "malicious message to nodes").(int)
-		faultyNodes := rapid.IntRange(1, pbft.MaxFaultyNodes(numOfNodes)).Draw(t, "malicious nodes").(int)
+		weightedNodes := make(map[pbft.NodeID]uint64, numOfNodes)
+		for i := 0; i < numOfNodes; i++ {
+			weightedNodes[pbft.NodeID(fmt.Sprintf("NODE_%s", strconv.Itoa(i)))] = 1
+		}
+		maxFaultyVotingPower, _, err := pbft.CalculateQuorum(weightedNodes)
+		require.NoError(t, err)
+		faultyNodes := rapid.IntRange(1, int(maxFaultyVotingPower)).Draw(t, "malicious nodes").(int)
 		maliciousNodes := generateMaliciousProposers(faultyNodes)
 		votingPower := make(map[pbft.NodeID]uint64, numOfNodes)
 
@@ -289,14 +296,11 @@ func TestProperty_NodeDoubleSign(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 
-		err := runCluster(ctx,
+		err = runCluster(ctx,
 			cluster,
 			sendTimeoutIfNNodesStucked(t, timeoutsChan, numOfNodes),
 			func(doneList *helper.BoolSlice) bool {
-				if doneList.CalculateNum(true) >= 2*numOfNodes/3+1 {
-					return true
-				}
-				return false
+				return doneList.CalculateNum(true) >= 2*numOfNodes/3+1
 			}, func(maxRound uint64) bool {
 				if maxRound > 10 {
 					t.Error("Infinite rounds")
@@ -333,10 +337,7 @@ func TestProperty_SeveralHonestNodesWithVotingPowerCanAchiveAgreement(t *testing
 			sendTimeoutIfNNodesStucked(t, timeoutsChan, numOfNodes),
 			func(doneList *helper.BoolSlice) bool {
 				// everything done. All nodes in done state
-				if doneList.CalculateNum(true) == numOfNodes {
-					return true
-				}
-				return false
+				return doneList.CalculateNum(true) == numOfNodes
 			}, func(maxRound uint64) bool {
 				// something went wrong.
 				if maxRound > 3 {
@@ -353,15 +354,15 @@ func TestProperty_SeveralHonestNodesWithVotingPowerCanAchiveAgreement(t *testing
 
 func TestProperty_NodesWithMajorityOfVotingPowerCanAchiveAgreement(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		numOfNodes := rapid.IntRange(4, 10).Draw(t, "num of nodes").(int)
+		numOfNodes := rapid.IntRange(5, 12).Draw(t, "num of nodes").(int)
 		stake := rapid.SliceOfN(rapid.Uint64Range(5, 10), numOfNodes, numOfNodes).Draw(t, "Generate stake").([]uint64)
-		var totalVotingPower uint64
 		votingPower := make(map[pbft.NodeID]uint64, numOfNodes)
 		for i := range stake {
 			votingPower[pbft.NodeID(strconv.Itoa(i))] = stake[i]
-			totalVotingPower += stake[i]
 		}
-		quorumVotingPower := pbft.QuorumSizeVP(totalVotingPower)
+		_, quorumSize, err := pbft.CalculateQuorum(votingPower)
+		require.NoError(t, err)
+
 		connectionsList := rapid.SliceOfDistinct(rapid.IntRange(0, numOfNodes-1), func(v int) int {
 			return v
 		}).Filter(func(votes []int) bool {
@@ -369,14 +370,14 @@ func TestProperty_NodesWithMajorityOfVotingPowerCanAchiveAgreement(t *testing.T)
 			for i := range votes {
 				votesVP += stake[votes[i]]
 			}
-			return votesVP >= quorumVotingPower
+			return votesVP >= quorumSize
 		}).Draw(t, "Select arbitrary nodes that have majority of voting power").([]int)
 
 		connections := map[pbft.NodeID]struct{}{}
-		var connectionsStake uint64
+		var topologyVotingPower uint64
 		for _, nodeIDInt := range connectionsList {
 			connections[pbft.NodeID(strconv.Itoa(nodeIDInt))] = struct{}{}
-			connectionsStake += stake[nodeIDInt]
+			topologyVotingPower += stake[nodeIDInt]
 		}
 
 		ft := &pbft.TransportStub{
@@ -401,15 +402,18 @@ func TestProperty_NodesWithMajorityOfVotingPowerCanAchiveAgreement(t *testing.T)
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 
-		err := runCluster(ctx,
+		err = runCluster(ctx,
 			cluster,
 			sendTimeoutIfNNodesStucked(t, timeoutsChan, numOfNodes),
 			func(doneList *helper.BoolSlice) bool {
-				// everything done. All nodes in done state
-				if doneList.CalculateNum(true) >= len(connections) {
-					return true
-				}
-				return false
+				accumulatedVotingPower := uint64(0)
+				// enough nodes (by their respective voting power) are in done state
+				doneList.Iterate(func(index int, isDone bool) {
+					if isDone {
+						accumulatedVotingPower += votingPower[cluster[index].GetValidatorId()]
+					}
+				})
+				return accumulatedVotingPower >= topologyVotingPower
 			}, func(maxRound uint64) bool {
 				// something went wrong.
 				if maxRound > 3 {
@@ -461,7 +465,7 @@ func getMaxClusterRound(cluster []*pbft.Pbft) uint64 {
 	return maxRound
 }
 
-func generateNode(id int, transport *pbft.TransportStub, votingPower map[pbft.NodeID]uint64) (*pbft.Pbft, chan time.Time) {
+func generateNode(id int, transport *pbft.TransportStub) (*pbft.Pbft, chan time.Time) {
 	timeoutChan := make(chan time.Time)
 	node := pbft.New(pbft.ValidatorKeyMock(strconv.Itoa(id)), transport,
 		pbft.WithTracer(trace.NewNoopTracerProvider().Tracer("")),
@@ -469,7 +473,6 @@ func generateNode(id int, transport *pbft.TransportStub, votingPower map[pbft.No
 		pbft.WithRoundTimeout(func(_ uint64) <-chan time.Time {
 			return timeoutChan
 		}),
-		pbft.WithVotingPower(votingPower),
 	)
 
 	transport.Nodes = append(transport.Nodes, node)
@@ -485,13 +488,14 @@ func generateCluster(numOfNodes int, transport *pbft.TransportStub, votingPower 
 	}
 	cluster := make([]*pbft.Pbft, numOfNodes)
 	for i := 0; i < numOfNodes; i++ {
-		cluster[i], timeoutsChan[i] = generateNode(i, transport, votingPower)
+		cluster[i], timeoutsChan[i] = generateNode(i, transport)
 		nodes[i] = strconv.Itoa(i)
 	}
 
 	for _, nd := range cluster {
-		nd.SetBackend(&BackendFake{
-			nodes: nodes,
+		_ = nd.SetBackend(&BackendFake{
+			nodes:          nodes,
+			votingPowerMap: votingPower,
 			insertFunc: func(proposal *pbft.SealedProposal) error {
 				return ip.Insert(*proposal)
 			},

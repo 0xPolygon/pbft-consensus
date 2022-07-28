@@ -5,7 +5,6 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/0xPolygon/pbft-consensus"
 	"github.com/0xPolygon/pbft-consensus/e2e"
 	"github.com/0xPolygon/pbft-consensus/e2e/transport"
 )
@@ -26,14 +25,18 @@ func (dn *DropNode) CanApply(c *e2e.Cluster) bool {
 	if runningNodes <= 0 {
 		return false
 	}
-	maxFaultyNodes := pbft.MaxFaultyNodes(len(c.Nodes()))
+	maxFaultyNodes, err := c.MaxFaulty()
+	if err != nil {
+		log.Printf("[ERROR] %v", err)
+		return false
+	}
 	remainingNodes := runningNodes - 1
-	return remainingNodes >= maxFaultyNodes
+	return remainingNodes >= int(maxFaultyNodes)
 }
 
 func (dn *DropNode) Apply(c *e2e.Cluster) RevertFunc {
 	runningNodes := c.GetRunningNodes()
-	nodeToStop := runningNodes[rand.Intn(len(runningNodes))]
+	nodeToStop := runningNodes[rand.Intn(len(runningNodes))] //nolint:golint,gosec
 	log.Printf("Dropping node: '%s'.", nodeToStop)
 
 	c.StopNode(nodeToStop.GetName())
@@ -56,11 +59,14 @@ func (action *Partition) Apply(c *e2e.Cluster) RevertFunc {
 	hook := transport.NewPartition(500 * time.Millisecond)
 	// create 2 partition with random number of nodes
 	// minority with less than quorum size nodes and majority with the rest of the nodes
-	quorumSize := pbft.QuorumSize(len(nodes))
-
+	quorumSize, err := c.QuorumSize()
+	if err != nil {
+		log.Printf("[ERROR] %v", err)
+		return nil
+	}
 	var minorityPartition []string
 	var majorityPartition []string
-	minorityPartitionSize := rand.Intn(quorumSize + 1)
+	minorityPartitionSize := rand.Intn(int(quorumSize + 1)) //nolint:golint,gosec
 	i := 0
 	for _, n := range nodes {
 		if i < minorityPartitionSize {

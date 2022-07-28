@@ -1,6 +1,7 @@
 package helper
 
 import (
+	//nolint:golint,gosec
 	"crypto/sha1"
 	"fmt"
 	"io"
@@ -16,15 +17,17 @@ import (
 	"github.com/0xPolygon/pbft-consensus"
 )
 
+const trueString = "true"
+
 func Hash(p []byte) []byte {
-	h := sha1.New()
+	h := sha1.New() //nolint:golint,gosec
 	h.Write(p)
 	return h.Sum(nil)
 }
 
 func GenerateProposal() []byte {
 	prop := make([]byte, 4)
-	_, _ = rand.Read(prop)
+	_, _ = rand.Read(prop) //nolint:golint,gosec
 	return prop
 }
 
@@ -80,12 +83,12 @@ func Contains(nodes []string, node string) bool {
 
 // ShouldApply is used to check if random event meets the threshold
 func ShouldApply(threshold int) bool {
-	r := rand.Intn(101)
+	r := rand.Intn(101) //nolint:golint,gosec
 	return r >= threshold
 }
 
 func IsFuzzEnabled(t *testing.T) {
-	if os.Getenv("FUZZ") != "true" {
+	if os.Getenv("FUZZ") != trueString {
 		t.Skip("Fuzz tests are disabled.")
 	}
 }
@@ -99,7 +102,7 @@ func CreateLogsDir(directoryName string) (string, error) {
 		directoryName = fmt.Sprintf("logs_%v", time.Now().Format(time.RFC3339))
 	}
 
-	if os.Getenv("E2E_LOG_TO_FILES") == "true" {
+	if os.Getenv("E2E_LOG_TO_FILES") == trueString {
 		logsDir, err = os.MkdirTemp("../", directoryName+"-")
 	}
 
@@ -109,7 +112,7 @@ func CreateLogsDir(directoryName string) (string, error) {
 func GetLoggerOutput(name string, logsDir string) io.Writer {
 	var loggerOutput io.Writer
 	var err error
-	if os.Getenv("SILENT") == "true" {
+	if os.Getenv("SILENT") == trueString {
 		loggerOutput = ioutil.Discard
 	} else if logsDir != "" {
 		loggerOutput, err = os.OpenFile(filepath.Join(logsDir, name+".log"), os.O_RDWR|os.O_APPEND|os.O_CREATE, 0660)

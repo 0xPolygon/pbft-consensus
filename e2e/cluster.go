@@ -23,6 +23,11 @@ import (
 	"github.com/0xPolygon/pbft-consensus/e2e/transport"
 )
 
+var (
+	errMaxFaultyEmptyCluster  = errors.New("unable to determine max faulty nodes: cluster is empty")
+	errQuorumSizeEmptyCluster = errors.New("unable to determine quorum size, because cluster is empty")
+)
+
 // CreateBackend is a delegate that creates a new instance of IntegrationBackend interface
 type CreateBackend func() IntegrationBackend
 
@@ -337,6 +342,24 @@ func (c *Cluster) getFilteredNodes(filter func(*node) bool) []*node {
 
 func (c *Cluster) startNode(name string) {
 	c.nodes[name].Start()
+}
+
+// MaxFaulty is a wrapper function which invokes MaxFaultyVotingPower on PBFT consensus instance of the first node in cluster
+func (c *Cluster) MaxFaulty() (uint64, error) {
+	nodes := c.getNodes()
+	if len(nodes) == 0 {
+		return 0, errMaxFaultyEmptyCluster
+	}
+	return nodes[0].pbft.MaxFaultyVotingPower(), nil
+}
+
+// QuorumSize is a wrapper function which invokes QuorumSize on PBFT consensus instance of the first node in cluster
+func (c *Cluster) QuorumSize() (uint64, error) {
+	nodes := c.getNodes()
+	if len(nodes) == 0 {
+		return 0, errQuorumSizeEmptyCluster
+	}
+	return nodes[0].pbft.QuorumSize(), nil
 }
 
 func initTracer(name string) *sdktrace.TracerProvider {

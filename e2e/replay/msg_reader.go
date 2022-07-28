@@ -144,8 +144,6 @@ LOOP:
 					messages: nodeMessages[name][nodeLastSequence],
 				}
 			}
-
-			isDone = true
 			break LOOP
 		}
 	}
@@ -181,7 +179,6 @@ func (r *MessageReader) startChunkReading(messagesChannel chan []*message, doneC
 		if len(messages) > 0 {
 			//its the leftover of messages
 			messagesChannel <- messages
-			messages = nil
 		}
 
 		doneChannel <- struct{}{}

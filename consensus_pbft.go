@@ -76,7 +76,7 @@ type Pbft struct {
 	// Output logger
 	logger Logger
 
-	// Config is the configuration of the consensus
+	// config is the configuration of the consensus
 	config *Config
 
 	// inter is the interface with the runtime
@@ -109,6 +109,7 @@ type Pbft struct {
 	// notifier is a reference to the struct which encapsulates handling messages and timeouts
 	notifier StateNotifier
 
+	// stats encapsulates logic for statistics reporting
 	stats *stats.Stats
 }
 
@@ -143,6 +144,11 @@ func (p *Pbft) SetBackend(backend Backend) error {
 
 	// set the current set of validators
 	p.state.validators = p.backend.ValidatorSet()
+
+	// initialize voting info
+	if err := p.state.initializeVotingInfo(); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -416,36 +422,18 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 			panic(fmt.Errorf("BUG: Unexpected message type: %s in %s", msg.Type, p.getState()))
 		}
 
-		//if voting power is disabled - count number of votes
-		if !p.IsVotingPowerEnabled() {
-			if p.state.numPrepared() > p.state.NumValid() {
-				// we have received enough prepare messages
-				sendCommit(span)
-			}
+		quorum := p.state.QuorumSize()
+		if p.state.CalculateVotingPower(p.state.prepared.extractNodeIds()) >= quorum {
+			// we have received enough prepare messages
+			sendCommit(span)
+		}
 
-			if p.state.numCommitted() > p.state.NumValid() {
-				// we have received enough commit messages
-				sendCommit(span)
+		if p.state.CalculateVotingPower(p.state.committed.extractNodeIds()) >= quorum {
+			// we have received enough commit messages
+			sendCommit(span)
 
-				// change to commit state just to get out of the loop
-				p.setState(CommitState)
-			}
-		} else {
-			totalVotingPower := TotalVotingPower(p.config.VotingPower)
-			validVotingPower := QuorumSizeVP(totalVotingPower)
-
-			if p.state.calculateMessagesVotingPower(p.state.prepared, p.config.VotingPower) >= validVotingPower {
-				// we have received enough prepare messages
-				sendCommit(span)
-			}
-
-			if p.state.calculateMessagesVotingPower(p.state.committed, p.config.VotingPower) >= validVotingPower {
-				// we have received enough commit messages
-				sendCommit(span)
-
-				// change to commit state just to get out of the loop
-				p.setState(CommitState)
-			}
+			// change to commit state just to get out of the loop
+			p.setState(CommitState)
 		}
 
 		// set the attributes of this span once it is done
@@ -524,6 +512,7 @@ var (
 	errIncorrectLockedProposal = fmt.Errorf("locked proposal is incorrect")
 	errVerificationFailed      = fmt.Errorf("proposal verification failed")
 	errFailedToInsertProposal  = fmt.Errorf("failed to insert proposal")
+	errInvalidTotalVotingPower = fmt.Errorf("invalid voting power configuration provided: total voting power must be greater than 0.")
 )
 
 func (p *Pbft) handleStateErr(err error) {
@@ -576,6 +565,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 	} else {
 		// otherwise, it is due to a timeout in any stage
 		// First, we try to sync up with any max round already available
+		// F + 1 round change messages for given round, where F denotes MaxFaulty is expected, in order to fast-track to maxRound
 		if maxRound, ok := p.state.maxRound(); ok {
 			p.logger.Printf("[DEBUG] round change, max round=%d", maxRound)
 			sendRoundChange(maxRound)
@@ -606,35 +596,20 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 		}
 
 		// we only expect RoundChange messages right now
-		num := p.state.AddRoundMessage(msg)
+		_ = p.state.AddRoundMessage(msg)
 
-		//if voting power is disabled - count number of votes
-		if !p.IsVotingPowerEnabled() {
-			if num == p.state.NumValid() {
-				// start a new round inmediatly
-				p.state.SetCurrentRound(msg.View.Round)
-				p.setState(AcceptState)
-			} else if num == p.state.MaxFaultyNodes()+1 {
-				// weak certificate, try to catch up if our round number is smaller
-				if p.state.GetCurrentRound() < msg.View.Round {
-					// update timer
-					sendRoundChange(msg.View.Round)
-				}
-			}
-		} else {
-			totalVotingPower := TotalVotingPower(p.config.VotingPower)
-			validVotingPower := QuorumSizeVP(totalVotingPower)
-			roundVotingPower := p.state.calculateMessagesVotingPower(p.state.roundMessages[msg.View.Round], p.config.VotingPower)
-			if roundVotingPower >= validVotingPower {
-				// start a new round inmediatly
-				p.state.SetCurrentRound(msg.View.Round)
-				p.setState(AcceptState)
-			} else if roundVotingPower >= MaxFaultyVP(totalVotingPower)+1 {
-				// weak certificate, try to catch up if our round number is smaller
-				if p.state.GetCurrentRound() < msg.View.Round {
-					// update timer
-					sendRoundChange(msg.View.Round)
-				}
+		currentVotingPower := p.state.CalculateVotingPower(p.state.roundMessages[msg.View.Round].extractNodeIds())
+		// Round change quorum is 2*F round change messages (F denotes max faulty voting power)
+		requiredVotingPower := 2 * p.state.MaxFaultyVotingPower()
+		if currentVotingPower >= requiredVotingPower {
+			// start a new round immediately
+			p.state.SetCurrentRound(msg.View.Round)
+			p.setState(AcceptState)
+		} else if currentVotingPower >= p.state.MaxFaultyVotingPower()+1 {
+			// weak certificate, try to catch up if our round number is smaller
+			if p.state.GetCurrentRound() < msg.View.Round {
+				// update timer
+				sendRoundChange(msg.View.Round)
 			}
 		}
 
@@ -808,6 +783,27 @@ func (p *Pbft) ReadMessageWithDiscards() (*MessageReq, []*MessageReq) {
 	return p.msgQueue.readMessageWithDiscards(p.getState(), p.state.view)
 }
 
-func (p *Pbft) IsVotingPowerEnabled() bool {
-	return p.config.VotingPower != nil
+// MaxFaultyVotingPower is a wrapper function around state.MaxFaultyVotingPower
+func (p *Pbft) MaxFaultyVotingPower() uint64 {
+	return p.state.MaxFaultyVotingPower()
+}
+
+// QuorumSize is a wrapper function around state.QuorumSize
+func (p *Pbft) QuorumSize() uint64 {
+	return p.state.QuorumSize()
+}
+
+// CalculateQuorum calculates max faulty voting power and quorum size for given voting power map
+func CalculateQuorum(votingPower map[NodeID]uint64) (maxFaultyVotingPower uint64, quorumSize uint64, err error) {
+	totalVotingPower := uint64(0)
+	for _, v := range votingPower {
+		totalVotingPower += v
+	}
+	if totalVotingPower == 0 {
+		err = errInvalidTotalVotingPower
+		return
+	}
+	maxFaultyVotingPower = (totalVotingPower - 1) / 3
+	quorumSize = 2*maxFaultyVotingPower + 1
+	return
 }
