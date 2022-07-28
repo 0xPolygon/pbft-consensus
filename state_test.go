@@ -348,7 +348,7 @@ func (ap *testerAccountPool) validatorSet() ValidatorSet {
 	for _, acc := range ap.accounts {
 		validatorIds = append(validatorIds, NodeID(acc.alias))
 	}
-	return convertToMockValidatorSet(validatorIds)
+	return NewValStringStub(validatorIds, CreateEqualWeightValidatorsMap(validatorIds))
 }
 
 // Helper function which enables creation of MessageReq.
@@ -374,10 +374,5 @@ func newMockValidatorSet(validatorIds []string) ValidatorSet {
 	for _, id := range validatorIds {
 		validatorNodeIds = append(validatorNodeIds, NodeID(id))
 	}
-	return convertToMockValidatorSet(validatorNodeIds)
-}
-
-func convertToMockValidatorSet(validatorIds []NodeID) ValidatorSet {
-	validatorSet := ValStringStub(validatorIds)
-	return &validatorSet
+	return NewValStringStub(validatorNodeIds, CreateEqualWeightValidatorsMap(validatorNodeIds))
 }
