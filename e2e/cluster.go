@@ -104,7 +104,7 @@ func NewPBFTCluster(t *testing.T, config *ClusterConfig, hook ...transport.Hook)
 
 	for _, name := range names {
 		trace := c.tracer.Tracer(name)
-		n, _ := newPBFTNode(name, config, names, trace, tt)
+		n := newPBFTNode(name, config, names, trace, tt)
 		n.c = c
 		c.nodes[name] = n
 	}

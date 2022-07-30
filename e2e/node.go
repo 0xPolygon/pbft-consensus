@@ -31,7 +31,7 @@ type node struct {
 	faulty uint64
 }
 
-func newPBFTNode(name string, clusterConfig *ClusterConfig, nodes []string, trace trace.Tracer, tt *transport.Transport) (*node, error) {
+func newPBFTNode(name string, clusterConfig *ClusterConfig, nodes []string, trace trace.Tracer, tt *transport.Transport) *node {
 	loggerOutput := helper.GetLoggerOutput(name, clusterConfig.LogsDir)
 
 	con := pbft.New(
@@ -61,7 +61,7 @@ func newPBFTNode(name string, clusterConfig *ClusterConfig, nodes []string, trac
 		running: 0,
 		// set to init index -1 so that zero value is not the same as first index
 		localSyncIndex: -1,
-	}, nil
+	}
 }
 
 func (n *node) GetName() string {

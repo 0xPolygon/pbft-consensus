@@ -386,6 +386,7 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 		}
 	}
 
+	quorum := p.state.getQuorumSize()
 	for p.getState() == ValidateState {
 		_, span := p.tracer.Start(ctx, "ValidateState")
 
@@ -410,25 +411,24 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 
 		switch msg.Type {
 		case MessageReq_Prepare:
-			p.state.addPrepared(msg)
+			p.state.addPrepareMsg(msg)
 
 		case MessageReq_Commit:
 			if err := p.backend.ValidateCommit(msg.From, msg.Seal); err != nil {
 				p.logger.Printf("[ERROR]: failed to validate commit: %v", err)
 				continue
 			}
-			p.state.addCommitted(msg)
+			p.state.addCommitMsg(msg)
 		default:
 			panic(fmt.Errorf("BUG: Unexpected message type: %s in %s", msg.Type, p.getState()))
 		}
 
-		quorum := p.state.QuorumSize()
-		if p.state.CalculateVotingPower(p.state.prepared.extractNodeIds()) >= quorum {
+		if p.state.prepared.getAccumulatedVotingPower() >= quorum {
 			// we have received enough prepare messages
 			sendCommit(span)
 		}
 
-		if p.state.CalculateVotingPower(p.state.committed.extractNodeIds()) >= quorum {
+		if p.state.committed.getAccumulatedVotingPower() >= quorum {
 			// we have received enough commit messages
 			sendCommit(span)
 
@@ -475,7 +475,7 @@ func (p *Pbft) setStateSpanAttributes(span trace.Span) {
 
 	// number of change state messages per round
 	for round, msgs := range p.state.roundMessages {
-		attr = append(attr, attribute.Int64(fmt.Sprintf("roundchange_%d", round), int64(len(msgs))))
+		attr = append(attr, attribute.Int64(fmt.Sprintf("roundchange_%d", round), int64(msgs.length())))
 	}
 	span.SetAttributes(attr...)
 }
@@ -596,16 +596,15 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 		}
 
 		// we only expect RoundChange messages right now
-		_ = p.state.AddRoundMessage(msg)
+		_ = p.state.addRoundChangeMsg(msg)
 
-		currentVotingPower := p.state.CalculateVotingPower(p.state.roundMessages[msg.View.Round].extractNodeIds())
+		currentVotingPower := p.state.roundMessages[msg.View.Round].getAccumulatedVotingPower()
 		// Round change quorum is 2*F round change messages (F denotes max faulty voting power)
-		requiredVotingPower := 2 * p.state.MaxFaultyVotingPower()
-		if currentVotingPower >= requiredVotingPower {
+		if currentVotingPower >= 2*p.state.getMaxFaultyVotingPower() {
 			// start a new round immediately
 			p.state.SetCurrentRound(msg.View.Round)
 			p.setState(AcceptState)
-		} else if currentVotingPower >= p.state.MaxFaultyVotingPower()+1 {
+		} else if currentVotingPower >= p.state.getMaxFaultyVotingPower()+1 {
 			// weak certificate, try to catch up if our round number is smaller
 			if p.state.GetCurrentRound() < msg.View.Round {
 				// update timer
@@ -785,12 +784,12 @@ func (p *Pbft) ReadMessageWithDiscards() (*MessageReq, []*MessageReq) {
 
 // MaxFaultyVotingPower is a wrapper function around state.MaxFaultyVotingPower
 func (p *Pbft) MaxFaultyVotingPower() uint64 {
-	return p.state.MaxFaultyVotingPower()
+	return p.state.getMaxFaultyVotingPower()
 }
 
 // QuorumSize is a wrapper function around state.QuorumSize
 func (p *Pbft) QuorumSize() uint64 {
-	return p.state.QuorumSize()
+	return p.state.getQuorumSize()
 }
 
 // CalculateQuorum calculates max faulty voting power and quorum size for given voting power map
