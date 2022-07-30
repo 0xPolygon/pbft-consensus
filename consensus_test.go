@@ -816,7 +816,7 @@ func TestRoundChange_PropertyMajorityOfVotingPowerAggreement(t *testing.T) {
 			for i := range votes {
 				votesVP += stake[votes[i]]
 			}
-			return votesVP >= node.state.QuorumSize()
+			return votesVP >= node.state.getQuorumSize()
 		}).Draw(t, "Select arbitrary nodes that have majority of voting power").([]int)
 
 		for _, voterID := range votes {
@@ -978,28 +978,28 @@ func (m *mockPbft) expect(res expectResult) {
 	m.t.Helper()
 
 	if sequence := m.state.view.Sequence; sequence != res.sequence {
-		m.t.Fatalf("incorrect sequence %d %d", sequence, res.sequence)
+		m.t.Fatalf("incorrect sequence actual: %d, expected: %d", sequence, res.sequence)
 	}
 	if round := m.state.GetCurrentRound(); round != res.round {
-		m.t.Fatalf("incorrect round %d %d", round, res.round)
+		m.t.Fatalf("incorrect round actual: %d, expected: %d", round, res.round)
 	}
 	if m.getState() != res.state {
-		m.t.Fatalf("incorrect state %s %s", m.getState(), res.state)
+		m.t.Fatalf("incorrect state actual: %s, expected: %s", m.getState(), res.state)
 	}
-	if size := len(m.state.prepared); uint64(size) != res.prepareMsgs {
-		m.t.Fatalf("incorrect prepared messages %d %d", size, res.prepareMsgs)
+	if size := m.state.prepared.length(); uint64(size) != res.prepareMsgs {
+		m.t.Fatalf("incorrect prepared messages actual: %d, expected: %d", size, res.prepareMsgs)
 	}
-	if size := len(m.state.committed); uint64(size) != res.commitMsgs {
-		m.t.Fatalf("incorrect commit messages %d %d", size, res.commitMsgs)
+	if size := m.state.committed.length(); uint64(size) != res.commitMsgs {
+		m.t.Fatalf("incorrect commit messages actual: %d, expected:%d", size, res.commitMsgs)
 	}
 	if m.state.IsLocked() != res.locked {
-		m.t.Fatalf("incorrect locked %v %v", m.state.locked, res.locked)
+		m.t.Fatalf("incorrect locked actual: %v, expected: %v", m.state.locked, res.locked)
 	}
 	if size := len(m.respMsg); uint64(size) != res.outgoing {
-		m.t.Fatalf("incorrect outgoing messages %v %v", size, res.outgoing)
+		m.t.Fatalf("incorrect outgoing messages actual: %v, expected: %v", size, res.outgoing)
 	}
 	if m.state.err != res.err {
-		m.t.Fatalf("incorrect error %v %v", m.state.err, res.err)
+		m.t.Fatalf("incorrect error actual: %v, expected: %v", m.state.err, res.err)
 	}
 }
 

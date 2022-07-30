@@ -1,7 +1,6 @@
 package pbft
 
 import (
-	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	crand "crypto/rand"
@@ -50,8 +49,8 @@ func TestState_AddMessages(t *testing.T) {
 
 	// Send message from node which is not amongst validator nodes
 	s.addMessage(createMessage("E", MessageReq_Prepare))
-	assert.Empty(t, s.committed)
-	assert.Empty(t, s.prepared)
+	assert.Empty(t, s.committed.messageMap)
+	assert.Empty(t, s.prepared.messageMap)
 	assert.Empty(t, s.roundMessages)
 
 	// -- test committed messages --
@@ -79,7 +78,7 @@ func TestState_AddMessages(t *testing.T) {
 	for round := 0; round < rounds; round++ {
 		assert.Equal(t, rounds, len(s.roundMessages))
 		msgsPerRound := s.roundMessages[uint64(round)]
-		assert.Equal(t, s.validators.Len(), len(msgsPerRound))
+		assert.Equal(t, s.validators.Len(), msgsPerRound.length())
 	}
 }
 
@@ -135,7 +134,7 @@ func TestState_MaxRound_NotFound(t *testing.T) {
 	for round := range validatorIds {
 		if round%2 == 0 {
 			// Each even round should populate more than one "RoundChange" messages, but just enough that we don't reach census (max faulty nodes+1)
-			for i := 0; i < int(s.MaxFaultyVotingPower()); i++ {
+			for i := 0; i < int(s.getMaxFaultyVotingPower()); i++ {
 				s.addMessage(createMessage(validatorIds[mrand.Intn(validatorsCount)], MessageReq_RoundChange, uint64(round)))
 			}
 		} else {
@@ -166,8 +165,8 @@ func TestState_AddRoundMessage(t *testing.T) {
 	s.addRoundChangeMsg(createMessage("B", MessageReq_RoundChange, 3))
 	assert.Equal(t, 4, len(s.roundMessages))
 
-	assert.Empty(t, s.prepared)
-	assert.Empty(t, s.committed)
+	assert.Empty(t, s.prepared.messageMap)
+	assert.Empty(t, s.committed.messageMap)
 }
 
 func TestState_addPrepared(t *testing.T) {
@@ -176,13 +175,13 @@ func TestState_addPrepared(t *testing.T) {
 	s.validators = newMockValidatorSet(validatorIds)
 
 	s.addPrepareMsg(createMessage("A", MessageReq_Commit))
-	assert.Equal(t, 0, len(s.prepared))
+	assert.Equal(t, 0, s.prepared.length())
 
 	s.addPrepareMsg(createMessage("A", MessageReq_Prepare))
 	s.addPrepareMsg(createMessage("B", MessageReq_Prepare))
 
-	assert.Equal(t, len(validatorIds), len(s.prepared))
-	assert.Empty(t, s.committed)
+	assert.Equal(t, len(validatorIds), s.prepared.length())
+	assert.True(t, s.committed.length() == 0)
 	assert.Empty(t, s.roundMessages)
 }
 
@@ -192,13 +191,13 @@ func TestState_addCommitted(t *testing.T) {
 	s.validators = newMockValidatorSet(validatorIds)
 
 	s.addCommitMsg(createMessage("A", MessageReq_Prepare))
-	assert.Empty(t, 0, s.committed)
+	assert.True(t, s.committed.length() == 0)
 
 	s.addCommitMsg(createMessage("A", MessageReq_Commit))
 	s.addCommitMsg(createMessage("B", MessageReq_Commit))
 
-	assert.Equal(t, len(validatorIds), len(s.committed))
-	assert.Empty(t, s.prepared)
+	assert.Equal(t, len(validatorIds), s.committed.length())
+	assert.True(t, s.prepared.length() == 0)
 	assert.Empty(t, s.roundMessages)
 }
 
@@ -250,10 +249,9 @@ func TestState_getCommittedSeals(t *testing.T) {
 		_, exists := processed[commSeal.NodeID]
 		assert.False(t, exists) // all entries in committedSeals should be different
 		processed[commSeal.NodeID] = struct{}{}
-		el := s.committed[commSeal.NodeID]
-		assert.NotNil(t, el)                                     // there should be entry in currentState.committed...
-		assert.True(t, bytes.Equal(commSeal.Signature, el.Seal)) // ...and signatures should match
-		assert.True(t, &commSeal.Signature != &el.Seal)
+		msg := s.committed.messageMap[commSeal.NodeID]
+		assert.NotNil(t, msg)                         // there should be entry in currentState.committed...
+		assert.Equal(t, commSeal.Signature, msg.Seal) // ...and signatures should match
 	}
 }
 
@@ -306,7 +304,7 @@ func TestState_MaxFaultyVotingPower_EqualVotingPower(t *testing.T) {
 		pool := newTesterAccountPool(int(c.nodesCount))
 		state, err := initState(pool)
 		require.NoError(t, err)
-		assert.Equal(t, c.faultyNodesCount, uint(state.MaxFaultyVotingPower()))
+		assert.Equal(t, c.faultyNodesCount, uint(state.getMaxFaultyVotingPower()))
 	}
 }
 
@@ -332,7 +330,7 @@ func TestState_QuorumSize_EqualVotingPower(t *testing.T) {
 		pool := newTesterAccountPool(int(c.nodesCount))
 		state, err := initState(pool)
 		require.NoError(t, err)
-		assert.Equal(t, c.quorumSize, state.QuorumSize())
+		assert.Equal(t, c.quorumSize, state.getQuorumSize())
 	}
 }
 
@@ -375,7 +373,7 @@ func TestState_MaxFaultyVotingPower_MixedVotingPower(t *testing.T) {
 		pool.add(getValidatorIds(c.votingPower)...)
 		state, err := initState(pool, c.votingPower)
 		require.NoError(t, err)
-		assert.Equal(t, c.maxFaultyNodes, state.MaxFaultyVotingPower())
+		assert.Equal(t, c.maxFaultyNodes, state.getMaxFaultyVotingPower())
 	}
 }
 
@@ -393,7 +391,7 @@ func TestState_QuorumSize_MixedVotingPower(t *testing.T) {
 		pool.add(getValidatorIds(c.votingPower)...)
 		state, err := initState(pool, c.votingPower)
 		require.NoError(t, err)
-		assert.Equal(t, c.quorumSize, state.QuorumSize())
+		assert.Equal(t, c.quorumSize, state.getQuorumSize())
 	}
 }
 

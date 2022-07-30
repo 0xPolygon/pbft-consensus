@@ -26,13 +26,13 @@ type state struct {
 	previousRound uint64
 
 	// List of prepared messages
-	prepared messages
+	prepared *messages
 
 	// List of committed messages
-	committed messages
+	committed *messages
 
 	// List of round change messages
-	roundMessages map[uint64]messages
+	roundMessages map[uint64]*messages
 
 	// maxFaultyVotingPower represents max tolerable faulty voting power in order to have Byzantine fault tollerance property satisfied
 	maxFaultyVotingPower uint64
@@ -84,15 +84,15 @@ func (s *state) calculateVotingPower(senders []NodeID) uint64 {
 	return accumulatedVotingPower
 }
 
-// QuorumSize calculates quorum size (namely the number of required messages of some type in order to proceed to the next state in PBFT state machine).
+// getQuorumSize calculates quorum size (namely the number of required messages of some type in order to proceed to the next state in PBFT state machine).
 // It is calculated by formula:
 // 2 * F + 1, where F denotes maximum count of faulty nodes in order to have Byzantine fault tollerant property satisfied.
-func (s *state) QuorumSize() uint64 {
+func (s *state) getQuorumSize() uint64 {
 	return s.quorumSize
 }
 
-// MaxFaultyVotingPower is calculated as at most 1/3 of total voting power of the entire validator set.
-func (s *state) MaxFaultyVotingPower() uint64 {
+// getMaxFaultyVotingPower is calculated as at most 1/3 of total voting power of the entire validator set.
+func (s *state) getMaxFaultyVotingPower() uint64 {
 	return s.maxFaultyVotingPower
 }
 
@@ -105,8 +105,8 @@ func (s *state) GetSequence() uint64 {
 }
 
 func (s *state) getCommittedSeals() []CommittedSeal {
-	committedSeals := make([]CommittedSeal, 0, len(s.committed))
-	for nodeId, commit := range s.committed {
+	committedSeals := make([]CommittedSeal, 0, len(s.committed.messageMap))
+	for nodeId, commit := range s.committed.messageMap {
 		committedSeals = append(committedSeals, CommittedSeal{Signature: commit.Seal, NodeID: nodeId})
 	}
 
@@ -136,11 +136,10 @@ func (s *state) getErr() error {
 }
 
 // maxRound tries to resolve the round node should fast-track, based on round change messages.
-// Quorum size for round change messages is F+1 (where F denotes max faulty voting power)
+// Quorum size for fast-track higher round is F+1 round change messages (where F denotes max faulty voting power)
 func (s *state) maxRound() (maxRound uint64, found bool) {
 	for currentRound, messages := range s.roundMessages {
-		accumulatedVotingPower := s.calculateVotingPower(messages.extractNodeIds())
-		if accumulatedVotingPower < s.MaxFaultyVotingPower()+1 {
+		if messages.getAccumulatedVotingPower() < s.getMaxFaultyVotingPower()+1 {
 			continue
 		}
 		if maxRound < currentRound {
@@ -154,9 +153,9 @@ func (s *state) maxRound() (maxRound uint64, found bool) {
 
 // resetRoundMsgs resets the prepared, committed and round messages in the current state
 func (s *state) resetRoundMsgs() {
-	s.prepared = map[NodeID]*MessageReq{}
-	s.committed = map[NodeID]*MessageReq{}
-	s.roundMessages = map[uint64]messages{}
+	s.prepared = newMessages()
+	s.committed = newMessages()
+	s.roundMessages = map[uint64]*messages{}
 }
 
 // CalcProposer calculates the proposer and sets it to the state
@@ -187,7 +186,7 @@ func (s *state) addRoundChangeMsg(msg *MessageReq) int {
 
 	s.addMessage(msg)
 
-	return len(s.roundMessages[msg.View.Round])
+	return s.roundMessages[msg.View.Round].length()
 }
 
 // addPrepareMsg adds a PREPARE message
@@ -216,29 +215,30 @@ func (s *state) addMessage(msg *MessageReq) {
 		return
 	}
 
+	votingPower := s.validators.VotingPower()[msg.From]
 	if msg.Type == MessageReq_Commit {
-		s.committed[addr] = msg
+		s.committed.addMessage(msg, votingPower)
 	} else if msg.Type == MessageReq_Prepare {
-		s.prepared[addr] = msg
+		s.prepared.addMessage(msg, votingPower)
 	} else if msg.Type == MessageReq_RoundChange {
 		view := msg.View
 		roundChangeMessages, exists := s.roundMessages[view.Round]
 		if !exists {
-			roundChangeMessages = map[NodeID]*MessageReq{}
+			roundChangeMessages = newMessages()
 			s.roundMessages[view.Round] = roundChangeMessages
 		}
-		roundChangeMessages[addr] = msg
+		roundChangeMessages.addMessage(msg, votingPower)
 	}
 }
 
 // numPrepared returns the number of messages in the prepared message list
 func (s *state) numPrepared() int {
-	return len(s.prepared)
+	return s.prepared.length()
 }
 
 // numCommitted returns the number of messages in the committed message list
 func (s *state) numCommitted() int {
-	return len(s.committed)
+	return s.committed.length()
 }
 
 func (s *state) GetCurrentRound() uint64 {
@@ -254,15 +254,30 @@ func (s *state) SetCurrentRound(round uint64) {
 	atomic.StoreUint64(&s.view.Round, round)
 }
 
-type messages map[NodeID]*MessageReq
+type messages struct {
+	messageMap             map[NodeID]*MessageReq
+	accumulatedVotingPower uint64
+}
 
-// extractNodeIds returns slice of message senders
-func (m messages) extractNodeIds() []NodeID {
-	nodeIds := make([]NodeID, len(m))
-	i := 0
-	for nodeId := range m {
-		nodeIds[i] = nodeId
-		i++
+func newMessages() *messages {
+	return &messages{
+		messageMap:             make(map[NodeID]*MessageReq),
+		accumulatedVotingPower: 0,
 	}
-	return nodeIds
+}
+
+func (m *messages) addMessage(message *MessageReq, votingPower uint64) {
+	if _, exists := m.messageMap[message.From]; exists {
+		return
+	}
+	m.messageMap[message.From] = message
+	m.accumulatedVotingPower += votingPower
+}
+
+func (m messages) getAccumulatedVotingPower() uint64 {
+	return m.accumulatedVotingPower
+}
+
+func (m messages) length() int {
+	return len(m.messageMap)
 }
