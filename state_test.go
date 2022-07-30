@@ -152,18 +152,18 @@ func TestState_AddRoundMessage(t *testing.T) {
 	s := newState()
 	s.validators = newMockValidatorSet([]string{"A", "B"})
 
-	roundMessageSize := s.AddRoundMessage(createMessage("A", MessageReq_Commit, 0))
+	roundMessageSize := s.addRoundChangeMsg(createMessage("A", MessageReq_Commit, 0))
 	assert.Equal(t, 0, roundMessageSize)
 	assert.Equal(t, 0, len(s.roundMessages))
 
-	s.AddRoundMessage(createMessage("A", MessageReq_RoundChange, 0))
-	s.AddRoundMessage(createMessage("A", MessageReq_RoundChange, 1))
-	s.AddRoundMessage(createMessage("A", MessageReq_RoundChange, 2))
+	s.addRoundChangeMsg(createMessage("A", MessageReq_RoundChange, 0))
+	s.addRoundChangeMsg(createMessage("A", MessageReq_RoundChange, 1))
+	s.addRoundChangeMsg(createMessage("A", MessageReq_RoundChange, 2))
 
-	roundMessageSize = s.AddRoundMessage(createMessage("B", MessageReq_RoundChange, 2))
+	roundMessageSize = s.addRoundChangeMsg(createMessage("B", MessageReq_RoundChange, 2))
 	assert.Equal(t, 2, roundMessageSize)
 
-	s.AddRoundMessage(createMessage("B", MessageReq_RoundChange, 3))
+	s.addRoundChangeMsg(createMessage("B", MessageReq_RoundChange, 3))
 	assert.Equal(t, 4, len(s.roundMessages))
 
 	assert.Empty(t, s.prepared)
@@ -175,11 +175,11 @@ func TestState_addPrepared(t *testing.T) {
 	validatorIds := []string{"A", "B"}
 	s.validators = newMockValidatorSet(validatorIds)
 
-	s.addPrepared(createMessage("A", MessageReq_Commit))
+	s.addPrepareMsg(createMessage("A", MessageReq_Commit))
 	assert.Equal(t, 0, len(s.prepared))
 
-	s.addPrepared(createMessage("A", MessageReq_Prepare))
-	s.addPrepared(createMessage("B", MessageReq_Prepare))
+	s.addPrepareMsg(createMessage("A", MessageReq_Prepare))
+	s.addPrepareMsg(createMessage("B", MessageReq_Prepare))
 
 	assert.Equal(t, len(validatorIds), len(s.prepared))
 	assert.Empty(t, s.committed)
@@ -191,11 +191,11 @@ func TestState_addCommitted(t *testing.T) {
 	validatorIds := []string{"A", "B"}
 	s.validators = newMockValidatorSet(validatorIds)
 
-	s.addCommitted(createMessage("A", MessageReq_Prepare))
+	s.addCommitMsg(createMessage("A", MessageReq_Prepare))
 	assert.Empty(t, 0, s.committed)
 
-	s.addCommitted(createMessage("A", MessageReq_Commit))
-	s.addCommitted(createMessage("B", MessageReq_Commit))
+	s.addCommitMsg(createMessage("A", MessageReq_Commit))
+	s.addCommitMsg(createMessage("B", MessageReq_Commit))
 
 	assert.Equal(t, len(validatorIds), len(s.committed))
 	assert.Empty(t, s.prepared)
@@ -239,9 +239,9 @@ func TestState_getCommittedSeals(t *testing.T) {
 	s := newState()
 	s.validators = pool.validatorSet()
 
-	s.addCommitted(createMessage("A", MessageReq_Commit))
-	s.addCommitted(createMessage("B", MessageReq_Commit))
-	s.addCommitted(createMessage("C", MessageReq_Commit))
+	s.addCommitMsg(createMessage("A", MessageReq_Commit))
+	s.addCommitMsg(createMessage("B", MessageReq_Commit))
+	s.addCommitMsg(createMessage("C", MessageReq_Commit))
 	committedSeals := s.getCommittedSeals()
 
 	assert.Len(t, committedSeals, 3)
@@ -356,7 +356,7 @@ func TestState_CalculateWeight_EqualVotingPower(t *testing.T) {
 		for nodeId := range votingPower {
 			senders = append(senders, nodeId)
 		}
-		assert.Equal(t, c.weight, state.CalculateVotingPower(senders))
+		assert.Equal(t, c.weight, state.calculateVotingPower(senders))
 	}
 }
 
@@ -417,7 +417,7 @@ func TestState_CalculateWeight_MixedVotingPower(t *testing.T) {
 			senders[i] = nodeId
 			i++
 		}
-		assert.Equal(t, c.quorumSize, state.CalculateVotingPower(senders))
+		assert.Equal(t, c.quorumSize, state.calculateVotingPower(senders))
 	}
 }
 

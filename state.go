@@ -75,8 +75,8 @@ func (s *state) initializeVotingInfo() error {
 	return nil
 }
 
-// CalculateVotingPower calculates voting power of provided senders
-func (s *state) CalculateVotingPower(senders []NodeID) uint64 {
+// calculateVotingPower calculates voting power of provided senders
+func (s *state) calculateVotingPower(senders []NodeID) uint64 {
 	accumulatedVotingPower := uint64(0)
 	for _, nodeId := range senders {
 		accumulatedVotingPower += s.validators.VotingPower()[nodeId]
@@ -139,7 +139,7 @@ func (s *state) getErr() error {
 // Quorum size for round change messages is F+1 (where F denotes max faulty voting power)
 func (s *state) maxRound() (maxRound uint64, found bool) {
 	for currentRound, messages := range s.roundMessages {
-		accumulatedVotingPower := s.CalculateVotingPower(messages.extractNodeIds())
+		accumulatedVotingPower := s.calculateVotingPower(messages.extractNodeIds())
 		if accumulatedVotingPower < s.MaxFaultyVotingPower()+1 {
 			continue
 		}
@@ -179,8 +179,8 @@ func (s *state) cleanRound(round uint64) {
 	delete(s.roundMessages, round)
 }
 
-// AddRoundMessage adds a message to the round, and returns the round message size
-func (s *state) AddRoundMessage(msg *MessageReq) int {
+// addRoundChangeMsg adds a ROUND-CHANGE message to the round, and returns the round message size
+func (s *state) addRoundChangeMsg(msg *MessageReq) int {
 	if msg.Type != MessageReq_RoundChange {
 		return 0
 	}
@@ -190,8 +190,8 @@ func (s *state) AddRoundMessage(msg *MessageReq) int {
 	return len(s.roundMessages[msg.View.Round])
 }
 
-// addPrepared adds a prepared message
-func (s *state) addPrepared(msg *MessageReq) {
+// addPrepareMsg adds a PREPARE message
+func (s *state) addPrepareMsg(msg *MessageReq) {
 	if msg.Type != MessageReq_Prepare {
 		return
 	}
@@ -199,8 +199,8 @@ func (s *state) addPrepared(msg *MessageReq) {
 	s.addMessage(msg)
 }
 
-// addCommitted adds a committed message
-func (s *state) addCommitted(msg *MessageReq) {
+// addCommitMsg adds a COMMIT message
+func (s *state) addCommitMsg(msg *MessageReq) {
 	if msg.Type != MessageReq_Commit {
 		return
 	}
@@ -222,12 +222,12 @@ func (s *state) addMessage(msg *MessageReq) {
 		s.prepared[addr] = msg
 	} else if msg.Type == MessageReq_RoundChange {
 		view := msg.View
-		roundMessages, exists := s.roundMessages[view.Round]
+		roundChangeMessages, exists := s.roundMessages[view.Round]
 		if !exists {
-			roundMessages = map[NodeID]*MessageReq{}
-			s.roundMessages[view.Round] = roundMessages
+			roundChangeMessages = map[NodeID]*MessageReq{}
+			s.roundMessages[view.Round] = roundChangeMessages
 		}
-		roundMessages[addr] = msg
+		roundChangeMessages[addr] = msg
 	}
 }
 

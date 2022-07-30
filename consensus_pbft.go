@@ -410,25 +410,25 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 
 		switch msg.Type {
 		case MessageReq_Prepare:
-			p.state.addPrepared(msg)
+			p.state.addPrepareMsg(msg)
 
 		case MessageReq_Commit:
 			if err := p.backend.ValidateCommit(msg.From, msg.Seal); err != nil {
 				p.logger.Printf("[ERROR]: failed to validate commit: %v", err)
 				continue
 			}
-			p.state.addCommitted(msg)
+			p.state.addCommitMsg(msg)
 		default:
 			panic(fmt.Errorf("BUG: Unexpected message type: %s in %s", msg.Type, p.getState()))
 		}
 
 		quorum := p.state.QuorumSize()
-		if p.state.CalculateVotingPower(p.state.prepared.extractNodeIds()) >= quorum {
+		if p.state.calculateVotingPower(p.state.prepared.extractNodeIds()) >= quorum {
 			// we have received enough prepare messages
 			sendCommit(span)
 		}
 
-		if p.state.CalculateVotingPower(p.state.committed.extractNodeIds()) >= quorum {
+		if p.state.calculateVotingPower(p.state.committed.extractNodeIds()) >= quorum {
 			// we have received enough commit messages
 			sendCommit(span)
 
@@ -596,9 +596,9 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 		}
 
 		// we only expect RoundChange messages right now
-		_ = p.state.AddRoundMessage(msg)
+		_ = p.state.addRoundChangeMsg(msg)
 
-		currentVotingPower := p.state.CalculateVotingPower(p.state.roundMessages[msg.View.Round].extractNodeIds())
+		currentVotingPower := p.state.calculateVotingPower(p.state.roundMessages[msg.View.Round].extractNodeIds())
 		// Round change quorum is 2*F round change messages (F denotes max faulty voting power)
 		requiredVotingPower := 2 * p.state.MaxFaultyVotingPower()
 		if currentVotingPower >= requiredVotingPower {
