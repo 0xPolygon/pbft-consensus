@@ -75,15 +75,6 @@ func (s *state) initializeVotingInfo() error {
 	return nil
 }
 
-// calculateVotingPower calculates voting power of provided senders
-func (s *state) calculateVotingPower(senders []NodeID) uint64 {
-	accumulatedVotingPower := uint64(0)
-	for _, nodeId := range senders {
-		accumulatedVotingPower += s.validators.VotingPower()[nodeId]
-	}
-	return accumulatedVotingPower
-}
-
 // getQuorumSize calculates quorum size (namely the number of required messages of some type in order to proceed to the next state in PBFT state machine).
 // It is calculated by formula:
 // 2 * F + 1, where F denotes maximum count of faulty nodes in order to have Byzantine fault tollerant property satisfied.

@@ -334,36 +334,11 @@ func TestState_QuorumSize_EqualVotingPower(t *testing.T) {
 	}
 }
 
-func TestState_CalculateWeight_EqualVotingPower(t *testing.T) {
-	cases := []struct {
-		nodesCount uint
-		weight     uint64
-	}{
-		{1, 1},
-		{3, 3},
-		{4, 4},
-		{100, 100},
-	}
-
-	for _, c := range cases {
-		pool := newTesterAccountPool(int(c.nodesCount))
-		votingPower := pool.validatorSet().VotingPower()
-		state, err := initState(pool)
-		require.NoError(t, err)
-		senders := make([]NodeID, 0)
-		for nodeId := range votingPower {
-			senders = append(senders, nodeId)
-		}
-		assert.Equal(t, c.weight, state.calculateVotingPower(senders))
-	}
-}
-
 func TestState_MaxFaultyVotingPower_MixedVotingPower(t *testing.T) {
 	cases := []struct {
 		votingPower    map[NodeID]uint64
 		maxFaultyNodes uint64
 	}{
-		// {map[NodeID]uint64{"A": 0, "B": 0, "C": 0}, 0},
 		{map[NodeID]uint64{"A": 5, "B": 5, "C": 6}, 5},
 		{map[NodeID]uint64{"A": 5, "B": 5, "C": 5, "D": 5}, 6},
 		{map[NodeID]uint64{"A": 50, "B": 25, "C": 10, "D": 15}, 33},
@@ -392,30 +367,6 @@ func TestState_QuorumSize_MixedVotingPower(t *testing.T) {
 		state, err := initState(pool, c.votingPower)
 		require.NoError(t, err)
 		assert.Equal(t, c.quorumSize, state.getQuorumSize())
-	}
-}
-
-func TestState_CalculateWeight_MixedVotingPower(t *testing.T) {
-	cases := []struct {
-		votingPower map[NodeID]uint64
-		quorumSize  uint64
-	}{
-		{map[NodeID]uint64{"A": 5, "B": 5, "C": 5, "D": 5}, 20},
-		{map[NodeID]uint64{"A": 5, "B": 5, "C": 6}, 16},
-		{map[NodeID]uint64{"A": 50, "B": 25, "C": 10, "D": 15}, 100},
-	}
-	for _, c := range cases {
-		pool := newTesterAccountPool()
-		pool.add(getValidatorIds(c.votingPower)...)
-		state, err := initState(pool, c.votingPower)
-		require.NoError(t, err)
-		senders := make([]NodeID, len(c.votingPower))
-		i := 0
-		for nodeId := range c.votingPower {
-			senders[i] = nodeId
-			i++
-		}
-		assert.Equal(t, c.quorumSize, state.calculateVotingPower(senders))
 	}
 }
 
