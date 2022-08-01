@@ -79,8 +79,8 @@ func (v *ValStringStub) VotingPower() map[NodeID]uint64 {
 	return v.VotingPowerMap
 }
 
-// CreateEqualWeightValidatorsMap is a helper function which creates map with same weight for every validator id in the provided slice
-func CreateEqualWeightValidatorsMap(validatorIds []NodeID) map[NodeID]uint64 {
+// CreateEqualVotingPowerMap is a helper function which creates map with same weight for every validator id in the provided slice
+func CreateEqualVotingPowerMap(validatorIds []NodeID) map[NodeID]uint64 {
 	weightedValidators := make(map[NodeID]uint64, len(validatorIds))
 	for _, validatorId := range validatorIds {
 		weightedValidators[validatorId] = 1

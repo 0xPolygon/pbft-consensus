@@ -19,7 +19,7 @@ func init() {
 }
 
 // Helper function which enables creation of MessageReq.
-func createMessage(sender string, messageType MsgType, round ...uint64) *MessageReq {
+func createMessage(sender NodeID, messageType MsgType, round ...uint64) *MessageReq {
 	seal := make([]byte, 2)
 	mrand.Read(seal)
 
@@ -29,7 +29,7 @@ func createMessage(sender string, messageType MsgType, round ...uint64) *Message
 	}
 
 	msg := &MessageReq{
-		From:     NodeID(sender),
+		From:     sender,
 		Type:     messageType,
 		View:     &View{Round: r},
 		Seal:     seal,
@@ -40,8 +40,8 @@ func createMessage(sender string, messageType MsgType, round ...uint64) *Message
 
 func TestState_AddMessages(t *testing.T) {
 	pool := newTesterAccountPool()
-	validatorIds := []string{"A", "B", "C", "D"}
-	pool.add(validatorIds...)
+	validatorIds := []NodeID{"A", "B", "C", "D"}
+	pool.addAccounts(CreateEqualVotingPowerMap(validatorIds))
 
 	s, err := initState(pool)
 	require.NoError(t, err)
@@ -83,16 +83,18 @@ func TestState_AddMessages(t *testing.T) {
 }
 
 func TestState_MaxRound_Found(t *testing.T) {
-	validatorsCount := 5
-	roundsCount := 6
+	const (
+		validatorsCount = 5
+		roundsCount     = 6
+	)
 
-	validatorIds := make([]string, validatorsCount)
+	validatorIds := make([]NodeID, validatorsCount)
 	for i := 0; i < validatorsCount; i++ {
 		validatorId := fmt.Sprintf("validator_%d", i)
-		validatorIds[i] = validatorId
+		validatorIds[i] = NodeID(validatorId)
 	}
 	pool := newTesterAccountPool()
-	pool.add(validatorIds...)
+	pool.addAccounts(CreateEqualVotingPowerMap(validatorIds))
 	s, err := initState(pool)
 	require.NoError(t, err)
 
@@ -114,12 +116,12 @@ func TestState_MaxRound_Found(t *testing.T) {
 func TestState_MaxRound_NotFound(t *testing.T) {
 	validatorsCount := 7
 
-	validatorIds := make([]string, validatorsCount)
+	validatorIds := make([]NodeID, validatorsCount)
 	for i := 0; i < validatorsCount; i++ {
-		validatorIds[i] = fmt.Sprintf("validator_%d", i)
+		validatorIds[i] = NodeID(fmt.Sprintf("validator_%d", i))
 	}
 	pool := newTesterAccountPool()
-	pool.add(validatorIds...)
+	pool.addAccounts(CreateEqualVotingPowerMap(validatorIds))
 	s, err := initState(pool)
 	require.NoError(t, err)
 
@@ -149,7 +151,8 @@ func TestState_MaxRound_NotFound(t *testing.T) {
 
 func TestState_AddRoundMessage(t *testing.T) {
 	s := newState()
-	s.validators = newMockValidatorSet([]string{"A", "B"})
+	validatorIds := []NodeID{"A", "B"}
+	s.validators = NewValStringStub(validatorIds, CreateEqualVotingPowerMap(validatorIds))
 
 	roundMessageSize := s.addRoundChangeMsg(createMessage("A", MessageReq_Commit, 0))
 	assert.Equal(t, 0, roundMessageSize)
@@ -171,8 +174,8 @@ func TestState_AddRoundMessage(t *testing.T) {
 
 func TestState_addPrepared(t *testing.T) {
 	s := newState()
-	validatorIds := []string{"A", "B"}
-	s.validators = newMockValidatorSet(validatorIds)
+	validatorIds := []NodeID{"A", "B"}
+	s.validators = NewValStringStub(validatorIds, CreateEqualVotingPowerMap(validatorIds))
 
 	s.addPrepareMsg(createMessage("A", MessageReq_Commit))
 	assert.Equal(t, 0, s.prepared.length())
@@ -187,8 +190,8 @@ func TestState_addPrepared(t *testing.T) {
 
 func TestState_addCommitted(t *testing.T) {
 	s := newState()
-	validatorIds := []string{"A", "B"}
-	s.validators = newMockValidatorSet(validatorIds)
+	validatorIds := []NodeID{"A", "B"}
+	s.validators = NewValStringStub(validatorIds, CreateEqualVotingPowerMap(validatorIds))
 
 	s.addCommitMsg(createMessage("A", MessageReq_Prepare))
 	assert.True(t, s.committed.length() == 0)
@@ -233,7 +236,7 @@ func TestState_GetSequence(t *testing.T) {
 
 func TestState_getCommittedSeals(t *testing.T) {
 	pool := newTesterAccountPool()
-	pool.add("A", "B", "C", "D", "E")
+	pool.addAccounts(CreateEqualVotingPowerMap([]NodeID{"A", "B", "C", "D", "E"}))
 
 	s := newState()
 	s.validators = pool.validatorSet()
@@ -345,8 +348,8 @@ func TestState_MaxFaultyVotingPower_MixedVotingPower(t *testing.T) {
 	}
 	for _, c := range cases {
 		pool := newTesterAccountPool()
-		pool.add(getValidatorIds(c.votingPower)...)
-		state, err := initState(pool, c.votingPower)
+		pool.addAccounts(c.votingPower)
+		state, err := initState(pool)
 		require.NoError(t, err)
 		assert.Equal(t, c.maxFaultyNodes, state.getMaxFaultyVotingPower())
 	}
@@ -363,30 +366,23 @@ func TestState_QuorumSize_MixedVotingPower(t *testing.T) {
 	}
 	for _, c := range cases {
 		pool := newTesterAccountPool()
-		pool.add(getValidatorIds(c.votingPower)...)
-		state, err := initState(pool, c.votingPower)
+		pool.addAccounts(c.votingPower)
+		state, err := initState(pool)
 		require.NoError(t, err)
 		assert.Equal(t, c.quorumSize, state.getQuorumSize())
 	}
 }
 
-func getValidatorIds(votingPowers map[NodeID]uint64) []string {
-	validatorIds := make([]string, 0)
-	for nodeId := range votingPowers {
-		validatorIds = append(validatorIds, string(nodeId))
-	}
-	return validatorIds
-}
-
 type signDelegate func([]byte) ([]byte, error)
 type testerAccount struct {
-	alias  string
-	priv   *ecdsa.PrivateKey
-	signFn signDelegate
+	alias       NodeID
+	priv        *ecdsa.PrivateKey
+	votingPower uint64
+	signFn      signDelegate
 }
 
 func (t *testerAccount) NodeID() NodeID {
-	return NodeID(t.alias)
+	return t.alias
 }
 
 func (t *testerAccount) Sign(b []byte) ([]byte, error) {
@@ -407,54 +403,50 @@ func newTesterAccountPool(num ...int) *testerAccountPool {
 	if len(num) == 1 {
 		for i := 0; i < num[0]; i++ {
 			t.accounts = append(t.accounts, &testerAccount{
-				alias: strconv.Itoa(i),
-				priv:  generateKey(),
+				alias:       NodeID(strconv.Itoa(i)),
+				priv:        generateKey(),
+				votingPower: 1,
 			})
 		}
 	}
 	return t
 }
 
-func (ap *testerAccountPool) add(accounts ...string) {
-	for _, account := range accounts {
-		if acct := ap.get(account); acct != nil {
+func (ap *testerAccountPool) addAccounts(votingPowerMap map[NodeID]uint64) {
+	for alias, votingPower := range votingPowerMap {
+		if acct := ap.get(alias); acct != nil {
 			continue
 		}
 		ap.accounts = append(ap.accounts, &testerAccount{
-			alias: account,
-			priv:  generateKey(),
+			alias:       alias,
+			priv:        generateKey(),
+			votingPower: votingPower,
 		})
 	}
 }
 
-func (ap *testerAccountPool) get(name string) *testerAccount {
+func (ap *testerAccountPool) get(alias NodeID) *testerAccount {
 	for _, account := range ap.accounts {
-		if account.alias == name {
+		if account.alias == alias {
 			return account
 		}
 	}
 	return nil
 }
 
-func (ap *testerAccountPool) validatorSet(votingPower ...map[NodeID]uint64) ValidatorSet {
-	validatorIds := []NodeID{}
-	for _, acc := range ap.accounts {
-		validatorIds = append(validatorIds, NodeID(acc.alias))
+func (ap *testerAccountPool) validatorSet() ValidatorSet {
+	validatorIds := make([]NodeID, len(ap.accounts))
+	votingPowerMap := make(map[NodeID]uint64, len(ap.accounts))
+	for i, acc := range ap.accounts {
+		validatorIds[i] = acc.alias
+		votingPowerMap[acc.alias] = acc.votingPower
 	}
-
-	var votingPowerMap map[NodeID]uint64
-	if len(votingPower) > 0 {
-		votingPowerMap = votingPower[0]
-	} else {
-		votingPowerMap = CreateEqualWeightValidatorsMap(validatorIds)
-	}
-
 	return NewValStringStub(validatorIds, votingPowerMap)
 }
 
 // Helper function which enables creation of MessageReq.
 // Note: sender needs to be seeded to the pool before invoking, otherwise senderId will be set to provided sender parameter.
-func (ap *testerAccountPool) createMessage(sender string, messageType MsgType, round ...uint64) *MessageReq {
+func (ap *testerAccountPool) createMessage(sender NodeID, messageType MsgType, round ...uint64) *MessageReq {
 	poolSender := ap.get(sender)
 	if poolSender != nil {
 		sender = poolSender.alias
@@ -470,30 +462,12 @@ func generateKey() *ecdsa.PrivateKey {
 	return prv
 }
 
-func initState(accountPool *testerAccountPool, votingPower ...map[NodeID]uint64) (*state, error) {
+func initState(accountPool *testerAccountPool) (*state, error) {
 	s := newState()
-	var votingPowerMap map[NodeID]uint64
-	if len(votingPower) > 0 {
-		votingPowerMap = votingPower[0]
-	} else {
-		validatorIds := []NodeID{}
-		for _, acc := range accountPool.accounts {
-			validatorIds = append(validatorIds, NodeID(acc.alias))
-		}
-		votingPowerMap = CreateEqualWeightValidatorsMap(validatorIds)
-	}
-	s.validators = accountPool.validatorSet(votingPowerMap)
+	s.validators = accountPool.validatorSet()
 	err := s.initializeVotingInfo()
 	if err != nil {
 		return nil, err
 	}
 	return s, nil
-}
-
-func newMockValidatorSet(validatorIds []string) ValidatorSet {
-	validatorNodeIds := []NodeID{}
-	for _, id := range validatorIds {
-		validatorNodeIds = append(validatorNodeIds, NodeID(id))
-	}
-	return NewValStringStub(validatorNodeIds, CreateEqualWeightValidatorsMap(validatorNodeIds))
 }

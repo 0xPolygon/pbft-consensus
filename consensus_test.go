@@ -31,7 +31,7 @@ var (
 func TestTransition_AcceptState_ToSyncState(t *testing.T) {
 	// we are in AcceptState and we are not in the validators list
 	// means that we have been removed as validator, move to sync state
-	i := newMockPbft(t, []string{"A", "B", "C", "D"}, "")
+	i := newMockPbft(t, []NodeID{"A", "B", "C", "D"}, nil, "")
 	i.setState(AcceptState)
 
 	i.runCycle(context.Background())
@@ -49,8 +49,7 @@ func TestTransition_AcceptState_Proposer_Propose(t *testing.T) {
 	// 3. send a preprepare message
 	// 4. send a prepare message
 	// 5. move to ValidateState
-
-	i := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
+	i := newMockPbft(t, []NodeID{"A", "B", "C", "D"}, nil, "A")
 	i.setState(AcceptState)
 
 	i.setProposal(&Proposal{
@@ -70,7 +69,7 @@ func TestTransition_AcceptState_Proposer_Propose(t *testing.T) {
 func TestTransition_AcceptState_Proposer_Locked(t *testing.T) {
 	// we are in AcceptState, we are the proposer but the value is locked.
 	// it needs to send the locked proposal again
-	i := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
+	i := newMockPbft(t, []NodeID{"A", "B", "C", "D"}, nil, "A")
 	i.setState(AcceptState)
 
 	i.state.lock()
@@ -91,7 +90,7 @@ func TestTransition_AcceptState_Proposer_Locked(t *testing.T) {
 }
 
 func TestTransition_AcceptState_Validator_VerifyCorrect(t *testing.T) {
-	i := newMockPbft(t, []string{"A", "B", "C"}, "B")
+	i := newMockPbft(t, []NodeID{"A", "B", "C"}, nil, "B")
 	i.state.view = ViewMsg(1, 0)
 	i.setState(AcceptState)
 
@@ -115,7 +114,7 @@ func TestTransition_AcceptState_Validator_VerifyCorrect(t *testing.T) {
 func TestTransition_AcceptState_Validator_VerifyFails(t *testing.T) {
 	t.Skip("involves validation of hash that is not done yet")
 
-	i := newMockPbft(t, []string{"A", "B", "C"}, "B")
+	i := newMockPbft(t, []NodeID{"A", "B", "C"}, nil, "B")
 	i.state.view = ViewMsg(1, 0)
 	i.setState(AcceptState)
 
@@ -142,10 +141,11 @@ func TestTransition_AcceptState_Proposer_FailedBuildProposal(t *testing.T) {
 		return nil, errors.New("failed to build a proposal")
 	}
 
-	validatorIds := []string{"A", "B", "C"}
-	backend := newMockBackend(validatorIds, nil).HookBuildProposalHandler(buildProposalFailure)
+	validatorIds := []NodeID{"A", "B", "C"}
+	votingPowerMap := CreateEqualVotingPowerMap(validatorIds)
+	backend := newMockBackend(validatorIds, votingPowerMap, nil).HookBuildProposalHandler(buildProposalFailure)
 
-	m := newMockPbft(t, validatorIds, "A", backend)
+	m := newMockPbft(t, validatorIds, votingPowerMap, "A", backend)
 	m.state.view = ViewMsg(1, 0)
 	m.setState(AcceptState)
 
@@ -170,20 +170,15 @@ func TestTransition_AcceptState_Proposer_FailedBuildProposal(t *testing.T) {
 	assert.True(t, m.IsState(RoundChangeState))
 }
 
-// Run state machine from AcceptState, proposer node.
+// Run state machine from AcceptState.
 // Artificially induce state machine cancellation and check whether state machine is still in AcceptState.
-func TestTransition_AcceptState_Proposer_Cancellation(t *testing.T) {
-	testAcceptState_Cancellation(t, true)
-}
-
-// Run state machine from AcceptState, non-proposer node.
-// Artificially induce state machine cancellation and check whether state machine is still in the AcceptState.
-func TestTransition_AcceptState_NonProposer_Cancellation(t *testing.T) {
-	testAcceptState_Cancellation(t, false)
+func TestTransition_AcceptState_Cancellation(t *testing.T) {
+	t.Run("Run AcceptState Proposer", func(t *testing.T) { testAcceptState_Cancellation(t, true) })
+	t.Run("Run AcceptState NonProposer", func(t *testing.T) { testAcceptState_Cancellation(t, false) })
 }
 
 func testAcceptState_Cancellation(t *testing.T, isProposerNode bool) {
-	m := newMockPbft(t, []string{"A", "B", "C", "D"}, "D")
+	m := newMockPbft(t, []NodeID{"A", "B", "C", "D"}, nil, "D")
 	if !isProposerNode {
 		m.Pbft.state.proposer = "A"
 	}
@@ -202,7 +197,7 @@ func testAcceptState_Cancellation(t *testing.T, isProposerNode bool) {
 }
 
 func TestTransition_AcceptState_Validator_ProposerInvalid(t *testing.T) {
-	i := newMockPbft(t, []string{"A", "B", "C"}, "B")
+	i := newMockPbft(t, []NodeID{"A", "B", "C"}, nil, "B")
 	i.state.view = ViewMsg(1, 0)
 	i.setState(AcceptState)
 
@@ -226,8 +221,7 @@ func TestTransition_AcceptState_Validator_ProposerInvalid(t *testing.T) {
 func TestTransition_AcceptState_Validator_LockWrong(t *testing.T) {
 	// We are a validator and have a locked state in 'proposal1'.
 	// We receive an invalid proposal 'proposal2' with different data.
-
-	i := newMockPbft(t, []string{"A", "B", "C"}, "B")
+	i := newMockPbft(t, []NodeID{"A", "B", "C"}, nil, "B")
 	i.state.view = ViewMsg(1, 0)
 	i.setState(AcceptState)
 
@@ -258,7 +252,7 @@ func TestTransition_AcceptState_Validator_LockWrong(t *testing.T) {
 }
 
 func TestTransition_AcceptState_Validator_LockCorrect(t *testing.T) {
-	i := newMockPbft(t, []string{"A", "B", "C"}, "B")
+	i := newMockPbft(t, []NodeID{"A", "B", "C"}, nil, "B")
 	i.state.view = ViewMsg(1, 0)
 	i.setState(AcceptState)
 
@@ -294,10 +288,11 @@ func TestTransition_AcceptState_Validate_ProposalFail(t *testing.T) {
 		return errors.New("failed to validate a proposal")
 	}
 
-	validatorIds := []string{"A", "B", "C"}
-	backend := newMockBackend(validatorIds, nil).HookValidateHandler(validateProposalFunc)
+	validatorIds := []NodeID{"A", "B", "C"}
+	votingPowerMap := CreateEqualVotingPowerMap(validatorIds)
+	backend := newMockBackend(validatorIds, votingPowerMap, nil).HookValidateHandler(validateProposalFunc)
 
-	m := newMockPbft(t, validatorIds, "C", backend)
+	m := newMockPbft(t, validatorIds, votingPowerMap, "C", backend)
 	m.state.view = ViewMsg(1, 0)
 	m.setState(AcceptState)
 
@@ -325,7 +320,7 @@ func TestTransition_AcceptState_Validate_ProposalFail(t *testing.T) {
 
 // Local node sending a messages isn't among validator set, so state machine should set state to SyncState
 func TestTransition_AcceptState_NonValidatorNode(t *testing.T) {
-	m := newMockPbft(t, []string{"A", "B", "C"}, "")
+	m := newMockPbft(t, []NodeID{"A", "B", "C"}, nil, "")
 	m.state.view = ViewMsg(1, 0)
 	m.setState(AcceptState)
 	m.runCycle(context.Background())
@@ -337,7 +332,7 @@ func TestTransition_AcceptState_NonValidatorNode(t *testing.T) {
 }
 
 func TestTransition_RoundChangeState_CatchupRound(t *testing.T) {
-	m := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
+	m := newMockPbft(t, []NodeID{"A", "B", "C", "D"}, nil, "A")
 	m.setState(RoundChangeState)
 
 	// new messages arrive with round number 2
@@ -373,7 +368,7 @@ func TestTransition_RoundChangeState_CatchupRound(t *testing.T) {
 }
 
 func TestTransition_RoundChangeState_Timeout(t *testing.T) {
-	m := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
+	m := newMockPbft(t, []NodeID{"A", "B", "C", "D"}, nil, "A")
 
 	m.setState(RoundChangeState)
 
@@ -406,7 +401,7 @@ func TestTransition_RoundChangeState_Timeout(t *testing.T) {
 }
 
 func TestTransition_RoundChangeState_WeakCertificate(t *testing.T) {
-	m := newMockPbft(t, []string{"A", "B", "C", "D", "E", "F", "G"}, "A")
+	m := newMockPbft(t, []NodeID{"A", "B", "C", "D", "E", "F", "G"}, nil, "A")
 
 	m.setState(RoundChangeState)
 
@@ -442,7 +437,7 @@ func TestTransition_RoundChangeState_WeakCertificate(t *testing.T) {
 func TestTransition_RoundChangeState_ErrStartNewRound(t *testing.T) {
 	// if we start a round change because there was an error we start
 	// a new round right away
-	m := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
+	m := newMockPbft(t, []NodeID{"A", "B", "C", "D"}, nil, "A")
 	m.Close()
 
 	m.state.err = errVerificationFailed
@@ -461,7 +456,7 @@ func TestTransition_RoundChangeState_ErrStartNewRound(t *testing.T) {
 func TestTransition_RoundChangeState_StartNewRound(t *testing.T) {
 	// if we start round change due to a state timeout and we are on the
 	// correct sequence, we start a new round
-	m := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
+	m := newMockPbft(t, []NodeID{"A", "B", "C", "D"}, nil, "A")
 	m.Close()
 
 	m.setState(RoundChangeState)
@@ -478,7 +473,7 @@ func TestTransition_RoundChangeState_StartNewRound(t *testing.T) {
 func TestTransition_RoundChangeState_MaxRound(t *testing.T) {
 	// if we start round change due to a state timeout we try to catch up
 	// with the highest round seen.
-	m := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
+	m := newMockPbft(t, []NodeID{"A", "B", "C", "D"}, nil, "A")
 	m.Close()
 
 	m.addMessage(&MessageReq{
@@ -515,10 +510,11 @@ func TestTransition_RoundChangeState_Stuck(t *testing.T) {
 		return 0, true
 	}
 
-	validatorIds := []string{"A", "B", "C"}
-	mockBackend := newMockBackend(validatorIds, nil).HookIsStuckHandler(isStuckFn)
+	validatorIds := []NodeID{"A", "B", "C"}
+	votingPowerMap := CreateEqualVotingPowerMap(validatorIds)
+	mockBackend := newMockBackend(validatorIds, votingPowerMap, nil).HookIsStuckHandler(isStuckFn)
 
-	m := newMockPbft(t, validatorIds, "A", mockBackend)
+	m := newMockPbft(t, validatorIds, votingPowerMap, "A", mockBackend)
 	m.SetState(RoundChangeState)
 
 	m.runCycle(context.Background())
@@ -527,60 +523,97 @@ func TestTransition_RoundChangeState_Stuck(t *testing.T) {
 
 // Test ValidateState to CommitState transition.
 func TestTransition_ValidateState_MoveToCommitState(t *testing.T) {
-	// we receive enough prepare messages to lock and commit the proposal
-	m := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
-	m.setState(ValidateState)
+	t.Run("All the validators have the same voting powers", func(t *testing.T) {
+		// we receive enough prepare messages to lock and commit the proposal
+		m := newMockPbft(t, []NodeID{"A", "B", "C", "D"}, nil, "A")
+		m.setState(ValidateState)
 
-	// Prepare messages
-	m.emitMsg(&MessageReq{
-		From: "A",
-		Type: MessageReq_Prepare,
-		View: ViewMsg(1, 0),
-	})
-	m.emitMsg(&MessageReq{
-		From: "B",
-		Type: MessageReq_Prepare,
-		View: ViewMsg(1, 0),
-	})
-	// repeated message is not included
-	m.emitMsg(&MessageReq{
-		From: "B",
-		Type: MessageReq_Prepare,
-		View: ViewMsg(1, 0),
-	})
-	m.emitMsg(&MessageReq{
-		From: "C",
-		Type: MessageReq_Prepare,
-		View: ViewMsg(1, 0),
+		// Prepare messages
+		m.emitMsg(&MessageReq{
+			From: "A",
+			Type: MessageReq_Prepare,
+			View: ViewMsg(1, 0),
+		})
+		m.emitMsg(&MessageReq{
+			From: "B",
+			Type: MessageReq_Prepare,
+			View: ViewMsg(1, 0),
+		})
+		// repeated message is not included
+		m.emitMsg(&MessageReq{
+			From: "B",
+			Type: MessageReq_Prepare,
+			View: ViewMsg(1, 0),
+		})
+		m.emitMsg(&MessageReq{
+			From: "C",
+			Type: MessageReq_Prepare,
+			View: ViewMsg(1, 0),
+		})
+
+		// Commit messages
+		m.emitMsg(&MessageReq{
+			From: "C",
+			Type: MessageReq_Commit,
+			View: ViewMsg(1, 0),
+		})
+		m.emitMsg(&MessageReq{
+			From: "D",
+			Type: MessageReq_Commit,
+			View: ViewMsg(1, 0),
+		})
+
+		m.runCycle(context.Background())
+
+		m.expect(expectResult{
+			sequence:    1,
+			state:       CommitState,
+			prepareMsgs: 3,
+			commitMsgs:  3, // Commit messages (A proposer sent commit via state machine loop, C and D sent commit via emit message)
+			locked:      true,
+			outgoing:    1, // A commit message
+		})
 	})
 
-	// Commit messages
-	m.emitMsg(&MessageReq{
-		From: "C",
-		Type: MessageReq_Commit,
-		View: ViewMsg(1, 0),
-	})
-	m.emitMsg(&MessageReq{
-		From: "D",
-		Type: MessageReq_Commit,
-		View: ViewMsg(1, 0),
+	t.Run("Validators have different voting powers", func(t *testing.T) {
+		// we receive enough prepare messages to lock and commit the proposal
+		m := newMockPbft(t, []NodeID{"A", "B", "C", "D"}, map[NodeID]uint64{"A": 15, "B": 35, "C": 25, "D": 25}, "A")
+		m.setState(ValidateState)
+
+		// Commit messages
+		m.emitMsg(&MessageReq{
+			From: "B",
+			Type: MessageReq_Commit,
+			View: ViewMsg(1, 0),
+		})
+		m.emitMsg(&MessageReq{
+			From: "C",
+			Type: MessageReq_Commit,
+			View: ViewMsg(1, 0),
+		})
+		m.emitMsg(&MessageReq{
+			From: "D",
+			Type: MessageReq_Commit,
+			View: ViewMsg(1, 0),
+		})
+
+		m.runCycle(context.Background())
+
+		m.expect(expectResult{
+			sequence:    1,
+			state:       CommitState,
+			prepareMsgs: 0,
+			commitMsgs:  3, // Commit messages (A proposer sent commit via state machine loop, C and D sent commit via emit message)
+			locked:      true,
+			outgoing:    1, // A commit message
+		})
 	})
 
-	m.runCycle(context.Background())
-
-	m.expect(expectResult{
-		sequence:    1,
-		state:       CommitState,
-		prepareMsgs: 3,
-		commitMsgs:  3, // Commit messages (A proposer sent commit via state machine loop, C and D sent commit via emit message)
-		locked:      true,
-		outgoing:    1, // A commit message
-	})
 }
 
 // No messages are sent, so ensure that destination state is RoundChangeState and that state machine jumps out of the loop.
 func TestTransition_ValidateState_MoveToRoundChangeState(t *testing.T) {
-	m := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
+	m := newMockPbft(t, []NodeID{"A", "B", "C", "D"}, nil, "A")
 	m.setState(ValidateState)
 
 	m.runCycle(context.Background())
@@ -590,7 +623,7 @@ func TestTransition_ValidateState_MoveToRoundChangeState(t *testing.T) {
 
 // Send wrong message type within ValidateState and asssure it panics
 func TestTransition_ValidateState_WrongMessageType(t *testing.T) {
-	m := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
+	m := newMockPbft(t, []NodeID{"A", "B", "C", "D"}, nil, "A")
 	m.setState(ValidateState)
 
 	// Create preprepare message and push it to validate state message queue
@@ -607,7 +640,7 @@ func TestTransition_ValidateState_WrongMessageType(t *testing.T) {
 
 // Test that past and future messages are discarded and state machine transfers from ValidateState to RoundChangeState.
 func TestTransition_ValidateState_DiscardMessage(t *testing.T) {
-	m := newMockPbft(t, []string{"A", "B"}, "A")
+	m := newMockPbft(t, []NodeID{"A", "B"}, nil, "A")
 	m.setState(ValidateState)
 	m.state.view = ViewMsg(1, 2)
 
@@ -636,7 +669,7 @@ func TestTransition_ValidateState_DiscardMessage(t *testing.T) {
 
 // Test CommitState to DoneState transition.
 func TestTransition_CommitState_DoneState(t *testing.T) {
-	m := newMockPbft(t, []string{"A", "B", "C"}, "A")
+	m := newMockPbft(t, []NodeID{"A", "B", "C"}, nil, "A")
 	m.state.view = ViewMsg(1, 0)
 	m.state.proposer = "A"
 	m.setState(CommitState)
@@ -651,7 +684,7 @@ func TestTransition_CommitState_DoneState(t *testing.T) {
 
 // Test CommitState to RoundChange transition.
 func TestTransition_CommitState_RoundChange(t *testing.T) {
-	m := newMockPbft(t, []string{"A", "B", "C"}, "A")
+	m := newMockPbft(t, []NodeID{"A", "B", "C"}, nil, "A")
 	m.state.view = ViewMsg(1, 0)
 	m.setState(CommitState)
 
@@ -693,7 +726,7 @@ func TestExponentialTimeout(t *testing.T) {
 
 // Ensure that DoneState cannot be set as initial state of state machine.
 func TestDoneState_RunCycle_Panics(t *testing.T) {
-	m := newMockPbft(t, []string{"A", "B", "C"}, "A")
+	m := newMockPbft(t, []NodeID{"A", "B", "C"}, nil, "A")
 	m.state.view = ViewMsg(1, 0)
 	m.SetState(DoneState)
 
@@ -704,7 +737,7 @@ func TestDoneState_RunCycle_Panics(t *testing.T) {
 // Use case #1: Cancellation is triggered and state machine remains in the AcceptState.
 // Use case #2: Cancellation is not triggered and state machine converges to the DoneState.
 func TestPbft_Run(t *testing.T) {
-	m := newMockPbft(t, []string{"A", "B", "C"}, "A")
+	m := newMockPbft(t, []NodeID{"A", "B", "C"}, nil, "A")
 	m.state.view = ViewMsg(1, 0)
 	m.setProposal(&Proposal{
 		Data: mockProposal,
@@ -766,7 +799,7 @@ func TestPbft_Run(t *testing.T) {
 
 // One of the validators fails to sign a proposal. Ensure that no messages were added to any message queue.
 func TestGossip_SignProposalFailed(t *testing.T) {
-	m := newMockPbft(t, []string{"A", "B"}, "A")
+	m := newMockPbft(t, []NodeID{"A", "B"}, nil, "A")
 	validator := m.pool.get("A")
 	validator.signFn = func(b []byte) ([]byte, error) {
 		return nil, errors.New("failed to sign message")
@@ -874,9 +907,12 @@ func (m *mockPbft) CalculateTimeout() time.Duration {
 	return time.Millisecond
 }
 
-func newMockPbft(t *testing.T, accounts []string, account string, backendArg ...*mockBackend) *mockPbft {
+func newMockPbft(t *testing.T, validatorIds []NodeID, votingPowerMap map[NodeID]uint64, account NodeID, backendArg ...*mockBackend) *mockPbft {
 	pool := newTesterAccountPool()
-	pool.add(accounts...)
+	if len(votingPowerMap) == 0 {
+		votingPowerMap = CreateEqualVotingPowerMap(validatorIds)
+	}
+	pool.addAccounts(votingPowerMap)
 
 	m := &mockPbft{
 		t:        t,
@@ -889,7 +925,7 @@ func newMockPbft(t *testing.T, accounts []string, account string, backendArg ...
 	var acct *testerAccount
 	if account == "" {
 		// not in validator set, create a new one (not part of the validator set)
-		pool.add("xx")
+		pool.addAccounts(map[NodeID]uint64{"xx": 1})
 		acct = pool.get("xx")
 	} else {
 		acct = pool.get(account)
@@ -910,9 +946,9 @@ func newMockPbft(t *testing.T, accounts []string, account string, backendArg ...
 		backend = backendArg[0]
 		backend.mock = m
 	} else {
-		backend = newMockBackend(accounts, m)
+		backend = newMockBackend(validatorIds, votingPowerMap, m)
 	}
-	_ = m.Pbft.SetBackend(backend)
+	require.NoError(t, m.Pbft.SetBackend(backend))
 
 	m.state.proposal = &Proposal{
 		Data: mockProposal,
@@ -934,10 +970,10 @@ func getDefaultLoggerOutput() io.Writer {
 	return os.Stdout
 }
 
-func newMockBackend(validatorIds []string, mockPbft *mockPbft) *mockBackend {
+func newMockBackend(validatorIds []NodeID, votingPowerMap map[NodeID]uint64, mockPbft *mockPbft) *mockBackend {
 	return &mockBackend{
 		mock:       mockPbft,
-		validators: newMockValidatorSet(validatorIds).(*ValStringStub),
+		validators: NewValStringStub(validatorIds, votingPowerMap),
 	}
 }
 

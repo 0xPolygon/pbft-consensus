@@ -47,5 +47,5 @@ func (n *ValidatorSet) Len() int {
 }
 
 func (n *ValidatorSet) VotingPower() map[pbft.NodeID]uint64 {
-	return pbft.CreateEqualWeightValidatorsMap(n.Nodes)
+	return pbft.CreateEqualVotingPowerMap(n.Nodes)
 }
