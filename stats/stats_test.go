@@ -20,40 +20,44 @@ func TestIncrMsgCount(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		stats.IncrMsgCount(roundChange)
+		stats.IncrMsgCount(roundChange, 1)
 	}()
 	// increment Prepepare Message count
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		stats.IncrMsgCount(preprepare)
-		stats.IncrMsgCount(preprepare)
+		stats.IncrMsgCount(preprepare, 3)
+		stats.IncrMsgCount(preprepare, 5)
 	}()
 	// increment Commit Message count
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		stats.IncrMsgCount(commit)
+		stats.IncrMsgCount(commit, 3)
 	}()
 	// increment Prepare Message count
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		stats.IncrMsgCount(prepare)
-		stats.IncrMsgCount(prepare)
-		stats.IncrMsgCount(prepare)
+		stats.IncrMsgCount(prepare, 2)
+		stats.IncrMsgCount(prepare, 4)
+		stats.IncrMsgCount(prepare, 6)
 	}()
 
 	wg.Wait()
 
-	// assert Round Changes
+	// assert Round change messages
 	assert.Equal(t, uint64(1), stats.msgCount[roundChange])
-	// assert Prepepares
+	assert.Equal(t, uint64(1), stats.msgVotingPower[roundChange])
+	// assert Pre-prepare messages
 	assert.Equal(t, uint64(2), stats.msgCount[preprepare])
-	// assert Commit Messages
+	assert.Equal(t, uint64(8), stats.msgVotingPower[preprepare])
+	// assert Commit messages
 	assert.Equal(t, uint64(1), stats.msgCount[commit])
-	// assert Prepare Message
+	assert.Equal(t, uint64(3), stats.msgVotingPower[commit])
+	// assert Prepare messages
 	assert.Equal(t, uint64(3), stats.msgCount[prepare])
+	assert.Equal(t, uint64(12), stats.msgVotingPower[prepare])
 }
 
 func TestSetView(t *testing.T) {
@@ -70,9 +74,10 @@ func TestReset(t *testing.T) {
 	stats := NewStats()
 	preprepare := "Preprepare"
 
-	stats.IncrMsgCount(preprepare)
-	stats.IncrMsgCount(preprepare)
+	stats.IncrMsgCount(preprepare, 1)
+	stats.IncrMsgCount(preprepare, 1)
 	stats.Reset()
 
 	assert.Equal(t, uint64(0), stats.msgCount[preprepare])
+	assert.Equal(t, uint64(0), stats.msgVotingPower[preprepare])
 }
