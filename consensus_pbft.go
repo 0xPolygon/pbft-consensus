@@ -444,16 +444,16 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 }
 
 func (p *Pbft) spanAddEventMessage(typ string, span trace.Span, msg *MessageReq) {
-	p.stats.IncrMsgCount(msg.Type.String())
+	p.stats.IncrMsgCount(msg.Type.String(), p.state.validators.VotingPower()[msg.From])
 
 	span.AddEvent("Message", trace.WithAttributes(
-		// where was the message generated
+		// message type
 		attribute.String("typ", typ),
 
 		// type of message
 		attribute.String("msg", msg.Type.String()),
 
-		// from address of the sender
+		// address of the sender
 		attribute.String("from", string(msg.From)),
 
 		// view sequence
@@ -467,15 +467,21 @@ func (p *Pbft) spanAddEventMessage(typ string, span trace.Span, msg *MessageReq)
 func (p *Pbft) setStateSpanAttributes(span trace.Span) {
 	attr := []attribute.KeyValue{}
 
-	// number of committed messages
-	attr = append(attr, attribute.Int64("committed", int64(p.state.numCommitted())))
+	// number of commit messages
+	attr = append(attr, attribute.Int("committed", p.state.numCommitted()))
 
-	// number of prepared messages
-	attr = append(attr, attribute.Int64("prepared", int64(p.state.numPrepared())))
+	// commit messages voting power
+	attr = append(attr, attribute.Int64("committed.votingPower", int64(p.state.committed.getAccumulatedVotingPower())))
+
+	// number of prepare messages
+	attr = append(attr, attribute.Int("prepared", p.state.numPrepared()))
+
+	// prepare messages voting power
+	attr = append(attr, attribute.Int64("committed.votingPower", int64(p.state.prepared.getAccumulatedVotingPower())))
 
 	// number of change state messages per round
 	for round, msgs := range p.state.roundMessages {
-		attr = append(attr, attribute.Int64(fmt.Sprintf("roundchange_%d", round), int64(msgs.length())))
+		attr = append(attr, attribute.Int(fmt.Sprintf("roundChange_%d", round), msgs.length()))
 	}
 	span.SetAttributes(attr...)
 }
@@ -727,7 +733,8 @@ func (p *Pbft) getNextMessage(span trace.Span) (*MessageReq, bool) {
 	for {
 		msg, discards := p.notifier.ReadNextMessage(p)
 		// send the discard messages
-		p.logger.Printf("[TRACE] Current state %s, number of prepared messages: %d, number of committed messages %d", p.getState(), p.state.numPrepared(), p.state.numCommitted())
+		p.logger.Printf("[TRACE] Current state %s, number of prepared messages: %d (voting power: %d), number of committed messages %d (voting power: %d)",
+			p.getState(), p.state.numPrepared(), p.state.prepared.getAccumulatedVotingPower(), p.state.numCommitted(), p.state.committed.getAccumulatedVotingPower())
 
 		for _, msg := range discards {
 			p.logger.Printf("[TRACE] Discarded %s ", msg)

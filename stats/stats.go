@@ -11,15 +11,17 @@ type Stats struct {
 	round    uint64
 	sequence uint64
 
-	msgCount      map[string]uint64
-	stateDuration map[string]time.Duration
+	msgCount       map[string]uint64
+	msgVotingPower map[string]uint64
+	stateDuration  map[string]time.Duration
 }
 
 func NewStats() *Stats {
 	return &Stats{
-		lock:          &sync.Mutex{},
-		msgCount:      make(map[string]uint64),
-		stateDuration: make(map[string]time.Duration),
+		lock:           &sync.Mutex{},
+		msgCount:       make(map[string]uint64),
+		msgVotingPower: make(map[string]uint64),
+		stateDuration:  make(map[string]time.Duration),
 	}
 }
 
@@ -30,10 +32,11 @@ func (s *Stats) SetView(sequence uint64, round uint64) {
 	s.round = round
 }
 
-func (s *Stats) IncrMsgCount(msgType string) {
+func (s *Stats) IncrMsgCount(msgType string, votingPower uint64) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	s.msgCount[msgType]++
+	s.msgVotingPower[msgType] += votingPower
 }
 
 func (s *Stats) StateDuration(state string, t time.Time) {
@@ -55,6 +58,10 @@ func (s *Stats) Snapshot() Stats {
 		stats.msgCount[msgType] = count
 	}
 
+	for msgType, votingPower := range s.msgVotingPower {
+		stats.msgVotingPower[msgType] = votingPower
+	}
+
 	for msgType, duration := range s.stateDuration {
 		stats.stateDuration[msgType] = duration
 	}
@@ -67,5 +74,6 @@ func (s *Stats) Reset() {
 	defer s.lock.Unlock()
 
 	s.msgCount = make(map[string]uint64)
+	s.msgVotingPower = make(map[string]uint64)
 	s.stateDuration = make(map[string]time.Duration)
 }
