@@ -22,9 +22,6 @@ type state struct {
 	// Current view
 	view *View
 
-	// Previous round
-	previousRound uint64
-
 	// List of prepared messages
 	prepared *messages
 
@@ -236,12 +233,7 @@ func (s *state) GetCurrentRound() uint64 {
 	return atomic.LoadUint64(&s.view.Round)
 }
 
-func (s *state) GetPreviousRound() uint64 {
-	return atomic.LoadUint64(&s.previousRound)
-}
-
 func (s *state) SetCurrentRound(round uint64) {
-	atomic.StoreUint64(&s.previousRound, s.view.Round)
 	atomic.StoreUint64(&s.view.Round, round)
 }
 
