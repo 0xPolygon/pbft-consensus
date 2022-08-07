@@ -64,11 +64,10 @@ type SealedProposal struct {
 
 // RoundInfo is the information about the round
 type RoundInfo struct {
-	IsProposer    bool
-	Proposer      NodeID
-	Locked        bool
-	CurrentRound  uint64
-	PreviousRound uint64
+	IsProposer   bool
+	Proposer     NodeID
+	Locked       bool
+	CurrentRound uint64
 }
 
 // Pbft represents the PBFT consensus mechanism object
@@ -250,7 +249,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 	defer span.End()
 
 	p.stats.SetView(p.state.view.Sequence, p.state.view.Round)
-	p.logger.Printf("[INFO] accept state: sequence %d", p.state.view.Sequence)
+	p.logger.Printf("[INFO] accept state: sequence %d, round %d", p.state.view.Sequence, p.state.view.Round)
 
 	if !p.state.validators.Includes(p.validator.NodeID()) {
 		// we are not a validator anymore, move back to sync state
@@ -265,11 +264,10 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 
 	isProposer := p.state.proposer == p.validator.NodeID()
 	p.backend.Init(&RoundInfo{
-		Proposer:      p.state.proposer,
-		IsProposer:    isProposer,
-		Locked:        p.state.IsLocked(),
-		CurrentRound:  p.state.GetCurrentRound(),
-		PreviousRound: p.state.GetPreviousRound(),
+		Proposer:     p.state.proposer,
+		IsProposer:   isProposer,
+		Locked:       p.state.IsLocked(),
+		CurrentRound: p.state.GetCurrentRound(),
 	})
 
 	// log the current state of this span
@@ -313,7 +311,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 		return
 	}
 
-	p.logger.Printf("[INFO] proposer calculated: proposer=%s, sequence=%d", p.state.proposer, p.state.view.Sequence)
+	p.logger.Printf("[INFO] proposer calculated: proposer=%s, sequence=%d, round=%d", p.state.proposer, p.state.view.Sequence, p.state.view.Round)
 
 	// we are NOT a proposer for this height/round. Then, we have to wait
 	// for a pre-prepare message from the proposer
@@ -405,7 +403,7 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 
 		// the message must have our local hash
 		if !bytes.Equal(msg.Hash, p.state.proposal.Hash) {
-			p.logger.Printf(fmt.Sprintf("[WARN]: incorrect hash in %s message", msg.Type.String()))
+			p.logger.Printf(fmt.Sprintf("[WARN]: incorrect hash in %s message from node %s", msg.Type.String(), msg.From))
 			continue
 		}
 
@@ -420,7 +418,7 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 			}
 			p.state.addCommitMsg(msg)
 		default:
-			panic(fmt.Errorf("BUG: Unexpected message type: %s in %s", msg.Type, p.getState()))
+			panic(fmt.Errorf("BUG: Unexpected message type: %s in %s from node %s", msg.Type, p.getState(), msg.From))
 		}
 
 		if p.state.prepared.getAccumulatedVotingPower() >= quorum {
@@ -518,7 +516,7 @@ var (
 	errIncorrectLockedProposal = fmt.Errorf("locked proposal is incorrect")
 	errVerificationFailed      = fmt.Errorf("proposal verification failed")
 	errFailedToInsertProposal  = fmt.Errorf("failed to insert proposal")
-	errInvalidTotalVotingPower = fmt.Errorf("invalid voting power configuration provided: total voting power must be greater than 0.")
+	errInvalidTotalVotingPower = fmt.Errorf("invalid voting power configuration provided: total voting power must be greater than 0")
 )
 
 func (p *Pbft) handleStateErr(err error) {

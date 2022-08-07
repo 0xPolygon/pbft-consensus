@@ -634,8 +634,9 @@ func TestTransition_ValidateState_WrongMessageType(t *testing.T) {
 		Hash:     digest,
 		View:     ViewMsg(1, 0),
 	}
+
 	heap.Push(&m.msgQueue.validateStateQueue, msg)
-	assert.PanicsWithError(t, "BUG: Unexpected message type: Preprepare in ValidateState", func() { m.runCycle(context.Background()) })
+	assert.PanicsWithError(t, "BUG: Unexpected message type: Preprepare in ValidateState from node A", func() { m.runCycle(context.Background()) })
 }
 
 // Test that past and future messages are discarded and state machine transfers from ValidateState to RoundChangeState.
