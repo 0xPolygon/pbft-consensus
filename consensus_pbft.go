@@ -319,20 +319,13 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 	// We only need to wait here for one type of message, the pre-prepare message from the proposer.
 	// However, since we can receive bad pre-prepare messages we have to wait (or timeout) until
 	// we get the message from the correct proposer.
-	counter := 1
 	for p.getState() == AcceptState {
-		_, span := p.tracer.Start(ctx, "AcceptState_ReadMsg")
-		span.SetAttributes(attribute.Int("loop.counter", counter))
-		counter++
-
 		msg, ok := p.getNextMessage(span)
 		if !ok {
-			span.End()
 			return
 		}
 		if msg == nil {
 			p.setState(RoundChangeState)
-			span.End()
 			continue
 		}
 		// TODO: Validate that the fields required for Preprepare are set (Proposal and Hash)
@@ -373,7 +366,9 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 //
 // The Validate state is rather simple - all nodes do in this state is read messages and add them to their local snapshot state
 func (p *Pbft) runValidateState(ctx context.Context) { // start new round
-	ctx, span := p.tracer.Start(ctx, "ValidateState")
+	_, span := p.tracer.Start(ctx, "ValidateState")
+	// set the attributes of this span once it is done
+	defer p.setStateSpanAttributes(span)
 	defer span.End()
 
 	hasCommitted := false
@@ -392,22 +387,15 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 	}
 
 	quorum := p.state.getQuorumSize()
-	counter := 1
 	for p.getState() == ValidateState {
-		_, span := p.tracer.Start(ctx, "ValidateState_ReadMsg")
-		span.SetAttributes(attribute.Int("loop.counter", counter))
-		counter++
-
 		msg, ok := p.getNextMessage(span)
 		if !ok {
 			// closing
-			span.End()
 			return
 		}
 		if msg == nil {
 			// timeout
 			p.setState(RoundChangeState)
-			span.End()
 			return
 		}
 
@@ -438,11 +426,6 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 			// change to commit state just to get out of the loop
 			p.setState(CommitState)
 		}
-
-		// set the attributes of this span once it is done
-		p.setStateSpanAttributes(span)
-
-		span.End()
 	}
 }
 
@@ -530,7 +513,9 @@ func (p *Pbft) handleStateErr(err error) {
 }
 
 func (p *Pbft) runRoundChangeState(ctx context.Context) {
-	ctx, span := p.tracer.Start(ctx, "RoundChange")
+	_, span := p.tracer.Start(ctx, "RoundChangeState")
+	// set the attributes of this span once it is done
+	defer p.setStateSpanAttributes(span)
 	defer span.End()
 
 	sendRoundChange := func(round uint64) {
@@ -584,17 +569,11 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 		}
 	}
 
-	counter := 1
 	// create a timer for the round change
 	for p.getState() == RoundChangeState {
-		_, span := p.tracer.Start(ctx, "RoundChange_ReadMsg")
-		span.SetAttributes(attribute.Int("loop.counter", counter))
-		counter++
-
 		msg, ok := p.getNextMessage(span)
 		if !ok {
 			// closing
-			span.End()
 			return
 		}
 		if msg == nil {
@@ -603,7 +582,6 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 			// checkTimeout will either produce a sync event and exit
 			// or restart the timeout
 			checkTimeout()
-			span.End()
 			continue
 		}
 
@@ -623,9 +601,6 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 				sendRoundChange(msg.View.Round)
 			}
 		}
-
-		p.setStateSpanAttributes(span)
-		span.End()
 	}
 }
 
