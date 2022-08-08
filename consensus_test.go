@@ -95,12 +95,7 @@ func TestTransition_AcceptState_Validator_VerifyCorrect(t *testing.T) {
 	i.setState(AcceptState)
 
 	// A sends the message
-	i.emitMsg(&MessageReq{
-		From:     "A",
-		Type:     MessageReq_Preprepare,
-		Proposal: mockProposal,
-		View:     ViewMsg(1, 0),
-	})
+	i.emitMsg(createMessage(NodeID("A"), MessageReq_Preprepare, ViewMsg(1, 0)))
 
 	i.runCycle(context.Background())
 
@@ -119,12 +114,7 @@ func TestTransition_AcceptState_Validator_VerifyFails(t *testing.T) {
 	i.setState(AcceptState)
 
 	// A sends the message
-	i.emitMsg(&MessageReq{
-		From:     "A",
-		Type:     MessageReq_Preprepare,
-		Proposal: mockProposal,
-		View:     ViewMsg(1, 0),
-	})
+	i.emitMsg(createMessage(NodeID("A"), MessageReq_Preprepare, ViewMsg(1, 0)))
 
 	i.runCycle(context.Background())
 
@@ -150,21 +140,9 @@ func TestTransition_AcceptState_Proposer_FailedBuildProposal(t *testing.T) {
 	m.setState(AcceptState)
 
 	// Prepare messages
-	m.emitMsg(&MessageReq{
-		From: "A",
-		Type: MessageReq_Prepare,
-		View: ViewMsg(1, 0),
-	})
-	m.emitMsg(&MessageReq{
-		From: "B",
-		Type: MessageReq_Prepare,
-		View: ViewMsg(1, 0),
-	})
-	m.emitMsg(&MessageReq{
-		From: "C",
-		Type: MessageReq_Prepare,
-		View: ViewMsg(1, 0),
-	})
+	for _, validatorId := range validatorIds {
+		m.emitMsg(createMessage(validatorId, MessageReq_Prepare, ViewMsg(1, 0)))
+	}
 
 	m.runCycle(m.ctx)
 	assert.True(t, m.IsState(RoundChangeState))
@@ -203,12 +181,7 @@ func TestTransition_AcceptState_Validator_ProposerInvalid(t *testing.T) {
 
 	// A is the proposer but C sends the propose, we do not fail
 	// but wait for timeout to move to roundChange state
-	i.emitMsg(&MessageReq{
-		From:     "C",
-		Type:     MessageReq_Preprepare,
-		Proposal: mockProposal,
-		View:     ViewMsg(1, 0),
-	})
+	i.emitMsg(createMessage(NodeID("C"), MessageReq_Preprepare, ViewMsg(1, 0)))
 
 	i.runCycle(context.Background())
 
@@ -233,13 +206,10 @@ func TestTransition_AcceptState_Validator_LockWrong(t *testing.T) {
 	i.state.lock()
 
 	// emit the wrong locked proposal
-	i.emitMsg(&MessageReq{
-		From:     "A",
-		Type:     MessageReq_Preprepare,
-		Proposal: mockProposal1,
-		Hash:     digest1,
-		View:     ViewMsg(1, 0),
-	})
+	msg := createMessage(NodeID("A"), MessageReq_Preprepare, ViewMsg(1, 0))
+	msg.Proposal = mockProposal1
+	msg.Hash = digest1
+	i.emitMsg(msg)
 
 	i.runCycle(context.Background())
 
@@ -257,20 +227,12 @@ func TestTransition_AcceptState_Validator_LockCorrect(t *testing.T) {
 	i.setState(AcceptState)
 
 	// locked proposal
-	proposal := mockProposal
-
 	i.state.proposal = &Proposal{
-		Data: proposal,
+		Data: mockProposal,
 		Hash: digest,
 	}
 	i.state.lock()
-
-	i.emitMsg(&MessageReq{
-		From:     "A",
-		Type:     MessageReq_Preprepare,
-		Proposal: proposal,
-		View:     ViewMsg(1, 0),
-	})
+	i.emitMsg(createMessage(NodeID("A"), MessageReq_Preprepare, ViewMsg(1, 0)))
 
 	i.runCycle(context.Background())
 
@@ -296,22 +258,8 @@ func TestTransition_AcceptState_Validate_ProposalFail(t *testing.T) {
 	m.state.view = ViewMsg(1, 0)
 	m.setState(AcceptState)
 
-	// Prepare messages
-	m.emitMsg(&MessageReq{
-		From: "A",
-		Type: MessageReq_Preprepare,
-		View: ViewMsg(1, 0),
-	})
-	m.emitMsg(&MessageReq{
-		From: "B",
-		Type: MessageReq_Preprepare,
-		View: ViewMsg(1, 0),
-	})
-	m.emitMsg(&MessageReq{
-		From: "C",
-		Type: MessageReq_Preprepare,
-		View: ViewMsg(1, 0),
-	})
+	// Prepare message
+	m.emitMsg(createMessage(NodeID("C"), MessageReq_Preprepare, ViewMsg(1, 0)))
 
 	m.runCycle(m.ctx)
 
@@ -336,22 +284,9 @@ func TestTransition_RoundChangeState_CatchupRound(t *testing.T) {
 	m.setState(RoundChangeState)
 
 	// new messages arrive with round number 2
-	m.emitMsg(&MessageReq{
-		From: "B",
-		Type: MessageReq_RoundChange,
-		View: ViewMsg(1, 2),
-	})
-	m.emitMsg(&MessageReq{
-		From: "C",
-		Type: MessageReq_RoundChange,
-		View: ViewMsg(1, 2),
-	})
-	m.emitMsg(&MessageReq{
-		From: "D",
-		Type: MessageReq_RoundChange,
-		View: ViewMsg(1, 2),
-	})
-	m.Close()
+	m.emitMsg(createMessage(NodeID("B"), MessageReq_RoundChange, ViewMsg(1, 2)))
+	m.emitMsg(createMessage(NodeID("C"), MessageReq_RoundChange, ViewMsg(1, 2)))
+	m.emitMsg(createMessage(NodeID("D"), MessageReq_RoundChange, ViewMsg(1, 2)))
 
 	// as soon as it starts it will move to round 1 because it has
 	// not processed all the messages yet.
@@ -407,21 +342,9 @@ func TestTransition_RoundChangeState_WeakCertificate(t *testing.T) {
 
 	// send three roundChange messages which are enough to force a
 	// weak change where the client moves to that new round state
-	m.emitMsg(&MessageReq{
-		From: "B",
-		Type: MessageReq_RoundChange,
-		View: ViewMsg(1, 2),
-	})
-	m.emitMsg(&MessageReq{
-		From: "C",
-		Type: MessageReq_RoundChange,
-		View: ViewMsg(1, 2),
-	})
-	m.emitMsg(&MessageReq{
-		From: "D",
-		Type: MessageReq_RoundChange,
-		View: ViewMsg(1, 2),
-	})
+	m.emitMsg(createMessage(NodeID("B"), MessageReq_RoundChange, ViewMsg(1, 2)))
+	m.emitMsg(createMessage(NodeID("C"), MessageReq_RoundChange, ViewMsg(1, 2)))
+	m.emitMsg(createMessage(NodeID("D"), MessageReq_RoundChange, ViewMsg(1, 2)))
 	m.Close()
 
 	m.runCycle(context.Background())
@@ -471,27 +394,16 @@ func TestTransition_RoundChangeState_StartNewRound(t *testing.T) {
 }
 
 func TestTransition_RoundChangeState_MaxRound(t *testing.T) {
+	const round = uint64(10)
 	// if we start round change due to a state timeout we try to catch up
 	// with the highest round seen.
 	m := newMockPbft(t, []NodeID{"A", "B", "C", "D"}, nil, "A")
 	m.Close()
-
-	m.addMessage(&MessageReq{
-		From: "B",
-		Type: MessageReq_RoundChange,
-		View: &View{
-			Round:    10,
-			Sequence: 1,
-		},
-	})
-	m.addMessage(&MessageReq{
-		From: "C",
-		Type: MessageReq_RoundChange,
-		View: &View{
-			Round:    10,
-			Sequence: 1,
-		},
-	})
+	// pre-create and add F+1 round change messages
+	messages := newMessages()
+	messages.addMessage(createMessage(NodeID("B"), MessageReq_RoundChange, ViewMsg(1, round)), 1)
+	messages.addMessage(createMessage(NodeID("C"), MessageReq_RoundChange, ViewMsg(1, round)), 1)
+	m.state.roundMessages[round] = messages
 
 	m.setState(RoundChangeState)
 	m.runCycle(context.Background())
@@ -529,39 +441,15 @@ func TestTransition_ValidateState_MoveToCommitState(t *testing.T) {
 		m.setState(ValidateState)
 
 		// Prepare messages
-		m.emitMsg(&MessageReq{
-			From: "A",
-			Type: MessageReq_Prepare,
-			View: ViewMsg(1, 0),
-		})
-		m.emitMsg(&MessageReq{
-			From: "B",
-			Type: MessageReq_Prepare,
-			View: ViewMsg(1, 0),
-		})
+		m.emitMsg(createMessage(NodeID("A"), MessageReq_Prepare, nil))
+		m.emitMsg(createMessage(NodeID("B"), MessageReq_Prepare, nil))
 		// repeated message is not included
-		m.emitMsg(&MessageReq{
-			From: "B",
-			Type: MessageReq_Prepare,
-			View: ViewMsg(1, 0),
-		})
-		m.emitMsg(&MessageReq{
-			From: "C",
-			Type: MessageReq_Prepare,
-			View: ViewMsg(1, 0),
-		})
+		m.emitMsg(createMessage(NodeID("B"), MessageReq_Prepare, nil))
+		m.emitMsg(createMessage(NodeID("C"), MessageReq_Prepare, nil))
 
 		// Commit messages
-		m.emitMsg(&MessageReq{
-			From: "C",
-			Type: MessageReq_Commit,
-			View: ViewMsg(1, 0),
-		})
-		m.emitMsg(&MessageReq{
-			From: "D",
-			Type: MessageReq_Commit,
-			View: ViewMsg(1, 0),
-		})
+		m.emitMsg(createMessage(NodeID("B"), MessageReq_Commit, nil))
+		m.emitMsg(createMessage(NodeID("C"), MessageReq_Commit, nil))
 
 		m.runCycle(context.Background())
 
@@ -581,21 +469,9 @@ func TestTransition_ValidateState_MoveToCommitState(t *testing.T) {
 		m.setState(ValidateState)
 
 		// Commit messages
-		m.emitMsg(&MessageReq{
-			From: "B",
-			Type: MessageReq_Commit,
-			View: ViewMsg(1, 0),
-		})
-		m.emitMsg(&MessageReq{
-			From: "C",
-			Type: MessageReq_Commit,
-			View: ViewMsg(1, 0),
-		})
-		m.emitMsg(&MessageReq{
-			From: "D",
-			Type: MessageReq_Commit,
-			View: ViewMsg(1, 0),
-		})
+		m.emitMsg(createMessage(NodeID("B"), MessageReq_Commit, nil))
+		m.emitMsg(createMessage(NodeID("C"), MessageReq_Commit, nil))
+		m.emitMsg(createMessage(NodeID("D"), MessageReq_Commit, nil))
 
 		m.runCycle(context.Background())
 
@@ -611,61 +487,50 @@ func TestTransition_ValidateState_MoveToCommitState(t *testing.T) {
 
 }
 
-// No messages are sent, so ensure that destination state is RoundChangeState and that state machine jumps out of the loop.
+// Not enough messages are sent, so ensure that destination state is RoundChangeState and that state machine jumps out of the loop.
 func TestTransition_ValidateState_MoveToRoundChangeState(t *testing.T) {
-	m := newMockPbft(t, []NodeID{"A", "B", "C", "D"}, nil, "A")
+	m := newMockPbft(t, []NodeID{"A", "B", "C", "D", "E", "F"}, nil, "A")
 	m.setState(ValidateState)
+	m.emitMsg(createMessage(NodeID("B"), MessageReq_Commit, nil))
+	m.emitMsg(createMessage(NodeID("C"), MessageReq_Commit, nil))
 
 	m.runCycle(context.Background())
 
-	assert.True(t, m.IsState(RoundChangeState))
+	m.expect(expectResult{
+		sequence:   1,
+		state:      RoundChangeState,
+		commitMsgs: 2, // Commit messages (A proposer sent commit via state machine loop, B sent commit via emit message)
+	})
 }
 
-// Send wrong message type within ValidateState and asssure it panics
+// Send wrong message type within ValidateState and ensure it panics
 func TestTransition_ValidateState_WrongMessageType(t *testing.T) {
 	m := newMockPbft(t, []NodeID{"A", "B", "C", "D"}, nil, "A")
 	m.setState(ValidateState)
 
 	// Create preprepare message and push it to validate state message queue
-	msg := &MessageReq{
-		From:     "A",
-		Type:     MessageReq_Preprepare,
-		Proposal: mockProposal,
-		Hash:     digest,
-		View:     ViewMsg(1, 0),
-	}
-
+	msg := createMessage(NodeID("A"), MessageReq_Preprepare, ViewMsg(1, 0))
 	heap.Push(&m.msgQueue.validateStateQueue, msg)
 	assert.PanicsWithError(t, "BUG: Unexpected message type: Preprepare in ValidateState from node A", func() { m.runCycle(context.Background()) })
 }
 
 // Test that past and future messages are discarded and state machine transfers from ValidateState to RoundChangeState.
 func TestTransition_ValidateState_DiscardMessage(t *testing.T) {
-	m := newMockPbft(t, []NodeID{"A", "B"}, nil, "A")
+	m := newMockPbft(t, []NodeID{"A", "B", "C", "D"}, nil, "A")
 	m.setState(ValidateState)
 	m.state.view = ViewMsg(1, 2)
 
 	// Send message from the past (it should be discarded)
-	m.emitMsg(&MessageReq{
-		From: "A",
-		Type: MessageReq_Prepare,
-		View: ViewMsg(1, 1),
-	})
+	m.emitMsg(createMessage(NodeID("A"), MessageReq_Prepare, ViewMsg(1, 1)))
 	// Send future message
-	m.emitMsg(&MessageReq{
-		From: "B",
-		Type: MessageReq_Prepare,
-		View: ViewMsg(2, 3),
-	})
+	m.emitMsg(createMessage(NodeID("B"), MessageReq_Prepare, ViewMsg(2, 3)))
 
 	m.runCycle(context.Background())
 	m.expect(expectResult{
-		state:       RoundChangeState,
-		round:       2,
-		sequence:    1,
-		prepareMsgs: 0,
-		commitMsgs:  0,
-		outgoing:    0})
+		state:    RoundChangeState,
+		round:    2,
+		sequence: 1,
+	})
 }
 
 // Test CommitState to DoneState transition.
@@ -746,21 +611,9 @@ func TestPbft_Run(t *testing.T) {
 	})
 
 	// Prepare messages
-	m.emitMsg(&MessageReq{
-		From: "A",
-		Type: MessageReq_Prepare,
-		View: ViewMsg(1, 0),
-	})
-	m.emitMsg(&MessageReq{
-		From: "B",
-		Type: MessageReq_Prepare,
-		View: ViewMsg(1, 0),
-	})
-	m.emitMsg(&MessageReq{
-		From: "C",
-		Type: MessageReq_Prepare,
-		View: ViewMsg(1, 0),
-	})
+	m.emitMsg(createMessage(NodeID("A"), MessageReq_Prepare, ViewMsg(1, 0)))
+	m.emitMsg(createMessage(NodeID("B"), MessageReq_Prepare, ViewMsg(1, 0)))
+	m.emitMsg(createMessage(NodeID("C"), MessageReq_Prepare, ViewMsg(1, 0)))
 
 	// Jump out from a state machine loop straight away
 	waitSignal := make(chan struct{})
@@ -779,11 +632,8 @@ func TestPbft_Run(t *testing.T) {
 	m.Run(m.ctx)
 
 	m.expect(expectResult{
-		state:       AcceptState,
-		sequence:    1,
-		prepareMsgs: 0,
-		commitMsgs:  0,
-		outgoing:    0,
+		state:    AcceptState,
+		sequence: 1,
 	})
 
 	// Make sure that if there is no cancellation trigger, state machine converges to the DoneState.
@@ -837,8 +687,8 @@ func TestRoundChange_PropertyMajorityOfVotingPowerAggreement(t *testing.T) {
 		}, WithLogger(log.New(io.Discard, "", log.LstdFlags)))
 		node.state.validators = validatorSet
 		node.state.view = &View{
-			1,
-			1,
+			Round:    1,
+			Sequence: 1,
 		}
 		err := node.state.initializeVotingInfo()
 		require.NoError(t, err)
@@ -854,10 +704,10 @@ func TestRoundChange_PropertyMajorityOfVotingPowerAggreement(t *testing.T) {
 		}).Draw(t, "Select arbitrary nodes that have majority of voting power").([]int)
 
 		for _, voterID := range votes {
-			node.PushMessage(&MessageReq{Type: MessageReq_RoundChange, From: NodeID(strconv.Itoa(voterID)), View: ViewMsg(1, 2)})
+			node.PushMessage(createMessage(NodeID(strconv.Itoa(voterID)), MessageReq_RoundChange, ViewMsg(1, 2)))
 		}
 
-		//for sending rounchange message
+		// for sending rounchange message
 		node.state.err = errors.New("skip")
 		node.state.setState(RoundChangeState)
 
@@ -890,10 +740,6 @@ func (m *mockPbft) emitMsg(msg *MessageReq) {
 		msg.Hash = digest
 	}
 	m.Pbft.PushMessage(msg)
-}
-
-func (m *mockPbft) addMessage(msg *MessageReq) {
-	m.state.addMessage(msg)
 }
 
 func (m *mockPbft) Gossip(msg *MessageReq) error {

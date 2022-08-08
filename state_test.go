@@ -19,21 +19,24 @@ func init() {
 }
 
 // Helper function which enables creation of MessageReq.
-func createMessage(sender NodeID, messageType MsgType, round ...uint64) *MessageReq {
-	seal := make([]byte, 2)
-	mrand.Read(seal)
-
-	r := uint64(0)
-	if len(round) > 0 {
-		r = round[0]
+func createMessage(sender NodeID, messageType MsgType, view *View) *MessageReq {
+	if view == nil {
+		view = ViewMsg(1, 0)
 	}
-
 	msg := &MessageReq{
-		From:     sender,
-		Type:     messageType,
-		View:     &View{Round: r},
-		Seal:     seal,
-		Proposal: mockProposal,
+		From: sender,
+		Type: messageType,
+		View: view,
+	}
+	switch msg.Type {
+	case MessageReq_Preprepare:
+		msg.Proposal = mockProposal
+		msg.Hash = digest
+
+	case MessageReq_Commit:
+		seal := make([]byte, 2)
+		mrand.Read(seal)
+		msg.Seal = seal
 	}
 	return msg
 }
@@ -48,7 +51,7 @@ func TestState_AddMessages(t *testing.T) {
 	s.validators = pool.validatorSet()
 
 	// Send message from node which is not amongst validator nodes
-	s.addMessage(createMessage("E", MessageReq_Prepare))
+	s.addMessage(createMessage("E", MessageReq_Prepare, ViewMsg(1, 0)))
 	assert.Empty(t, s.committed.messageMap)
 	assert.Empty(t, s.prepared.messageMap)
 	assert.Empty(t, s.roundMessages)
@@ -126,7 +129,7 @@ func TestState_MaxRound_NotFound(t *testing.T) {
 	require.NoError(t, err)
 
 	// Send wrong message type from some validator, whereas roundMessages map is empty
-	s.addMessage(createMessage(validatorIds[0], MessageReq_Preprepare))
+	s.addMessage(createMessage(validatorIds[0], MessageReq_Preprepare, ViewMsg(1, 1)))
 
 	maxRound, found := s.maxRound()
 	assert.Equal(t, maxRound, uint64(0))
@@ -137,10 +140,10 @@ func TestState_MaxRound_NotFound(t *testing.T) {
 		if round%2 == 0 {
 			// Each even round should populate more than one "RoundChange" messages, but just enough that we don't reach census (max faulty nodes+1)
 			for i := 0; i < int(s.getMaxFaultyVotingPower()); i++ {
-				s.addMessage(createMessage(validatorIds[mrand.Intn(validatorsCount)], MessageReq_RoundChange, uint64(round)))
+				s.addMessage(createMessage(validatorIds[mrand.Intn(validatorsCount)], MessageReq_RoundChange, ViewMsg(1, uint64(round))))
 			}
 		} else {
-			s.addMessage(createMessage(validatorIds[mrand.Intn(validatorsCount)], MessageReq_RoundChange, uint64(round)))
+			s.addMessage(createMessage(validatorIds[mrand.Intn(validatorsCount)], MessageReq_RoundChange, ViewMsg(1, uint64(round))))
 		}
 	}
 
@@ -154,19 +157,20 @@ func TestState_AddRoundMessage(t *testing.T) {
 	validatorIds := []NodeID{"A", "B"}
 	s.validators = NewValStringStub(validatorIds, CreateEqualVotingPowerMap(validatorIds))
 
-	roundMessageSize := s.addRoundChangeMsg(createMessage("A", MessageReq_Commit, 0))
-	assert.Equal(t, 0, roundMessageSize)
-	assert.Equal(t, 0, len(s.roundMessages))
+	// commit message isn't added to the round change messages queue
+	s.addRoundChangeMsg(createMessage("A", MessageReq_Commit, ViewMsg(1, 0)))
+	assert.Empty(t, s.roundMessages)
+	assert.Nil(t, s.roundMessages[0])
 
-	s.addRoundChangeMsg(createMessage("A", MessageReq_RoundChange, 0))
-	s.addRoundChangeMsg(createMessage("A", MessageReq_RoundChange, 1))
-	s.addRoundChangeMsg(createMessage("A", MessageReq_RoundChange, 2))
+	s.addRoundChangeMsg(createMessage("A", MessageReq_RoundChange, ViewMsg(1, 0)))
+	s.addRoundChangeMsg(createMessage("A", MessageReq_RoundChange, ViewMsg(1, 1)))
+	s.addRoundChangeMsg(createMessage("A", MessageReq_RoundChange, ViewMsg(1, 2)))
 
-	roundMessageSize = s.addRoundChangeMsg(createMessage("B", MessageReq_RoundChange, 2))
-	assert.Equal(t, 2, roundMessageSize)
+	s.addRoundChangeMsg(createMessage("B", MessageReq_RoundChange, ViewMsg(1, 2)))
+	assert.Equal(t, 2, s.roundMessages[2].length())
 
-	s.addRoundChangeMsg(createMessage("B", MessageReq_RoundChange, 3))
-	assert.Equal(t, 4, len(s.roundMessages))
+	s.addRoundChangeMsg(createMessage("B", MessageReq_RoundChange, ViewMsg(1, 3)))
+	assert.Len(t, s.roundMessages, 4)
 
 	assert.Empty(t, s.prepared.messageMap)
 	assert.Empty(t, s.committed.messageMap)
@@ -177,11 +181,11 @@ func TestState_addPrepared(t *testing.T) {
 	validatorIds := []NodeID{"A", "B"}
 	s.validators = NewValStringStub(validatorIds, CreateEqualVotingPowerMap(validatorIds))
 
-	s.addPrepareMsg(createMessage("A", MessageReq_Commit))
+	s.addPrepareMsg(createMessage("A", MessageReq_Commit, ViewMsg(1, 1)))
 	assert.Equal(t, 0, s.prepared.length())
 
-	s.addPrepareMsg(createMessage("A", MessageReq_Prepare))
-	s.addPrepareMsg(createMessage("B", MessageReq_Prepare))
+	s.addPrepareMsg(createMessage("A", MessageReq_Prepare, ViewMsg(1, 1)))
+	s.addPrepareMsg(createMessage("B", MessageReq_Prepare, ViewMsg(1, 1)))
 
 	assert.Equal(t, len(validatorIds), s.prepared.length())
 	assert.True(t, s.committed.length() == 0)
@@ -193,11 +197,11 @@ func TestState_addCommitted(t *testing.T) {
 	validatorIds := []NodeID{"A", "B"}
 	s.validators = NewValStringStub(validatorIds, CreateEqualVotingPowerMap(validatorIds))
 
-	s.addCommitMsg(createMessage("A", MessageReq_Prepare))
+	s.addCommitMsg(createMessage("A", MessageReq_Prepare, ViewMsg(1, 1)))
 	assert.True(t, s.committed.length() == 0)
 
-	s.addCommitMsg(createMessage("A", MessageReq_Commit))
-	s.addCommitMsg(createMessage("B", MessageReq_Commit))
+	s.addCommitMsg(createMessage("A", MessageReq_Commit, ViewMsg(1, 1)))
+	s.addCommitMsg(createMessage("B", MessageReq_Commit, ViewMsg(1, 1)))
 
 	assert.Equal(t, len(validatorIds), s.committed.length())
 	assert.True(t, s.prepared.length() == 0)
@@ -205,7 +209,7 @@ func TestState_addCommitted(t *testing.T) {
 }
 
 func TestState_Copy(t *testing.T) {
-	originalMsg := createMessage("A", MessageReq_Preprepare, 0)
+	originalMsg := createMessage("A", MessageReq_Preprepare, ViewMsg(1, 0))
 	copyMsg := originalMsg.Copy()
 	assert.NotSame(t, originalMsg, copyMsg)
 	assert.Equal(t, originalMsg, copyMsg)
@@ -241,9 +245,9 @@ func TestState_getCommittedSeals(t *testing.T) {
 	s := newState()
 	s.validators = pool.validatorSet()
 
-	s.addCommitMsg(createMessage("A", MessageReq_Commit))
-	s.addCommitMsg(createMessage("B", MessageReq_Commit))
-	s.addCommitMsg(createMessage("C", MessageReq_Commit))
+	s.addCommitMsg(createMessage("A", MessageReq_Commit, ViewMsg(1, 0)))
+	s.addCommitMsg(createMessage("B", MessageReq_Commit, ViewMsg(1, 0)))
+	s.addCommitMsg(createMessage("C", MessageReq_Commit, ViewMsg(1, 0)))
 	committedSeals := s.getCommittedSeals()
 
 	assert.Len(t, committedSeals, 3)
@@ -451,7 +455,11 @@ func (ap *testerAccountPool) createMessage(sender NodeID, messageType MsgType, r
 	if poolSender != nil {
 		sender = poolSender.alias
 	}
-	return createMessage(sender, messageType, round...)
+	r := uint64(0)
+	if len(round) == 1 {
+		r = round[0]
+	}
+	return createMessage(sender, messageType, ViewMsg(1, r))
 }
 
 func generateKey() *ecdsa.PrivateKey {

@@ -316,8 +316,8 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 	// we are NOT a proposer for this height/round. Then, we have to wait
 	// for a pre-prepare message from the proposer
 
-	// We only need to wait here for one type of message, the Prepare message from the proposer.
-	// However, since we can receive bad Prepare messages we have to wait (or timeout) until
+	// We only need to wait here for one type of message, the pre-prepare message from the proposer.
+	// However, since we can receive bad pre-prepare messages we have to wait (or timeout) until
 	// we get the message from the correct proposer.
 	for p.getState() == AcceptState {
 		msg, ok := p.getNextMessage(span)
@@ -595,7 +595,7 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 		}
 
 		// we only expect RoundChange messages right now
-		_ = p.state.addRoundChangeMsg(msg)
+		p.state.addRoundChangeMsg(msg)
 
 		currentVotingPower := p.state.roundMessages[msg.View.Round].getAccumulatedVotingPower()
 		// Round change quorum is 2*F round change messages (F denotes max faulty voting power)
