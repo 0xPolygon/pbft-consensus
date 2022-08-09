@@ -6,22 +6,13 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func mockQueueMsg(id string, msgType MsgType, view *View) *MessageReq {
-	return &MessageReq{
-		// use the from field to identify the msg
-		From: NodeID(id),
-		View: view,
-		Type: msgType,
-	}
-}
-
 func TestMsgQueue_RoundChangeState(t *testing.T) {
 	m := newMsgQueue()
 
 	// insert non round change messages
 	{
-		m.pushMessage(mockQueueMsg("A", MessageReq_Prepare, ViewMsg(1, 0)))
-		m.pushMessage(mockQueueMsg("B", MessageReq_Commit, ViewMsg(1, 0)))
+		m.pushMessage(createMessage("A", MessageReq_Prepare, ViewMsg(1, 1)))
+		m.pushMessage(createMessage("B", MessageReq_Commit, ViewMsg(1, 1)))
 
 		// we only read round state messages
 		assert.Nil(t, m.readMessage(RoundChangeState, ViewMsg(1, 0)))
@@ -29,7 +20,7 @@ func TestMsgQueue_RoundChangeState(t *testing.T) {
 
 	// insert old round change messages
 	{
-		m.pushMessage(mockQueueMsg("C", MessageReq_RoundChange, ViewMsg(1, 1)))
+		m.pushMessage(createMessage("C", MessageReq_RoundChange, ViewMsg(1, 1)))
 
 		// the round change message is old
 		assert.Nil(t, m.readMessage(RoundChangeState, ViewMsg(2, 0)))
@@ -38,9 +29,9 @@ func TestMsgQueue_RoundChangeState(t *testing.T) {
 
 	// insert two valid round change messages with an old one in the middle
 	{
-		m.pushMessage(mockQueueMsg("D", MessageReq_RoundChange, ViewMsg(2, 2)))
-		m.pushMessage(mockQueueMsg("E", MessageReq_RoundChange, ViewMsg(1, 1)))
-		m.pushMessage(mockQueueMsg("F", MessageReq_RoundChange, ViewMsg(2, 1)))
+		m.pushMessage(createMessage("D", MessageReq_RoundChange, ViewMsg(2, 2)))
+		m.pushMessage(createMessage("E", MessageReq_RoundChange, ViewMsg(1, 1)))
+		m.pushMessage(createMessage("F", MessageReq_RoundChange, ViewMsg(2, 1)))
 
 		msg1 := m.readMessage(RoundChangeState, ViewMsg(2, 0))
 		assert.NotNil(t, msg1)
@@ -54,10 +45,10 @@ func TestMsgQueue_RoundChangeState(t *testing.T) {
 	// insert future messages to the queue => such messages should not be retrieved back
 	{
 		m = newMsgQueue()
-		m.pushMessage(mockQueueMsg("A", MessageReq_RoundChange, ViewMsg(3, 1)))
+		m.pushMessage(createMessage("A", MessageReq_RoundChange, ViewMsg(3, 1)))
 		assert.Nil(t, m.readMessage(RoundChangeState, ViewMsg(1, 1)))
 
-		m.pushMessage(mockQueueMsg("A", MessageReq_Commit, ViewMsg(3, 1)))
+		m.pushMessage(createMessage("A", MessageReq_Commit, ViewMsg(3, 1)))
 		assert.Nil(t, m.readMessage(CommitState, ViewMsg(1, 1)))
 	}
 }

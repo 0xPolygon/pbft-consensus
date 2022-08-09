@@ -167,14 +167,12 @@ func (s *state) cleanRound(round uint64) {
 }
 
 // addRoundChangeMsg adds a ROUND-CHANGE message to the round, and returns the round message size
-func (s *state) addRoundChangeMsg(msg *MessageReq) int {
+func (s *state) addRoundChangeMsg(msg *MessageReq) {
 	if msg.Type != MessageReq_RoundChange {
-		return 0
+		return
 	}
 
 	s.addMessage(msg)
-
-	return s.roundMessages[msg.View.Round].length()
 }
 
 // addPrepareMsg adds a PREPARE message
