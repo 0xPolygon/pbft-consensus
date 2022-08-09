@@ -473,12 +473,14 @@ func TestTransition_ValidateState_MoveToCommitState(t *testing.T) {
 		m.runCycle(context.Background())
 
 		m.expect(expectResult{
-			sequence:    1,
-			state:       CommitState,
-			prepareMsgs: 3,
-			commitMsgs:  3, // Commit messages (A proposer sent commit via state machine loop, C and D sent commit via emit message)
-			locked:      true,
-			outgoing:    1, // A commit message
+			sequence:               1,
+			state:                  CommitState,
+			prepareMsgs:            3,
+			commitMsgs:             3, // Commit messages (A proposer sent commit via state machine loop, C and D sent commit via emit message)
+			commitMsgsVotingPower:  3,
+			locked:                 true,
+			outgoing:               1, // A commit message
+			prepareMsgsVotingPower: 3,
 		})
 	})
 
@@ -495,12 +497,13 @@ func TestTransition_ValidateState_MoveToCommitState(t *testing.T) {
 		m.runCycle(context.Background())
 
 		m.expect(expectResult{
-			sequence:    1,
-			state:       CommitState,
-			prepareMsgs: 0,
-			commitMsgs:  3, // Commit messages (A proposer sent commit via state machine loop, C and D sent commit via emit message)
-			locked:      true,
-			outgoing:    1, // A commit message
+			sequence:              1,
+			state:                 CommitState,
+			prepareMsgs:           0,
+			commitMsgs:            3, // Commit messages (A proposer sent commit via state machine loop, C and D sent commit via emit message)
+			locked:                true,
+			outgoing:              1,  // A commit message
+			commitMsgsVotingPower: 85, // B. C and D sends commit messagess
 		})
 	})
 
@@ -517,9 +520,10 @@ func TestTransition_ValidateState_MoveToRoundChangeState(t *testing.T) {
 		m.runCycle(context.Background())
 
 		m.expect(expectResult{
-			sequence:   1,
-			state:      RoundChangeState,
-			commitMsgs: 2, // Commit messages (A proposer sent commit via state machine loop, B sent commit via emit message)
+			sequence:              1,
+			state:                 RoundChangeState,
+			commitMsgs:            2, // Commit messages (A proposer sent commit via state machine loop, B sent commit via emit message)
+			commitMsgsVotingPower: 2, // B and C sends commit messages
 		})
 	})
 
@@ -532,9 +536,10 @@ func TestTransition_ValidateState_MoveToRoundChangeState(t *testing.T) {
 		m.runCycle(context.Background())
 
 		m.expect(expectResult{
-			sequence:   1,
-			state:      RoundChangeState,
-			commitMsgs: 2, // Commit messages (A proposer sent commit via state machine loop, B sent commit via emit message)
+			sequence:              1,
+			state:                 RoundChangeState,
+			commitMsgs:            2, // Commit messages (A proposer sent commit via state machine loop, B sent commit via emit message)
+			commitMsgsVotingPower: 20,
 		})
 	})
 
@@ -547,12 +552,14 @@ func TestTransition_ValidateState_MoveToRoundChangeState(t *testing.T) {
 		m.runCycle(context.Background())
 
 		m.expect(expectResult{
-			sequence:    1,
-			state:       RoundChangeState,
-			prepareMsgs: 2, // Commit messages (A proposer sent commit via state machine loop, B sent commit via emit message)
-			commitMsgs:  1, // Commit message which node A sends
-			outgoing:    1,
-			locked:      true,
+			sequence:               1,
+			state:                  RoundChangeState,
+			prepareMsgs:            2,  // Commit messages (A proposer sent commit via state machine loop, B sent commit via emit message)
+			commitMsgs:             1,  // Commit message which node A sends
+			commitMsgsVotingPower:  10, // A sends commit message
+			prepareMsgsVotingPower: 35, // B and D sends prepare messages
+			outgoing:               1,
+			locked:                 true,
 		})
 	})
 }
@@ -694,11 +701,13 @@ func TestPbft_Run(t *testing.T) {
 	m.Run(context.Background())
 
 	m.expect(expectResult{
-		state:       DoneState,
-		sequence:    1,
-		prepareMsgs: 1,
-		commitMsgs:  1,
-		outgoing:    3,
+		state:                  DoneState,
+		sequence:               1,
+		prepareMsgs:            1,
+		prepareMsgsVotingPower: 1,
+		commitMsgsVotingPower:  1,
+		commitMsgs:             1,
+		outgoing:               3,
 	})
 }
 
@@ -904,6 +913,10 @@ type expectResult struct {
 	prepareMsgs uint64
 	commitMsgs  uint64
 
+	// accumulated voting powers
+	prepareMsgsVotingPower uint64
+	commitMsgsVotingPower  uint64
+
 	// outgoing messages
 	outgoing uint64
 }
@@ -928,6 +941,12 @@ func (m *mockPbft) expect(res expectResult) {
 	}
 	if size := m.state.committed.length(); uint64(size) != res.commitMsgs {
 		m.t.Fatalf("incorrect commit messages actual: %d, expected:%d", size, res.commitMsgs)
+	}
+	if accumulatedVotingPower := m.state.prepared.getAccumulatedVotingPower(); accumulatedVotingPower != res.prepareMsgsVotingPower {
+		m.t.Fatalf("incorrect prepare messages acccumulated voting power actual: %d, expected:%d", accumulatedVotingPower, res.prepareMsgsVotingPower)
+	}
+	if accumulatedVotingPower := m.state.committed.getAccumulatedVotingPower(); accumulatedVotingPower != res.commitMsgsVotingPower {
+		m.t.Fatalf("incorrect commit messages acccumulated voting power actual: %d, expected:%d", accumulatedVotingPower, res.commitMsgsVotingPower)
 	}
 	if m.state.IsLocked() != res.locked {
 		m.t.Fatalf("incorrect locked actual: %v, expected: %v", m.state.locked, res.locked)
