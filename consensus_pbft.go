@@ -367,8 +367,11 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 // The Validate state is rather simple - all nodes do in this state is read messages and add them to their local snapshot state
 func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 	_, span := p.tracer.Start(ctx, "ValidateState")
-	// set the attributes of this span once it is done
-	defer p.setSpanStateAttributesWithTerminate(span)
+	// set the attributes of this span once runValidateState is done
+	defer func() {
+		p.setStateSpanAttributes(span)
+		span.End()
+	}()
 
 	hasCommitted := false
 	sendCommit := func(span trace.Span) {
@@ -428,12 +431,6 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 	}
 }
 
-// setSpanStateAttributesWithTerminate sets state attributes to given span and terminates it
-func (p *Pbft) setSpanStateAttributesWithTerminate(span trace.Span) {
-	p.setStateSpanAttributes(span)
-	span.End()
-}
-
 // spanAddEventMessage reports given message to both PBFT built-in statistics reporting mechanism and open telemetry
 func (p *Pbft) spanAddEventMessage(typ string, span trace.Span, msg *MessageReq) {
 	p.stats.IncrMsgCount(msg.Type.String(), p.state.validators.VotingPower()[msg.From])
@@ -459,6 +456,9 @@ func (p *Pbft) spanAddEventMessage(typ string, span trace.Span, msg *MessageReq)
 func (p *Pbft) setStateSpanAttributes(span trace.Span) {
 	attr := []attribute.KeyValue{}
 
+	// round
+	attr = append(attr, attribute.Int64("round", int64(p.state.view.Round)))
+
 	// number of commit messages
 	attr = append(attr, attribute.Int("committed", p.state.numCommitted()))
 
@@ -469,13 +469,23 @@ func (p *Pbft) setStateSpanAttributes(span trace.Span) {
 	attr = append(attr, attribute.Int("prepared", p.state.numPrepared()))
 
 	// prepare messages voting power
-	attr = append(attr, attribute.Int64("committed.votingPower", int64(p.state.prepared.getAccumulatedVotingPower())))
+	attr = append(attr, attribute.Int64("prepared.votingPower", int64(p.state.prepared.getAccumulatedVotingPower())))
 
-	// number of change state messages per round
+	// number of round change messages per round
 	for round, msgs := range p.state.roundMessages {
 		attr = append(attr, attribute.Int(fmt.Sprintf("roundChange_%d", round), msgs.length()))
 	}
 	span.SetAttributes(attr...)
+}
+
+// resetRoundChangeSpan terminates previous span (if any) and starts a new one
+func (p *Pbft) resetRoundChangeSpan(span trace.Span, ctx context.Context, iteration int64) trace.Span {
+	if span != nil {
+		span.End()
+	}
+	_, span = p.tracer.Start(ctx, "RoundChangeState")
+	span.SetAttributes(attribute.Int64("iteration", iteration))
+	return span
 }
 
 func (p *Pbft) runCommitState(ctx context.Context) {
@@ -519,29 +529,26 @@ func (p *Pbft) handleStateErr(err error) {
 }
 
 func (p *Pbft) runRoundChangeState(ctx context.Context) {
-	iteration := int64(0)
-	_, span := p.tracer.Start(ctx, "RoundChangeState")
-	span.SetAttributes(attribute.Int64("round", 0))
-	span.SetAttributes(attribute.Int64("iteration", iteration))
+	iteration := int64(1)
+	span := p.resetRoundChangeSpan(nil, ctx, iteration)
 
 	sendRoundChange := func(round uint64) {
-		// set state attributes to the span
-		p.setStateSpanAttributes(span)
-
 		p.logger.Printf("[DEBUG] local round change: round=%d", round)
 		// set the new round
 		p.setRound(round)
+		// set state attributes to the span
+		p.setStateSpanAttributes(span)
 		// clean the round
 		p.state.cleanRound(round)
 		// send the round change message
 		p.sendRoundChange()
-
 		// terminate a span and start a new one
-		span.End()
-		_, span = p.tracer.Start(ctx, "RoundChangeState")
 		iteration++
-		span.SetAttributes(attribute.Int64("round", int64(round)))
-		span.SetAttributes(attribute.Int64("iteration", iteration))
+		span = p.resetRoundChangeSpan(span, ctx, iteration)
+	}
+
+	sendNextRoundChange := func() {
+		sendRoundChange(p.state.GetCurrentRound() + 1)
 	}
 
 	checkTimeout := func() {
@@ -555,21 +562,23 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 				// the best remote height
 				attribute.Int64("remote", int64(bestHeight)),
 			))
-			p.setSpanStateAttributesWithTerminate(span)
+			// set state span attributes and terminate it
+			p.setStateSpanAttributes(span)
+			span.End()
 			p.setState(SyncState)
 			return
 		}
 
 		// otherwise, it seems that we are in sync
 		// and we should start a new round
-		sendRoundChange(p.state.GetCurrentRound() + 1)
+		sendNextRoundChange()
 	}
 
 	// if the round was triggered due to an error, we send our own
 	// next round change
 	if err := p.state.getErr(); err != nil {
 		p.logger.Printf("[DEBUG] round change handle error. Error message: %v", err)
-		sendRoundChange(p.state.GetCurrentRound() + 1)
+		sendNextRoundChange()
 	} else {
 		// otherwise, it is due to a timeout in any stage
 		// First, we try to sync up with any max round already available
@@ -605,9 +614,11 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 		currentVotingPower := p.state.roundMessages[msg.View.Round].getAccumulatedVotingPower()
 		// Round change quorum is 2*F round change messages (F denotes max faulty voting power)
 		if currentVotingPower >= 2*p.state.getMaxFaultyVotingPower() {
-			p.setSpanStateAttributesWithTerminate(span)
 			// start a new round immediately
 			p.state.SetCurrentRound(msg.View.Round)
+			// set state span attributes and terminate it
+			p.setStateSpanAttributes(span)
+			span.End()
 			p.setState(AcceptState)
 		} else if currentVotingPower >= p.state.getMaxFaultyVotingPower()+1 {
 			// weak certificate, try to catch up if our round number is smaller
