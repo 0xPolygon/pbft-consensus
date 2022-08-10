@@ -243,7 +243,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 	defer span.End()
 
 	p.stats.SetView(p.state.view.Sequence, p.state.view.Round)
-	p.logger.Printf("[INFO] accept state: sequence %d", p.state.view.Sequence)
+	p.logger.Printf("[INFO] accept state: %v", p.state.view)
 
 	if !p.state.validators.Includes(p.validator.NodeID()) {
 		// we are not a validator anymore, move back to sync state
@@ -396,7 +396,7 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 
 		// the message must have our local hash
 		if !bytes.Equal(msg.Hash, p.state.proposal.Hash) {
-			p.logger.Printf(fmt.Sprintf("[WARN]: incorrect hash in %s message", msg.Type.String()))
+			p.logger.Printf(fmt.Sprintf("[WARN] incorrect hash in %s message", msg.Type.String()))
 			continue
 		}
 
@@ -406,7 +406,7 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 
 		case MessageReq_Commit:
 			if err := p.backend.ValidateCommit(msg.From, msg.Seal); err != nil {
-				p.logger.Printf("[ERROR]: failed to validate commit: %v", err)
+				p.logger.Printf("[ERROR] failed to validate commit message from %s. Error: %v", msg.From, err)
 				continue
 			}
 			p.state.addCommitted(msg)
@@ -811,7 +811,7 @@ func (p *Pbft) PushMessageInternal(msg *MessageReq) {
 // PushMessage pushes a new message to the message queue
 func (p *Pbft) PushMessage(msg *MessageReq) {
 	if err := msg.Validate(); err != nil {
-		p.logger.Printf("[ERROR]: failed to validate msg: %v", err)
+		p.logger.Printf("[ERROR] failed to validate msg: %v. Error: %v", msg, err)
 		return
 	}
 
