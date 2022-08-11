@@ -279,26 +279,45 @@ func TestTransition_AcceptState_NonValidatorNode(t *testing.T) {
 	})
 }
 
-func TestTransition_RoundChangeState_CatchupRound(t *testing.T) {
-	m := newMockPbft(t, []NodeID{"A", "B", "C", "D"}, nil, "A")
-	m.setState(RoundChangeState)
+func TestTransition_RoundChangeState_AcceptState(t *testing.T) {
+	t.Run("Catchup round (equal voting powers)", func(t *testing.T) {
+		m := newMockPbft(t, []NodeID{"A", "B", "C", "D"}, nil, "A")
+		m.setState(RoundChangeState)
 
-	// new messages arrive with round number 2
-	m.emitMsg(createMessage(NodeID("B"), MessageReq_RoundChange, ViewMsg(1, 2)))
-	m.emitMsg(createMessage(NodeID("C"), MessageReq_RoundChange, ViewMsg(1, 2)))
-	m.emitMsg(createMessage(NodeID("D"), MessageReq_RoundChange, ViewMsg(1, 2)))
+		// new messages arrive with round number 2
+		m.emitMsg(createMessage(NodeID("B"), MessageReq_RoundChange, ViewMsg(1, 2)))
+		m.emitMsg(createMessage(NodeID("C"), MessageReq_RoundChange, ViewMsg(1, 2)))
+		m.emitMsg(createMessage(NodeID("D"), MessageReq_RoundChange, ViewMsg(1, 2)))
 
-	// as soon as it starts it will move to round 1 because it has
-	// not processed all the messages yet.
-	// After it receives 3 Round change messages higher than his own
-	// round it will change round again and move to accept
-	m.runCycle(context.Background())
+		// as soon as it starts it will move to round 1 because it has
+		// not processed all the messages yet.
+		// After it receives 3 Round change messages higher than his own
+		// round it will change round again and move to accept
+		m.runCycle(context.Background())
 
-	m.expect(expectResult{
-		sequence: 1,
-		round:    2,
-		outgoing: 1, // our new round change
-		state:    AcceptState,
+		m.expect(expectResult{
+			sequence: 1,
+			round:    2,
+			outgoing: 1, // our new round change
+			state:    AcceptState,
+		})
+	})
+
+	t.Run("Catchup round (different voting powers)", func(t *testing.T) {
+		m := newMockPbft(t, []NodeID{"A", "B", "C", "D"}, map[NodeID]uint64{"A": 10, "B": 5, "C": 15, "D": 20}, "A")
+		m.setState(RoundChangeState)
+		// C and D send quorum of round change messages (2*F) and therefore local node is fast tracked into the round 5 straight away
+		m.emitMsg(createMessage(NodeID("C"), MessageReq_RoundChange, ViewMsg(1, 5)))
+		m.emitMsg(createMessage(NodeID("D"), MessageReq_RoundChange, ViewMsg(1, 5)))
+
+		m.runCycle(context.Background())
+
+		m.expect(expectResult{
+			sequence: 1,
+			round:    5,
+			outgoing: 1, // our new round change
+			state:    AcceptState,
+		})
 	})
 }
 
@@ -454,12 +473,14 @@ func TestTransition_ValidateState_MoveToCommitState(t *testing.T) {
 		m.runCycle(context.Background())
 
 		m.expect(expectResult{
-			sequence:    1,
-			state:       CommitState,
-			prepareMsgs: 3,
-			commitMsgs:  3, // Commit messages (A proposer sent commit via state machine loop, C and D sent commit via emit message)
-			locked:      true,
-			outgoing:    1, // A commit message
+			sequence:               1,
+			state:                  CommitState,
+			prepareMsgs:            3,
+			commitMsgs:             3, // Commit messages (A proposer sent commit via state machine loop, C and D sent commit via emit message)
+			commitMsgsVotingPower:  3,
+			locked:                 true,
+			outgoing:               1, // A commit message
+			prepareMsgsVotingPower: 3,
 		})
 	})
 
@@ -476,12 +497,13 @@ func TestTransition_ValidateState_MoveToCommitState(t *testing.T) {
 		m.runCycle(context.Background())
 
 		m.expect(expectResult{
-			sequence:    1,
-			state:       CommitState,
-			prepareMsgs: 0,
-			commitMsgs:  3, // Commit messages (A proposer sent commit via state machine loop, C and D sent commit via emit message)
-			locked:      true,
-			outgoing:    1, // A commit message
+			sequence:              1,
+			state:                 CommitState,
+			prepareMsgs:           0,
+			commitMsgs:            3, // Commit messages (A proposer sent commit via state machine loop, C and D sent commit via emit message)
+			locked:                true,
+			outgoing:              1,  // A commit message
+			commitMsgsVotingPower: 85, // B. C and D sends commit messagess
 		})
 	})
 
@@ -489,17 +511,56 @@ func TestTransition_ValidateState_MoveToCommitState(t *testing.T) {
 
 // Not enough messages are sent, so ensure that destination state is RoundChangeState and that state machine jumps out of the loop.
 func TestTransition_ValidateState_MoveToRoundChangeState(t *testing.T) {
-	m := newMockPbft(t, []NodeID{"A", "B", "C", "D", "E", "F"}, nil, "A")
-	m.setState(ValidateState)
-	m.emitMsg(createMessage(NodeID("B"), MessageReq_Commit, nil))
-	m.emitMsg(createMessage(NodeID("C"), MessageReq_Commit, nil))
+	t.Run("All the validators have the same voting powers", func(t *testing.T) {
+		m := newMockPbft(t, []NodeID{"A", "B", "C", "D", "E", "F"}, nil, "A")
+		m.setState(ValidateState)
+		m.emitMsg(createMessage(NodeID("B"), MessageReq_Commit, nil))
+		m.emitMsg(createMessage(NodeID("C"), MessageReq_Commit, nil))
 
-	m.runCycle(context.Background())
+		m.runCycle(context.Background())
 
-	m.expect(expectResult{
-		sequence:   1,
-		state:      RoundChangeState,
-		commitMsgs: 2, // Commit messages (A proposer sent commit via state machine loop, B sent commit via emit message)
+		m.expect(expectResult{
+			sequence:              1,
+			state:                 RoundChangeState,
+			commitMsgs:            2, // Commit messages (A proposer sent commit via state machine loop, B sent commit via emit message)
+			commitMsgsVotingPower: 2, // B and C sends commit messages
+		})
+	})
+
+	t.Run("Validators have different voting powers (send not enough commit messages)", func(t *testing.T) {
+		m := newMockPbft(t, []NodeID{"A", "B", "C", "D", "E", "F"}, map[NodeID]uint64{"A": 10, "B": 15, "C": 5, "D": 20}, "A")
+		m.setState(ValidateState)
+		m.emitMsg(createMessage(NodeID("B"), MessageReq_Commit, nil))
+		m.emitMsg(createMessage(NodeID("C"), MessageReq_Commit, nil))
+
+		m.runCycle(context.Background())
+
+		m.expect(expectResult{
+			sequence:              1,
+			state:                 RoundChangeState,
+			commitMsgs:            2, // Commit messages (A proposer sent commit via state machine loop, B sent commit via emit message)
+			commitMsgsVotingPower: 20,
+		})
+	})
+
+	t.Run("Validators have different voting powers (send only prepare messages)", func(t *testing.T) {
+		m := newMockPbft(t, []NodeID{"A", "B", "C", "D", "E", "F"}, map[NodeID]uint64{"A": 10, "B": 15, "C": 5, "D": 20}, "A")
+		m.setState(ValidateState)
+		m.emitMsg(createMessage(NodeID("B"), MessageReq_Prepare, nil))
+		m.emitMsg(createMessage(NodeID("D"), MessageReq_Prepare, nil))
+
+		m.runCycle(context.Background())
+
+		m.expect(expectResult{
+			sequence:               1,
+			state:                  RoundChangeState,
+			prepareMsgs:            2,  // Commit messages (A proposer sent commit via state machine loop, B sent commit via emit message)
+			commitMsgs:             1,  // Commit message which node A sends
+			commitMsgsVotingPower:  10, // A sends commit message
+			prepareMsgsVotingPower: 35, // B and D sends prepare messages
+			outgoing:               1,
+			locked:                 true,
+		})
 	})
 }
 
@@ -640,11 +701,13 @@ func TestPbft_Run(t *testing.T) {
 	m.Run(context.Background())
 
 	m.expect(expectResult{
-		state:       DoneState,
-		sequence:    1,
-		prepareMsgs: 1,
-		commitMsgs:  1,
-		outgoing:    3,
+		state:                  DoneState,
+		sequence:               1,
+		prepareMsgs:            1,
+		prepareMsgsVotingPower: 1,
+		commitMsgsVotingPower:  1,
+		commitMsgs:             1,
+		outgoing:               3,
 	})
 }
 
@@ -850,6 +913,10 @@ type expectResult struct {
 	prepareMsgs uint64
 	commitMsgs  uint64
 
+	// accumulated voting powers
+	prepareMsgsVotingPower uint64
+	commitMsgsVotingPower  uint64
+
 	// outgoing messages
 	outgoing uint64
 }
@@ -874,6 +941,12 @@ func (m *mockPbft) expect(res expectResult) {
 	}
 	if size := m.state.committed.length(); uint64(size) != res.commitMsgs {
 		m.t.Fatalf("incorrect commit messages actual: %d, expected:%d", size, res.commitMsgs)
+	}
+	if accumulatedVotingPower := m.state.prepared.getAccumulatedVotingPower(); accumulatedVotingPower != res.prepareMsgsVotingPower {
+		m.t.Fatalf("incorrect prepare messages acccumulated voting power actual: %d, expected:%d", accumulatedVotingPower, res.prepareMsgsVotingPower)
+	}
+	if accumulatedVotingPower := m.state.committed.getAccumulatedVotingPower(); accumulatedVotingPower != res.commitMsgsVotingPower {
+		m.t.Fatalf("incorrect commit messages acccumulated voting power actual: %d, expected:%d", accumulatedVotingPower, res.commitMsgsVotingPower)
 	}
 	if m.state.IsLocked() != res.locked {
 		m.t.Fatalf("incorrect locked actual: %v, expected: %v", m.state.locked, res.locked)
