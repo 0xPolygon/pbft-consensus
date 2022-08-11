@@ -27,6 +27,7 @@ func createMessage(sender NodeID, messageType MsgType, view *View) *MessageReq {
 		From: sender,
 		Type: messageType,
 		View: view,
+		Hash: digest,
 	}
 	switch msg.Type {
 	case MessageReq_Preprepare:

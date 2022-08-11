@@ -2,10 +2,18 @@ package pbft
 
 // ValidatorSet represents the validator set bahavior
 type ValidatorSet interface {
+	// CalcProposer abstracts proposer calculation logic
 	CalcProposer(round uint64) NodeID
+	// Includes determines whether given NodeID is in the current validator set
 	Includes(id NodeID) bool
+	// Len returns length of validator set
 	Len() int
+	// VotingPower returns voting powers for each validator node.
+	// Voting power refers as weighted vote during PBFT message accumulation
+	// (e.g. the more voting power validator node has, its vote has more weight)
 	VotingPower() map[NodeID]uint64
+	// Verify abstracts seal validation logic
+	Verify(id NodeID, seal []byte, hash []byte) error
 }
 
 // Logger represents logger behavior
@@ -22,7 +30,9 @@ type Transport interface {
 
 // SignKey represents the behavior of the signing key
 type SignKey interface {
+	// NodeID gets public identity of the current validator node
 	NodeID() NodeID
+	// Sign is used for implementing messages signing logic
 	Sign(b []byte) ([]byte, error)
 }
 
@@ -57,7 +67,4 @@ type Backend interface {
 
 	// ValidatorSet returns the validator set for the current round
 	ValidatorSet() ValidatorSet
-
-	// ValidateCommit is used to validate that a given commit is valid
-	ValidateCommit(from NodeID, seal []byte) error
 }

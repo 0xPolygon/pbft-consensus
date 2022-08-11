@@ -290,6 +290,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 				p.setState(RoundChangeState)
 				return
 			}
+			p.msgQueue.verifyCommitMessages(p.state.validators, p.state.proposal.Hash, p.state.view, p.updateCh, p.logger)
 
 			// calculate how much time do we have to wait to gossip the proposal
 			delay := time.Until(p.state.proposal.Time)
@@ -359,6 +360,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 			p.sendPrepareMsg()
 			p.setState(ValidateState)
 		}
+		p.msgQueue.verifyCommitMessages(p.state.validators, p.state.proposal.Hash, p.state.view.Copy(), p.updateCh, p.logger)
 	}
 }
 
@@ -789,6 +791,17 @@ func (p *Pbft) PushMessageInternal(msg *MessageReq) {
 func (p *Pbft) PushMessage(msg *MessageReq) {
 	if err := msg.Validate(); err != nil {
 		p.logger.Printf("[ERROR]: failed to validate msg: %v", err)
+		return
+	}
+
+	// wanted to do Commit Validation in parallel
+	// for that reason, validating logic was moved from runValidateState
+	if msg.Type == MessageReq_Commit {
+		p.msgQueue.pushPendingCommitMessage(msg)
+		if p.state == nil || p.state.validators == nil || p.state.proposal == nil {
+			return
+		}
+		p.msgQueue.verifyCommitMessages(p.state.validators, p.state.proposal.Hash, p.state.view.Copy(), p.updateCh, p.logger)
 		return
 	}
 

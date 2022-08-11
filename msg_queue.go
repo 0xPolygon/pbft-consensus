@@ -16,6 +16,10 @@ type msgQueue struct {
 	// Heap implementation for the validate state message queue
 	validateStateQueue msgQueueImpl
 
+	// TODO: This is a little bit hacky, maybe should reuse validateStateQueue, but mark messages as pending and confirmed?
+	// pendingCommitMsgsQueue contains commit messages which are yet to be validated
+	pendingCommitMsgsQueue msgQueueImpl
+
 	queueLock sync.Mutex
 }
 
@@ -28,6 +32,40 @@ func (m *msgQueue) pushMessage(message *MessageReq) {
 	heap.Push(queue, message)
 }
 
+// pushPendingCommitMessage adds a new commit message to a message queue
+func (m *msgQueue) pushPendingCommitMessage(message *MessageReq) {
+	m.queueLock.Lock()
+	defer m.queueLock.Unlock()
+
+	m.pendingCommitMsgsQueue.Push(message)
+}
+
+// verifyCommitMessages verify accumulated commit messages for the given sequence and round.
+// Only valid ones will end up in the validateStateQueue.
+func (m *msgQueue) verifyCommitMessages(validators ValidatorSet, hash []byte, view *View, notifyCh chan<- struct{}, logger Logger) {
+	for {
+		m.queueLock.Lock()
+		msg, _ := m.pendingCommitMsgsQueue.readMessageWithDiscardsLocked(view, ValidateState)
+		m.queueLock.Unlock()
+		if msg == nil {
+			return
+		}
+
+		go func(message *MessageReq) {
+			if err := validators.Verify(message.From, message.Seal, hash); err != nil {
+				logger.Printf("[ERROR] Commit message is invalid. Sender: %s, Seal: %s. Error: %v",
+					message.From, message.Seal, err)
+			}
+			m.pushMessage(message)
+
+			select {
+			case notifyCh <- struct{}{}:
+			default:
+			}
+		}(msg)
+	}
+}
+
 // readMessage reads the message from a message queue, based on the current state and view
 func (m *msgQueue) readMessage(st State, current *View) *MessageReq {
 	msg, _ := m.readMessageWithDiscards(st, current)
@@ -38,44 +76,8 @@ func (m *msgQueue) readMessageWithDiscards(st State, current *View) (*MessageReq
 	m.queueLock.Lock()
 	defer m.queueLock.Unlock()
 
-	discarded := []*MessageReq{}
 	queue := m.getQueue(st)
-
-	for {
-		if queue.Len() == 0 {
-			return nil, discarded
-		}
-		msg := queue.head()
-
-		// check if the message is from the future
-		if st == RoundChangeState {
-			// if we are in RoundChangeState we only care about sequence
-			// since we are interested in knowing all the possible rounds
-			if msg.View.Sequence > current.Sequence {
-				// future message
-				return nil, discarded
-			}
-		} else {
-			// otherwise, we compare both sequence and round
-			if cmpView(msg.View, current) > 0 {
-				// future message
-				return nil, discarded
-			}
-		}
-
-		// at this point, 'msg' is good or old, in either case
-		// we have to remove it from the queue
-		heap.Pop(queue)
-
-		if cmpView(msg.View, current) < 0 {
-			// old value, try again
-			discarded = append(discarded, msg)
-			continue
-		}
-
-		// good value, return it
-		return msg, discarded
-	}
+	return queue.readMessageWithDiscardsLocked(current, st)
 }
 
 // getQueue checks the passed in state, and returns the corresponding message queue
@@ -95,9 +97,10 @@ func (m *msgQueue) getQueue(st State) *msgQueueImpl {
 // newMsgQueue creates a new message queue structure
 func newMsgQueue() *msgQueue {
 	return &msgQueue{
-		roundChangeStateQueue: msgQueueImpl{},
-		acceptStateQueue:      msgQueueImpl{},
-		validateStateQueue:    msgQueueImpl{},
+		roundChangeStateQueue:  msgQueueImpl{},
+		acceptStateQueue:       msgQueueImpl{},
+		validateStateQueue:     msgQueueImpl{},
+		pendingCommitMsgsQueue: msgQueueImpl{},
 	}
 }
 
@@ -131,6 +134,45 @@ func stateToMsg(st State) MsgType {
 }
 
 type msgQueueImpl []*MessageReq
+
+func (m *msgQueueImpl) readMessageWithDiscardsLocked(view *View, pbftState State) (*MessageReq, []*MessageReq) {
+	discarded := []*MessageReq{}
+	for {
+		if m.Len() == 0 {
+			return nil, discarded
+		}
+		msg := m.head()
+
+		// check if the message is from the future
+		if pbftState == RoundChangeState {
+			// if we are in RoundChangeState we only care about sequence
+			// since we are interested in knowing all the possible rounds
+			if msg.View.Sequence > view.Sequence {
+				// future message
+				return nil, discarded
+			}
+		} else {
+			// otherwise, we compare both sequence and round
+			if cmpView(msg.View, view) > 0 {
+				// future message
+				return nil, discarded
+			}
+		}
+
+		// at this point, 'msg' is good or old, in either case
+		// we have to remove it from the queue
+		heap.Pop(m)
+
+		if cmpView(msg.View, view) < 0 {
+			// old value, try again
+			discarded = append(discarded, msg)
+			continue
+		}
+
+		// good value, return it
+		return msg, discarded
+	}
+}
 
 // head returns the head of the queue
 func (m msgQueueImpl) head() *MessageReq {

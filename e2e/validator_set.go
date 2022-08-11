@@ -49,3 +49,7 @@ func (n *ValidatorSet) Len() int {
 func (n *ValidatorSet) VotingPower() map[pbft.NodeID]uint64 {
 	return pbft.CreateEqualVotingPowerMap(n.Nodes)
 }
+
+func (n *ValidatorSet) Verify(nodeID pbft.NodeID, seal []byte, hash []byte) error {
+	return nil
+}

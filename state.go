@@ -16,19 +16,19 @@ type state struct {
 	// proposal stores information about the height proposal
 	proposal *Proposal
 
-	// The selected proposer
+	// proposer is the selected proposer
 	proposer NodeID
 
-	// Current view
+	// view is a current view
 	view *View
 
-	// List of prepared messages
+	// prepared is a list of prepared messages
 	prepared *messages
 
-	// List of committed messages
+	// committed is a list of committed messages
 	committed *messages
 
-	// List of round change messages
+	// roundMessages is a list of round change messages
 	roundMessages map[uint64]*messages
 
 	// maxFaultyVotingPower represents max tolerable faulty voting power in order to have Byzantine fault tollerance property satisfied
@@ -37,13 +37,13 @@ type state struct {
 	// quorumSize represents minimum accumulated voting power needed to proceed to next PBFT state
 	quorumSize uint64
 
-	// Locked signals whether the proposal is locked
+	// locked signals whether the proposal is locked
 	locked uint64
 
 	// timeout tracks the time left for this round
 	timeoutChan <-chan time.Time
 
-	// Describes whether there has been an error during the computation
+	// err describes whether there has been an error during the computation
 	err error
 }
 
