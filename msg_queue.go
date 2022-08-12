@@ -40,9 +40,8 @@ func (m *msgQueue) pushPendingCommitMessage(message *MessageReq) {
 	m.pendingCommitMsgsQueue.Push(message)
 }
 
-// verifyCommitMessages verify accumulated commit messages for the given sequence and round.
-// Only valid ones will end up in the validateStateQueue.
-func (m *msgQueue) verifyCommitMessages(validators ValidatorSet, hash []byte, view *View, notifyCh chan<- struct{}, logger Logger) {
+// processPendingCommitMessages processes accumulated pending commit messages for the given sequence and round.
+func (m *msgQueue) processPendingCommitMessages(view *View, handler func(*MessageReq)) {
 	for {
 		m.queueLock.Lock()
 		msg, _ := m.pendingCommitMsgsQueue.readMessageWithDiscardsLocked(view, ValidateState)
@@ -50,19 +49,7 @@ func (m *msgQueue) verifyCommitMessages(validators ValidatorSet, hash []byte, vi
 		if msg == nil {
 			return
 		}
-
-		go func(message *MessageReq) {
-			if err := validators.Verify(message.From, message.Seal, hash); err != nil {
-				logger.Printf("[ERROR] Commit message is invalid. Sender: %s, Seal: %s. Error: %v",
-					message.From, message.Seal, err)
-			}
-			m.pushMessage(message)
-
-			select {
-			case notifyCh <- struct{}{}:
-			default:
-			}
-		}(msg)
+		go handler(msg)
 	}
 }
 

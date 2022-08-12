@@ -3,6 +3,7 @@ package pbft
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -290,7 +291,8 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 				p.setState(RoundChangeState)
 				return
 			}
-			p.msgQueue.verifyCommitMessages(p.state.validators, p.state.proposal.Hash, p.state.view, p.updateCh, p.logger)
+			// TODO: Maybe can be removed from here
+			p.msgQueue.processPendingCommitMessages(p.state.view.Copy(), p.verifyCommitMessage)
 
 			// calculate how much time do we have to wait to gossip the proposal
 			delay := time.Until(p.state.proposal.Time)
@@ -360,7 +362,8 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 			p.sendPrepareMsg()
 			p.setState(ValidateState)
 		}
-		p.msgQueue.verifyCommitMessages(p.state.validators, p.state.proposal.Hash, p.state.view.Copy(), p.updateCh, p.logger)
+		// TODO: Maybe can be removed from here
+		p.msgQueue.processPendingCommitMessages(p.state.view.Copy(), p.verifyCommitMessage)
 	}
 }
 
@@ -798,13 +801,27 @@ func (p *Pbft) PushMessage(msg *MessageReq) {
 	// for that reason, validating logic was moved from runValidateState
 	if msg.Type == MessageReq_Commit {
 		p.msgQueue.pushPendingCommitMessage(msg)
-		if p.state == nil || p.state.validators == nil || p.state.proposal == nil {
+		if p.state.view == nil {
 			return
 		}
-		p.msgQueue.verifyCommitMessages(p.state.validators, p.state.proposal.Hash, p.state.view.Copy(), p.updateCh, p.logger)
+		p.msgQueue.processPendingCommitMessages(p.state.view.Copy(), p.verifyCommitMessage)
 		return
 	}
 
+	p.PushMessageInternal(msg)
+}
+
+// verifyCommitMessage validates commit message and if it is valid one, it gets injected to the validateStateQueue.
+// Otherwise it gets discarded.
+func (p *Pbft) verifyCommitMessage(msg *MessageReq) {
+	if p.state.validators == nil || p.state.proposal == nil {
+		return
+	}
+	if err := p.state.validators.Verify(msg.From, msg.Seal, p.state.proposal.Hash); err != nil {
+		p.logger.Printf("[ERROR] Commit message is invalid (%v). Proposal hash: %v. Error: %v",
+			msg, hex.EncodeToString(p.state.proposal.Hash), err)
+		return
+	}
 	p.PushMessageInternal(msg)
 }
 
