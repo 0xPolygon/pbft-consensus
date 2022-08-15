@@ -3,6 +3,8 @@ package pbft
 import (
 	"bytes"
 	"context"
+	"crypto/sha1"
+	"encoding/binary"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -672,7 +674,11 @@ func (p *Pbft) gossip(msgType MsgType) {
 	// if the message is commit, we need to add the committed seal
 	if msg.Type == MessageReq_Commit {
 		// seal the hash of the proposal
-		seal, err := p.validator.Sign(p.state.proposal.Hash)
+		signingHash := p.state.proposal.Hash
+		if p.config.SignBlockHeightAndRound {
+			signingHash = SlashingHash(p.state.view.Sequence, p.state.view.Round, signingHash)
+		}
+		seal, err := p.validator.Sign(signingHash)
 		if err != nil {
 			p.logger.Printf("[ERROR] failed to commit seal. Error message: %v", err)
 			return
@@ -828,4 +834,15 @@ func CalculateQuorum(votingPower map[NodeID]uint64) (maxFaultyVotingPower uint64
 	maxFaultyVotingPower = (totalVotingPower - 1) / 3
 	quorumSize = 2*maxFaultyVotingPower + 1
 	return
+}
+
+func SlashingHash(height, round uint64, blockHash []byte) []byte {
+	heightAndRound := make([]byte, 16)
+	binary.BigEndian.PutUint64(heightAndRound[0:8], height)
+	binary.BigEndian.PutUint64(heightAndRound[8:16], round)
+
+	h := sha1.New()
+	h.Write(append(heightAndRound, blockHash...))
+	signingHash := h.Sum(nil)
+	return signingHash
 }

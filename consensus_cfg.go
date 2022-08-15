@@ -50,6 +50,12 @@ func WithNotifier(notifier StateNotifier) ConfigOption {
 	}
 }
 
+func WithHeightAndRoundSigning() ConfigOption {
+	return func(c *Config) {
+		c.SignBlockHeightAndRound = true
+	}
+}
+
 type Config struct {
 	// ProposalTimeout is the time to wait for the proposal
 	// from the validator. It defaults to Timeout
@@ -71,7 +77,8 @@ type Config struct {
 	// Notifier is a reference to the struct which encapsulates handling messages and timeouts
 	Notifier StateNotifier
 
-	StatsCallback StatsCallback
+	StatsCallback           StatsCallback
+	SignBlockHeightAndRound bool
 }
 
 func DefaultConfig() *Config {
