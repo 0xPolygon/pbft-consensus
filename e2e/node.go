@@ -19,10 +19,11 @@ type node struct {
 
 	c *Cluster
 
-	name     string
-	pbft     *pbft.Pbft
-	cancelFn context.CancelFunc
-	running  uint64
+	name           string
+	pbft           *pbft.Pbft
+	cancelFn       context.CancelFunc
+	running        uint64
+	isShuttingDown uint64
 
 	// validator nodes
 	nodes []string
@@ -101,9 +102,7 @@ func (n *node) Start() {
 	n.cancelFn = cancelFn
 	atomic.StoreUint64(&n.running, 1)
 	go func() {
-		defer func() {
-			atomic.StoreUint64(&n.running, 0)
-		}()
+		defer atomic.StoreUint64(&n.running, 0)
 	SYNC:
 		_, syncIndex := n.c.syncWithNetwork(n.name)
 		n.setSyncIndex(syncIndex)
@@ -139,9 +138,15 @@ func (n *node) Start() {
 }
 
 func (n *node) Stop() {
+	if n.isShutDownOngoing() {
+		// ignore stop invocation if node is already in a shutting down condition
+		return
+	}
 	if !n.IsRunning() {
 		panic(fmt.Errorf("node %s is already stopped", n.name))
 	}
+	atomic.StoreUint64(&n.isShuttingDown, 1)
+	defer atomic.StoreUint64(&n.isShuttingDown, 0)
 	n.cancelFn()
 	// block until node is running
 	for n.IsRunning() {
@@ -150,6 +155,10 @@ func (n *node) Stop() {
 
 func (n *node) IsRunning() bool {
 	return atomic.LoadUint64(&n.running) != 0
+}
+
+func (n *node) isShutDownOngoing() bool {
+	return atomic.LoadUint64(&n.isShuttingDown) != 0
 }
 
 func (n *node) getSyncIndex() int64 {
