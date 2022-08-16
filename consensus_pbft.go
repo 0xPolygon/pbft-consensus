@@ -796,14 +796,13 @@ func (p *Pbft) PushMessage(msg *MessageReq) {
 	// for that reason, validating logic was moved from runValidateState
 	if msg.Type == MessageReq_Commit {
 		p.msgQueue.pushPendingCommitMessage(msg)
-		if p.state.view == nil {
-			return
+		if p.state.view != nil && p.state.proposal != nil && p.state.validators != nil {
+			p.msgQueue.processPendingCommitMessages(p.state.view, p.state.validators,
+				p.state.proposal.Hash, p.verifyCommitMessage)
 		}
-		p.msgQueue.processPendingCommitMessages(p.state.view, p.state.validators, p.state.proposal.Hash, p.verifyCommitMessage)
-		return
+	} else {
+		p.PushMessageInternal(msg)
 	}
-
-	p.PushMessageInternal(msg)
 }
 
 // verifyCommitMessage validates commit message and if it is valid one, it gets injected to the validateStateQueue.
