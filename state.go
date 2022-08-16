@@ -1,12 +1,16 @@
 package pbft
 
 import (
+	"sync"
 	"sync/atomic"
 	"time"
 )
 
 // state defines the current state object in PBFT
 type state struct {
+	// mutex enables thread safe access to the state fields
+	mutex sync.RWMutex
+
 	// validators represent the current validator set
 	validators ValidatorSet
 
@@ -63,7 +67,7 @@ func newState() *state {
 // initializeVotingInfo populates voting information: maximum faulty voting power and quorum size,
 // based on the provided voting power map from ValidatorSet
 func (s *state) initializeVotingInfo() error {
-	maxFaultyVotingPower, quorumSize, err := CalculateQuorum(s.validators.VotingPower())
+	maxFaultyVotingPower, quorumSize, err := CalculateQuorum(s.getValidatorSet().VotingPower())
 	if err != nil {
 		return err
 	}
@@ -115,6 +119,48 @@ func (s *state) setState(st State) {
 	atomic.StoreUint64(stateAddr, uint64(st))
 }
 
+// setValidatorSet sets validator set (thread-safe)
+func (s *state) setValidatorSet(validators ValidatorSet) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	s.validators = validators
+}
+
+// getValidatorSet gets validator set (thread-safe)
+func (s *state) getValidatorSet() ValidatorSet {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	return s.validators
+}
+
+// setProposal sets proposal (thread-safe)
+func (s *state) setProposal(proposal *Proposal) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	s.proposal = proposal
+}
+
+// GetProposal gets proposal (thread-safe)
+func (s *state) GetProposal() *Proposal {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	return s.proposal
+}
+
+// setView sets view (thread-safe)
+func (s *state) setView(view *View) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	s.view = view
+}
+
+// getView gets view (thread-safe)
+func (s *state) getView() *View {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	return s.view
+}
+
 // getErr returns the current error, if any, and consumes it
 func (s *state) getErr() error {
 	err := s.err
@@ -148,7 +194,7 @@ func (s *state) resetRoundMsgs() {
 
 // CalcProposer calculates the proposer and sets it to the state
 func (s *state) CalcProposer() {
-	s.proposer = s.validators.CalcProposer(s.view.Round)
+	s.proposer = s.getValidatorSet().CalcProposer(s.getView().Round)
 }
 
 func (s *state) lock() {
@@ -195,13 +241,12 @@ func (s *state) addCommitMsg(msg *MessageReq) {
 
 // addMessage adds a new message to one of the following message lists: committed, prepared, roundMessages
 func (s *state) addMessage(msg *MessageReq) {
-	addr := msg.From
-	if !s.validators.Includes(addr) {
+	if !s.getValidatorSet().Includes(msg.From) {
 		// only include messages from validators
 		return
 	}
 
-	votingPower := s.validators.VotingPower()[msg.From]
+	votingPower := s.getValidatorSet().VotingPower()[msg.From]
 	if msg.Type == MessageReq_Commit {
 		s.committed.addMessage(msg, votingPower)
 	} else if msg.Type == MessageReq_Prepare {
@@ -228,11 +273,13 @@ func (s *state) numCommitted() int {
 }
 
 func (s *state) GetCurrentRound() uint64 {
-	return atomic.LoadUint64(&s.view.Round)
+	view := s.getView()
+	return atomic.LoadUint64(&view.Round)
 }
 
 func (s *state) SetCurrentRound(round uint64) {
-	atomic.StoreUint64(&s.view.Round, round)
+	view := s.getView()
+	atomic.StoreUint64(&view.Round, round)
 }
 
 type messages struct {

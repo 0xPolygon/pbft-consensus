@@ -3,9 +3,7 @@ package pbft
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"fmt"
-	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -143,7 +141,7 @@ func (p *Pbft) SetBackend(backend Backend) error {
 	p.setSequence(p.backend.Height())
 
 	// set the current set of validators
-	p.state.validators = p.backend.ValidatorSet()
+	p.state.setValidatorSet(p.backend.ValidatorSet())
 
 	// initialize voting info
 	if err := p.state.initializeVotingInfo(); err != nil {
@@ -158,7 +156,7 @@ func (p *Pbft) Run(ctx context.Context) {
 	p.SetInitialState(ctx)
 
 	// start the trace span
-	spanCtx, span := p.tracer.Start(context.Background(), fmt.Sprintf("Sequence-%d", p.state.view.Sequence))
+	spanCtx, span := p.tracer.Start(context.Background(), fmt.Sprintf("Sequence-%d", p.state.getView().Sequence))
 	defer span.End()
 
 	// loop until we reach the a finish state
@@ -203,9 +201,10 @@ func (p *Pbft) runCycle(ctx context.Context) {
 	state := p.getState()
 	defer p.stats.StateDuration(state.String(), startTime)
 
+	view := p.state.getView()
 	// Log to the console
-	if p.state.view != nil {
-		p.logger.Printf("[DEBUG] cycle: state=%s, sequence=%d, round=%d", p.getState(), p.state.view.Sequence, p.state.GetCurrentRound())
+	if view != nil {
+		p.logger.Printf("[DEBUG] cycle: state=%s %v", p.getState(), view)
 	}
 	// Based on the current state, execute the corresponding section
 	switch state {
@@ -227,9 +226,7 @@ func (p *Pbft) runCycle(ctx context.Context) {
 }
 
 func (p *Pbft) setSequence(sequence uint64) {
-	p.state.view = &View{
-		Sequence: sequence,
-	}
+	p.state.setView(&View{Sequence: sequence})
 	p.setRound(0)
 }
 
@@ -249,10 +246,11 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 	_, span := p.tracer.Start(ctx, "AcceptState")
 	defer span.End()
 
-	p.stats.SetView(p.state.view.Sequence, p.state.view.Round)
-	p.logger.Printf("[INFO] accept state: sequence %d, round %d", p.state.view.Sequence, p.state.view.Round)
+	view := p.state.getView()
+	p.stats.SetView(view.Sequence, view.Round)
+	p.logger.Printf("[INFO] accept state: %v", view)
 
-	if !p.state.validators.Includes(p.validator.NodeID()) {
+	if !p.state.getValidatorSet().Includes(p.validator.NodeID()) {
 		// we are not a validator anymore, move back to sync state
 		p.logger.Print("[INFO] we are not a validator anymore")
 		p.setState(SyncState)
@@ -278,22 +276,21 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 		attribute.String("proposer", string(p.state.proposer)),
 	)
 
-	var err error
-
 	if isProposer {
 		p.logger.Printf("[INFO] we are the proposer")
 
 		if !p.state.IsLocked() {
 			// since the state is not locked, we need to build a new proposal
-			p.state.proposal, err = p.backend.BuildProposal()
+			proposal, err := p.backend.BuildProposal()
 			if err != nil {
 				p.logger.Printf("[ERROR] failed to build proposal: %v", err)
 				p.setState(RoundChangeState)
 				return
 			}
+			p.state.setProposal(proposal)
 
 			// calculate how much time do we have to wait to gossip the proposal
-			delay := time.Until(p.state.proposal.Time)
+			delay := time.Until(proposal.Time)
 			select {
 			case <-time.After(delay):
 			case <-ctx.Done():
@@ -312,7 +309,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 		return
 	}
 
-	p.logger.Printf("[INFO] proposer calculated: proposer=%s, sequence=%d, round=%d", p.state.proposer, p.state.view.Sequence, p.state.view.Round)
+	p.logger.Printf("[INFO] proposer calculated: proposer=%s %v", p.state.proposer, view)
 
 	// we are NOT a proposer for this height/round. Then, we have to wait
 	// for a pre-prepare message from the proposer
@@ -348,7 +345,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 
 		if p.state.IsLocked() {
 			// the state is locked, we need to receive the same proposal
-			if p.state.proposal.Equal(proposal) {
+			if p.state.GetProposal().Equal(proposal) {
 				// fast-track and send a commit message and wait for validations
 				p.sendCommitMsg()
 				p.setState(ValidateState)
@@ -356,7 +353,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 				p.handleStateErr(errIncorrectLockedProposal)
 			}
 		} else {
-			p.state.proposal = proposal
+			p.state.setProposal(proposal)
 			p.sendPrepareMsg()
 			p.setState(ValidateState)
 		}
@@ -374,8 +371,9 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 		span.End()
 	}()
 
+	proposal := p.state.GetProposal()
 	// validate commit messages
-	p.msgQueue.processPendingCommitMessages(p.state.view, p.state.validators, p.state.proposal.Hash, p.verifyCommitMessage)
+	p.msgQueue.processPendingCommitMessages(p.state.getView(), p.state.getValidatorSet(), proposal.Hash, p.verifyCommitMessage)
 
 	hasCommitted := false
 	sendCommit := func(span trace.Span) {
@@ -406,7 +404,7 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 		}
 
 		// the message must have our local hash
-		if !bytes.Equal(msg.Hash, p.state.proposal.Hash) {
+		if !bytes.Equal(msg.Hash, proposal.Hash) {
 			p.logger.Printf(fmt.Sprintf("[WARN]: incorrect hash in %s message from node %s", msg.Type.String(), msg.From))
 			continue
 		}
@@ -437,7 +435,7 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 
 // spanAddEventMessage reports given message to both PBFT built-in statistics reporting mechanism and open telemetry
 func (p *Pbft) spanAddEventMessage(typ string, span trace.Span, msg *MessageReq) {
-	p.stats.IncrMsgCount(msg.Type.String(), p.state.validators.VotingPower()[msg.From])
+	p.stats.IncrMsgCount(msg.Type.String(), p.state.getValidatorSet().VotingPower()[msg.From])
 
 	span.AddEvent("Message", trace.WithAttributes(
 		// message type
@@ -461,7 +459,7 @@ func (p *Pbft) setStateSpanAttributes(span trace.Span) {
 	attr := []attribute.KeyValue{}
 
 	// round
-	attr = append(attr, attribute.Int64("round", int64(p.state.view.Round)))
+	attr = append(attr, attribute.Int64("round", int64(p.state.GetCurrentRound())))
 
 	// number of commit messages
 	attr = append(attr, attribute.Int("committed", p.state.numCommitted()))
@@ -497,7 +495,8 @@ func (p *Pbft) runCommitState(ctx context.Context) {
 	defer span.End()
 
 	committedSeals := p.state.getCommittedSeals()
-	proposal := p.state.proposal.Copy()
+	proposal := p.state.GetProposal().Copy()
+	view := p.state.getView()
 
 	// at this point either if it works or not we need to unlock the state
 	// to allow for other proposals to be produced if it insertion fails
@@ -507,7 +506,7 @@ func (p *Pbft) runCommitState(ctx context.Context) {
 		Proposal:       proposal,
 		CommittedSeals: committedSeals,
 		Proposer:       p.state.proposer,
-		Number:         p.state.view.Sequence,
+		Number:         view.Sequence,
 	}
 	if err := p.backend.Insert(pp); err != nil {
 		// start a new round with the state unlocked since we need to
@@ -559,10 +558,11 @@ func (p *Pbft) runRoundChangeState(ctx context.Context) {
 		// At this point we might be stuck in the network if:
 		// - We have advanced the round but everyone else passed.
 		// - We are removing those messages since they are old now.
-		if bestHeight, stucked := p.backend.IsStuck(p.state.view.Sequence); stucked {
+		view := p.state.getView()
+		if bestHeight, stucked := p.backend.IsStuck(view.Sequence); stucked {
 			span.AddEvent("OutOfSync", trace.WithAttributes(
 				// our local height
-				attribute.Int64("local", int64(p.state.view.Sequence)),
+				attribute.Int64("local", int64(view.Sequence)),
 				// the best remote height
 				attribute.Int64("remote", int64(bestHeight)),
 			))
@@ -657,26 +657,27 @@ func (p *Pbft) gossip(msgType MsgType) {
 		Type: msgType,
 		From: p.validator.NodeID(),
 	}
+	proposal := p.state.GetProposal()
 	if msgType != MessageReq_RoundChange {
 		// Except for round change message in which we are deciding on the proposer,
 		// the rest of the consensus message require the hash:
 		// 1. Preprepare: notify the validators of the proposal + hash
 		// 2. Prepare + Commit: safe check to only include messages from our round.
-		msg.Hash = p.state.proposal.Hash
+		msg.Hash = proposal.Hash
 	}
 
 	// add View
-	msg.View = p.state.view.Copy()
+	msg.View = p.state.getView().Copy()
 
 	// if we are sending a preprepare message we need to include the proposal
 	if msg.Type == MessageReq_Preprepare {
-		msg.SetProposal(p.state.proposal.Data)
+		msg.SetProposal(proposal.Data)
 	}
 
 	// if the message is commit, we need to add the committed seal
 	if msg.Type == MessageReq_Commit {
 		// seal the hash of the proposal
-		seal, err := p.validator.Sign(p.state.proposal.Hash)
+		seal, err := p.validator.Sign(proposal.Hash)
 		if err != nil {
 			p.logger.Printf("[ERROR] failed to commit seal. Error message: %v", err)
 			return
@@ -686,9 +687,7 @@ func (p *Pbft) gossip(msgType MsgType) {
 
 	if msg.Type != MessageReq_Preprepare {
 		// send a copy to ourselves so that we can process this message as well
-		msg2 := msg.Copy()
-		msg2.From = p.validator.NodeID()
-		p.PushMessage(msg2)
+		p.PushMessage(msg.Copy())
 	}
 	if err := p.transport.Gossip(msg); err != nil {
 		p.logger.Printf("[ERROR] failed to gossip. Error message: %v", err)
@@ -727,16 +726,16 @@ func (p *Pbft) setState(s State) {
 
 // IsLocked returns if the current proposal is locked
 func (p *Pbft) IsLocked() bool {
-	return atomic.LoadUint64(&p.state.locked) == 1
+	return p.state.IsLocked()
 }
 
 // GetProposal returns current proposal in the pbft
 func (p *Pbft) GetProposal() *Proposal {
-	return p.state.proposal
+	return p.state.GetProposal()
 }
 
 func (p *Pbft) Round() uint64 {
-	return atomic.LoadUint64(&p.state.view.Round)
+	return p.state.GetCurrentRound()
 }
 
 // getNextMessage reads a new message from the message queue
@@ -765,7 +764,7 @@ func (p *Pbft) getNextMessage(span trace.Span) (*MessageReq, bool) {
 			span.AddEvent("Timeout")
 			p.notifier.HandleTimeout(p.validator.NodeID(), stateToMsg(p.getState()), &View{
 				Round:    p.state.GetCurrentRound(),
-				Sequence: p.state.view.Sequence,
+				Sequence: p.state.getView().Sequence,
 			})
 			p.logger.Printf("[TRACE] Message read timeout occurred")
 			return nil, true
@@ -796,9 +795,11 @@ func (p *Pbft) PushMessage(msg *MessageReq) {
 	// for that reason, validating logic was moved from runValidateState
 	if msg.Type == MessageReq_Commit {
 		p.msgQueue.pushPendingCommitMessage(msg)
-		if p.state.view != nil && p.state.proposal != nil && p.state.validators != nil {
-			p.msgQueue.processPendingCommitMessages(p.state.view, p.state.validators,
-				p.state.proposal.Hash, p.verifyCommitMessage)
+		view := p.state.getView()
+		proposal := p.state.GetProposal()
+		validators := p.state.getValidatorSet()
+		if view != nil && proposal != nil && validators != nil {
+			p.msgQueue.processPendingCommitMessages(view, validators, proposal.Hash, p.verifyCommitMessage)
 		}
 	} else {
 		p.PushMessageInternal(msg)
@@ -807,10 +808,10 @@ func (p *Pbft) PushMessage(msg *MessageReq) {
 
 // verifyCommitMessage validates commit message and if it is valid one, it gets injected to the validateStateQueue.
 // Otherwise it gets discarded.
-func (p *Pbft) verifyCommitMessage(msg *MessageReq, validators ValidatorSet, hash []byte) {
-	if err := validators.Verify(msg.From, msg.Seal, hash); err != nil {
+func (p *Pbft) verifyCommitMessage(msg *MessageReq, validators ValidatorSet, proposalHash []byte) {
+	if err := validators.Verify(msg.From, msg.Seal, proposalHash); err != nil {
 		p.logger.Printf("[ERROR] Commit message is invalid (%v). Proposal hash: %v. Error: %v",
-			msg, hex.EncodeToString(p.state.proposal.Hash), err)
+			msg, proposalHash, err)
 		return
 	}
 	p.PushMessageInternal(msg)
@@ -818,7 +819,7 @@ func (p *Pbft) verifyCommitMessage(msg *MessageReq, validators ValidatorSet, has
 
 // ReadMessageWithDiscards reads next message with discards from message queue based on current state, sequence and round
 func (p *Pbft) ReadMessageWithDiscards() (*MessageReq, []*MessageReq) {
-	return p.msgQueue.readMessageWithDiscards(p.getState(), p.state.view)
+	return p.msgQueue.readMessageWithDiscards(p.getState(), p.state.getView())
 }
 
 // MaxFaultyVotingPower is a wrapper function around state.MaxFaultyVotingPower

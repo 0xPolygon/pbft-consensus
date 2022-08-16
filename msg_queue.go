@@ -41,7 +41,7 @@ func (m *msgQueue) pushPendingCommitMessage(message *MessageReq) {
 }
 
 // processPendingCommitMessages processes accumulated pending commit messages for the given sequence and round.
-func (m *msgQueue) processPendingCommitMessages(view *View, validators ValidatorSet, hash []byte, handler func(*MessageReq, ValidatorSet, []byte)) {
+func (m *msgQueue) processPendingCommitMessages(view *View, validators ValidatorSet, proposalHash []byte, handler func(*MessageReq, ValidatorSet, []byte)) {
 	for {
 		m.queueLock.Lock()
 		msg, _ := m.pendingCommitMsgsQueue.readMessageWithDiscardsLocked(view, ValidateState)
@@ -49,7 +49,7 @@ func (m *msgQueue) processPendingCommitMessages(view *View, validators Validator
 		if msg == nil {
 			return
 		}
-		go handler(msg, validators, hash)
+		go handler(msg, validators, proposalHash)
 	}
 }
 
