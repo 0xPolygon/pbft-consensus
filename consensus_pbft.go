@@ -291,8 +291,6 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 				p.setState(RoundChangeState)
 				return
 			}
-			// TODO: Maybe can be removed from here
-			p.msgQueue.processPendingCommitMessages(p.state.view.Copy(), p.verifyCommitMessage)
 
 			// calculate how much time do we have to wait to gossip the proposal
 			delay := time.Until(p.state.proposal.Time)
@@ -362,8 +360,6 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 			p.sendPrepareMsg()
 			p.setState(ValidateState)
 		}
-		// TODO: Maybe can be removed from here
-		p.msgQueue.processPendingCommitMessages(p.state.view.Copy(), p.verifyCommitMessage)
 	}
 }
 
@@ -377,6 +373,9 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 		p.setStateSpanAttributes(span)
 		span.End()
 	}()
+
+	// validate commit messages
+	p.msgQueue.processPendingCommitMessages(p.state.view, p.state.validators, p.state.proposal.Hash, p.verifyCommitMessage)
 
 	hasCommitted := false
 	sendCommit := func(span trace.Span) {
@@ -800,7 +799,7 @@ func (p *Pbft) PushMessage(msg *MessageReq) {
 		if p.state.view == nil {
 			return
 		}
-		p.msgQueue.processPendingCommitMessages(p.state.view.Copy(), p.verifyCommitMessage)
+		p.msgQueue.processPendingCommitMessages(p.state.view, p.state.validators, p.state.proposal.Hash, p.verifyCommitMessage)
 		return
 	}
 
@@ -809,11 +808,8 @@ func (p *Pbft) PushMessage(msg *MessageReq) {
 
 // verifyCommitMessage validates commit message and if it is valid one, it gets injected to the validateStateQueue.
 // Otherwise it gets discarded.
-func (p *Pbft) verifyCommitMessage(msg *MessageReq) {
-	if p.state.validators == nil || p.state.proposal == nil {
-		return
-	}
-	if err := p.state.validators.Verify(msg.From, msg.Seal, p.state.proposal.Hash); err != nil {
+func (p *Pbft) verifyCommitMessage(msg *MessageReq, validators ValidatorSet, hash []byte) {
+	if err := validators.Verify(msg.From, msg.Seal, hash); err != nil {
 		p.logger.Printf("[ERROR] Commit message is invalid (%v). Proposal hash: %v. Error: %v",
 			msg, hex.EncodeToString(p.state.proposal.Hash), err)
 		return

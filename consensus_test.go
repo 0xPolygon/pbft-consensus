@@ -900,7 +900,7 @@ func (m *mockPbft) setProposal(p *Proposal) {
 		p.Hash = h.Sum(nil)
 	}
 	m.proposal = p
-	m.msgQueue.processPendingCommitMessages(m.state.view.Copy(), m.verifyCommitMessage)
+	m.msgQueue.processPendingCommitMessages(m.state.view, m.state.validators, m.state.proposal.Hash, m.verifyCommitMessage)
 }
 
 type expectResult struct {
