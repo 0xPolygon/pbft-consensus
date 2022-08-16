@@ -411,6 +411,10 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 		case MessageReq_Prepare:
 			p.state.addPrepareMsg(msg)
 		case MessageReq_Commit:
+			if err := p.backend.ValidateCommit(msg.From, msg.Seal); err != nil {
+				p.logger.Printf("[ERROR]: failed to validate commit: %v", err)
+				continue
+			}
 			p.state.addCommitMsg(msg)
 		default:
 			panic(fmt.Errorf("BUG: Unexpected message type: %s in %s from node %s", msg.Type, p.getState(), msg.From))
@@ -783,15 +787,6 @@ func (p *Pbft) PushMessageInternal(msg *MessageReq) {
 
 // PushMessage pushes a new message to the message queue
 func (p *Pbft) PushMessage(msg *MessageReq) {
-	// wanted to do Commit Validation in parallel
-	// for that reason, validating logic was moved from runValidateState
-	if msg.Type == MessageReq_Commit {
-		if err := p.backend.ValidateCommit(msg.From, msg.Seal); err != nil {
-			p.logger.Printf("[ERROR]: failed to validate commit: %v", err)
-			return
-		}
-	}
-
 	if err := msg.Validate(); err != nil {
 		p.logger.Printf("[ERROR]: failed to validate msg: %v", err)
 		return
