@@ -3,6 +3,7 @@ package pbft
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -811,7 +812,7 @@ func (p *Pbft) PushMessage(msg *MessageReq) {
 func (p *Pbft) verifyCommitMessage(msg *MessageReq, validators ValidatorSet, proposalHash []byte) {
 	if err := validators.Verify(msg.From, msg.Seal, proposalHash); err != nil {
 		p.logger.Printf("[ERROR] Commit message is invalid (%v). Proposal hash: %v. Error: %v",
-			msg, proposalHash, err)
+			msg, hex.EncodeToString(proposalHash), err)
 		return
 	}
 	p.PushMessageInternal(msg)
