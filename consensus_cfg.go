@@ -58,6 +58,12 @@ func WithVotingPower(vp map[NodeID]uint64) ConfigOption {
 	}
 }
 
+func WithLivenessFixes(isEnabled bool) ConfigOption {
+	return func(c *Config) {
+		c.IsLivenessFixEnabled = isEnabled
+	}
+}
+
 type Config struct {
 	// ProposalTimeout is the time to wait for the proposal
 	// from the validator. It defaults to Timeout
@@ -82,6 +88,8 @@ type Config struct {
 	StatsCallback StatsCallback
 
 	VotingPower map[NodeID]uint64
+
+	IsLivenessFixEnabled bool
 }
 
 func DefaultConfig() *Config {

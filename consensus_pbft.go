@@ -308,9 +308,11 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 		// send the prepare message since we are ready to move the state
 		p.sendPrepareMsg()
 
-		if p.state.IsLocked() {
-			// proposer node is already locked to the same proposal => fast-track and send commit message straight away
-			p.sendCommitMsg()
+		if p.config.IsLivenessFixEnabled {
+			if p.state.IsLocked() {
+				// proposer node is already locked to the same proposal => fast-track and send commit message straight away
+				p.sendCommitMsg()
+			}
 		}
 
 		// move to validation state for new prepare messages
@@ -353,8 +355,10 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 		if p.state.IsLocked() {
 			// the state is locked, we need to receive the same proposal
 			if p.state.proposal.Equal(proposal) {
-				// fast-track (send prepare and commit message) and wait for validations
-				p.sendPrepareMsg()
+				if p.config.IsLivenessFixEnabled {
+					// fast-track (send prepare and commit message) and wait for validations
+					p.sendPrepareMsg()
+				}
 				p.sendCommitMsg()
 				p.setState(ValidateState)
 			} else {
@@ -386,6 +390,10 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 //
 // Returns true if there are at least 2*F commit messages in the queue (meaning that node should relock to the given proposal), otherwise false.
 func (p *Pbft) shouldRelock(preprepareMsg *MessageReq) bool {
+	if !p.config.IsLivenessFixEnabled {
+		return false
+	}
+
 	// shouldRelock is invoked when transferred from RoundChangeState to AcceptState.
 	// Since it contains specific logic for commit messages counting, this checkup is introduced.
 	if !p.IsState(AcceptState) {
@@ -436,8 +444,12 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 	sendCommit := func(span trace.Span) {
 		// at this point either we have enough prepare messages
 		// or commit messages so we can lock the proposal
-		if !p.state.IsLocked() {
-			// invoke lock only at initial round when locking occurred
+		if p.config.IsLivenessFixEnabled {
+			if !p.state.IsLocked() {
+				// invoke lock only at initial round when locking occurred
+				p.state.lock(p.state.view.Round)
+			}
+		} else {
 			p.state.lock(p.state.view.Round)
 		}
 

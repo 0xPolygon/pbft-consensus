@@ -35,6 +35,7 @@ type ClusterConfig struct {
 	TransportHandler      transport.Handler
 	RoundTimeout          pbft.RoundTimeout
 	CreateBackend         CreateBackend
+	LivenessFixEnabled    bool
 }
 
 type Cluster struct {
