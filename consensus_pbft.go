@@ -305,11 +305,10 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 
 		// send the preprepare message
 		p.sendPreprepareMsg()
+		// send the prepare message since we are ready to move the state
+		p.sendPrepareMsg()
 
-		if !p.state.IsLocked() {
-			// send the prepare message since we are ready to move the state
-			p.sendPrepareMsg()
-		} else {
+		if p.state.IsLocked() {
 			// proposer node is already locked to the same proposal => fast-track and send commit message straight away
 			p.sendCommitMsg()
 		}
@@ -354,7 +353,8 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 		if p.state.IsLocked() {
 			// the state is locked, we need to receive the same proposal
 			if p.state.proposal.Equal(proposal) {
-				// fast-track (send a commit message) and wait for validations
+				// fast-track (send prepare and commit message) and wait for validations
+				p.sendPrepareMsg()
 				p.sendCommitMsg()
 				p.setState(ValidateState)
 			} else {
@@ -365,6 +365,7 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 					p.logger.Printf("[%s] Relocking to a propsal: %v", p.validator.NodeID(), proposal.Data)
 					p.state.proposal = proposal
 					p.state.lock(msg.View.Round)
+					p.sendPrepareMsg()
 					p.sendCommitMsg()
 					p.setState(ValidateState)
 				} else {
