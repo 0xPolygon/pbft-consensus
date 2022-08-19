@@ -831,6 +831,7 @@ func (p *Pbft) IsVotingPowerEnabled() bool {
 
 func ConsensusStateHandler(consensus *Pbft) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
 		res := map[string]interface{}{
 			"state":         consensus.state.state,
 			"proposal":      consensus.state.proposal,
@@ -842,6 +843,7 @@ func ConsensusStateHandler(consensus *Pbft) http.HandlerFunc {
 		err := json.NewEncoder(writer).Encode(res)
 		if err != nil {
 			consensus.logger.Print("dump handler err", err)
+			writer.WriteHeader(400)
 		}
 	}
 }
