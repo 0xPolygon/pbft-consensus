@@ -37,8 +37,9 @@ type state struct {
 	// quorumSize represents minimum accumulated voting power needed to proceed to next PBFT state
 	quorumSize uint64
 
-	// Locked signals whether the proposal is locked
-	locked uint64
+	// Locked round signals whether the proposal is locked and in which round.
+	// If it is nil, it means that proposal isn't locked.
+	lockedRound *uint64
 
 	// timeout tracks the time left for this round
 	timeoutChan <-chan time.Time
@@ -85,7 +86,7 @@ func (s *state) getMaxFaultyVotingPower() uint64 {
 }
 
 func (s *state) IsLocked() bool {
-	return atomic.LoadUint64(&s.locked) == 1
+	return s.lockedRound != nil
 }
 
 func (s *state) GetSequence() uint64 {
@@ -151,14 +152,13 @@ func (s *state) CalcProposer() {
 	s.proposer = s.validators.CalcProposer(s.view.Round)
 }
 
-func (s *state) lock() {
-	atomic.StoreUint64(&s.locked, 1)
+func (s *state) lock(round uint64) {
+	s.lockedRound = &round
 }
 
 func (s *state) unlock() {
 	s.proposal = nil
-
-	atomic.StoreUint64(&s.locked, 0)
+	s.lockedRound = nil
 }
 
 // cleanRound deletes the specific round messages

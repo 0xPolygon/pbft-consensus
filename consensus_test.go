@@ -72,7 +72,7 @@ func TestTransition_AcceptState_Proposer_Locked(t *testing.T) {
 	i := newMockPbft(t, []NodeID{"A", "B", "C", "D"}, nil, "A")
 	i.setState(AcceptState)
 
-	i.state.lock()
+	i.state.lock(0)
 	i.state.proposal = &Proposal{
 		Data: mockProposal,
 		Hash: digest,
@@ -194,7 +194,7 @@ func TestTransition_AcceptState_Validator_ProposerInvalid(t *testing.T) {
 func TestTransition_AcceptState_Validator_LockWrong(t *testing.T) {
 	// We are a validator and have a locked state in 'proposal1'.
 	// We receive an invalid proposal 'proposal2' with different data.
-	i := newMockPbft(t, []NodeID{"A", "B", "C"}, nil, "B")
+	i := newMockPbft(t, []NodeID{"A", "B", "C", "D", "E", "F"}, nil, "B")
 	i.state.view = ViewMsg(1, 0)
 	i.setState(AcceptState)
 
@@ -203,7 +203,8 @@ func TestTransition_AcceptState_Validator_LockWrong(t *testing.T) {
 		Data: mockProposal,
 		Hash: digest,
 	}
-	i.state.lock()
+
+	i.state.lock(0)
 
 	// emit the wrong locked proposal
 	msg := createMessage(NodeID("A"), MessageReq_Preprepare, ViewMsg(1, 0))
@@ -231,7 +232,7 @@ func TestTransition_AcceptState_Validator_LockCorrect(t *testing.T) {
 		Data: mockProposal,
 		Hash: digest,
 	}
-	i.state.lock()
+	i.state.lock(0)
 	i.emitMsg(createMessage(NodeID("A"), MessageReq_Preprepare, ViewMsg(1, 0)))
 
 	i.runCycle(context.Background())
@@ -949,7 +950,7 @@ func (m *mockPbft) expect(res expectResult) {
 		m.t.Fatalf("incorrect commit messages acccumulated voting power actual: %d, expected:%d", accumulatedVotingPower, res.commitMsgsVotingPower)
 	}
 	if m.state.IsLocked() != res.locked {
-		m.t.Fatalf("incorrect locked actual: %v, expected: %v", m.state.locked, res.locked)
+		m.t.Fatalf("incorrect locked actual: %v, expected: %v", m.state.IsLocked(), res.locked)
 	}
 	if size := len(m.respMsg); uint64(size) != res.outgoing {
 		m.t.Fatalf("incorrect outgoing messages actual: %v, expected: %v", size, res.outgoing)
