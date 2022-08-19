@@ -249,7 +249,6 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 	defer span.End()
 
 	p.stats.SetView(p.state.view.Sequence, p.state.view.Round)
-	p.logger.Printf("[INFO] accept state: sequence %d, round %d", p.state.view.Sequence, p.state.view.Round)
 
 	if !p.state.validators.Includes(p.validator.NodeID()) {
 		// we are not a validator anymore, move back to sync state
@@ -277,6 +276,11 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 		attribute.String("proposer", string(p.state.proposer)),
 	)
 
+	p.logger.Printf("[INFO] accept state: sequence=%d, round=%d, isproposer=%t, locked=%t, proposer=%s", p.state.view.Sequence, p.state.view.Round, isProposer, p.state.IsLocked(), string(p.state.proposer))
+	if p.state.IsLocked() {
+		p.logger.Printf("[DEBUG] locked proposal: hash=0x%x", p.state.proposal.Hash)
+	}
+
 	var err error
 
 	if isProposer {
@@ -293,6 +297,9 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 
 			// calculate how much time do we have to wait to gossip the proposal
 			delay := time.Until(p.state.proposal.Time)
+
+			p.logger.Printf("[INFO] proposal generated: hash=0x%x, delay=%s", p.state.proposal.Hash, delay)
+
 			select {
 			case <-time.After(delay):
 			case <-ctx.Done():
@@ -310,8 +317,6 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 		p.setState(ValidateState)
 		return
 	}
-
-	p.logger.Printf("[INFO] proposer calculated: proposer=%s, sequence=%d, round=%d", p.state.proposer, p.state.view.Sequence, p.state.view.Round)
 
 	// we are NOT a proposer for this height/round. Then, we have to wait
 	// for a pre-prepare message from the proposer
@@ -690,6 +695,8 @@ func (p *Pbft) gossip(msgType MsgType) {
 		msg2.From = p.validator.NodeID()
 		p.PushMessage(msg2)
 	}
+
+	p.logger.Printf("[TRACE] gossip message: type=%s, sequence=%d, round=%d", msg.Type.String(), msg.View.Sequence, msg.View.Round)
 	if err := p.transport.Gossip(msg); err != nil {
 		p.logger.Printf("[ERROR] failed to gossip. Error message: %v", err)
 	}
@@ -792,6 +799,7 @@ func (p *Pbft) PushMessage(msg *MessageReq) {
 		return
 	}
 
+	p.logger.Printf("[TRACE] receive message: type=%s, sequence=%d, round=%d", msg.Type.String(), msg.View.Sequence, msg.View.Round)
 	p.PushMessageInternal(msg)
 }
 
