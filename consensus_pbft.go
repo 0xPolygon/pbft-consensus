@@ -3,7 +3,9 @@ package pbft
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"sync/atomic"
 	"time"
 
@@ -825,4 +827,13 @@ func (p *Pbft) ReadMessageWithDiscards() (*MessageReq, []*MessageReq) {
 
 func (p *Pbft) IsVotingPowerEnabled() bool {
 	return p.config.VotingPower != nil
+}
+
+func ConsensusStateHandler(consensus *Pbft) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		err := json.NewEncoder(writer).Encode(consensus.state)
+		if err != nil {
+			consensus.logger.Print("dump handler err", err)
+		}
+	}
 }
