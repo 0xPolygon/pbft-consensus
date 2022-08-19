@@ -41,6 +41,7 @@ func newPBFTNode(name string, clusterConfig *ClusterConfig, nodes []string, trac
 		pbft.WithLogger(log.New(loggerOutput, "", log.LstdFlags)),
 		pbft.WithNotifier(clusterConfig.ReplayMessageNotifier),
 		pbft.WithRoundTimeout(clusterConfig.RoundTimeout),
+		pbft.WithLivenessFixes(clusterConfig.LivenessFixEnabled),
 	)
 
 	if clusterConfig.TransportHandler != nil {

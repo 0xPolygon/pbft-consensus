@@ -77,9 +77,10 @@ func TestE2E_Partition_LivenessIssue_Case1_FiveNodes_OneFaulty(t *testing.T) {
 	transport.WithFlowMap(flowMap).WithGossipHandler(livenessGossipHandler)
 
 	config := &ClusterConfig{
-		Count:  5,
-		Name:   "liveness_issue",
-		Prefix: "A",
+		Count:              5,
+		Name:               "liveness_issue",
+		Prefix:             "A",
+		LivenessFixEnabled: true,
 	}
 
 	c := NewPBFTCluster(t, config, transport)
@@ -179,9 +180,10 @@ func TestE2E_Partition_LivenessIssue_Case2_SixNodes_OneFaulty(t *testing.T) {
 	transport.WithFlowMap(flowMap).WithGossipHandler(livenessGossipHandler)
 
 	config := &ClusterConfig{
-		Count:  6,
-		Name:   "liveness_issue",
-		Prefix: "A",
+		Count:              6,
+		Name:               "liveness_issue",
+		Prefix:             "A",
+		LivenessFixEnabled: true,
 	}
 
 	c := NewPBFTCluster(t, config, transport)
@@ -224,10 +226,11 @@ func TestE2E_Network_Stuck_Locked_Node_Dropped(t *testing.T) {
 	transport := transport.NewGenericGossip()
 
 	config := &ClusterConfig{
-		Count:        4,
-		Name:         "liveness_issue",
-		Prefix:       "A",
-		RoundTimeout: helper.GetPredefinedTimeout(2 * time.Second),
+		Count:              4,
+		Name:               "liveness_issue",
+		Prefix:             "A",
+		RoundTimeout:       helper.GetPredefinedTimeout(2 * time.Second),
+		LivenessFixEnabled: true,
 	}
 
 	c := NewPBFTCluster(t, config, transport)
@@ -262,8 +265,7 @@ func TestE2E_Network_Stuck_Locked_Node_Dropped(t *testing.T) {
 			t.Logf("Node %v, running: %v, isProposalLocked: %v, no proposal set\n", n.name, n.IsRunning(), n.pbft.IsLocked())
 		}
 	}
-	// TODO: Temporary assertion until liveness issue is fixed
-	assert.Error(t, err)
+	assert.NoError(t, err)
 }
 
 func TestE2E_Partition_OneMajority(t *testing.T) {
