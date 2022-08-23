@@ -340,6 +340,11 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 			Data: msg.Proposal,
 			Hash: msg.Hash,
 		}
+		if p.state.IsLocked() && !p.state.proposal.Equal(proposal) {
+			p.handleStateErr(errIncorrectLockedProposal)
+			return
+		}
+
 		if err := p.backend.Validate(proposal); err != nil {
 			p.logger.Printf("[ERROR] failed to validate proposal. Error message: %v", err)
 			p.setState(RoundChangeState)
@@ -347,14 +352,9 @@ func (p *Pbft) runAcceptState(ctx context.Context) { // start new round
 		}
 
 		if p.state.IsLocked() {
-			// the state is locked, we need to receive the same proposal
-			if p.state.proposal.Equal(proposal) {
-				// fast-track and send a commit message and wait for validations
-				p.sendCommitMsg()
-				p.setState(ValidateState)
-			} else {
-				p.handleStateErr(errIncorrectLockedProposal)
-			}
+			// fast-track and send a commit message and wait for validations
+			p.sendCommitMsg()
+			p.setState(ValidateState)
 		} else {
 			p.state.proposal = proposal
 			p.sendPrepareMsg()
