@@ -95,9 +95,6 @@ type Pbft struct {
 	// msgQueue is a queue that stores all the incomming gossip messages
 	msgQueue *msgQueue
 
-	// updateCh is a channel used to notify when a new gossip message arrives
-	updateCh chan struct{}
-
 	// Transport is the interface for the gossip transport
 	transport Transport
 
@@ -123,7 +120,6 @@ func New(validator SignKey, transport Transport, opts ...ConfigOption) *Pbft {
 		state:        newState(),
 		transport:    transport,
 		msgQueue:     newMsgQueue(),
-		updateCh:     make(chan struct{}, 1), //hack. There is a bug when you have several messages pushed on the same time.
 		config:       config,
 		logger:       config.Logger,
 		tracer:       config.Tracer,
@@ -145,6 +141,10 @@ func (p *Pbft) SetBackend(backend Backend) error {
 	// set the current set of validators
 	p.state.validators = p.backend.ValidatorSet()
 
+	// run commit validation routine
+	// (it is run here, because e2e tests are using the same instance of pbft when restarting a nodes)
+	p.msgQueue.initCommitValidationRoutine(p.logger)
+
 	return nil
 }
 
@@ -160,6 +160,7 @@ func (p *Pbft) Run(ctx context.Context) {
 	for p.getState() != DoneState && p.getState() != SyncState {
 		select {
 		case <-ctx.Done():
+			p.msgQueue.commitValidation.close()
 			return
 		default:
 		}
@@ -375,6 +376,11 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 		span.End()
 	}()
 
+	p.msgQueue.updateStateInfo(&stateInfo{
+		proposalHash: p.state.proposal.Hash,
+		validators:   p.state.validators,
+		view:         p.state.view,
+	})
 	hasCommitted := false
 	sendCommit := func(span trace.Span) {
 		// at this point either we have enough prepare messages
@@ -413,10 +419,6 @@ func (p *Pbft) runValidateState(ctx context.Context) { // start new round
 			p.state.addPrepared(msg)
 
 		case MessageReq_Commit:
-			if err := p.backend.ValidateCommit(msg.From, msg.Seal); err != nil {
-				p.logger.Printf("[ERROR] failed to validate commit message from %s. Error: %v", msg.From, err)
-				continue
-			}
 			p.state.addCommitted(msg)
 		default:
 			panic(fmt.Errorf("BUG: Unexpected message type: %s in %s", msg.Type, p.getState()))
@@ -714,9 +716,7 @@ func (p *Pbft) gossip(msgType MsgType) {
 
 	if msg.Type != MessageReq_Preprepare {
 		// send a copy to ourselves so that we can process this message as well
-		msg2 := msg.Copy()
-		msg2.From = p.validator.NodeID()
-		p.PushMessage(msg2)
+		p.PushMessage(msg.Copy())
 	}
 
 	p.logger.Printf("[TRACE] gossip message: type=%s, sequence=%d, round=%d", msg.Type.String(), msg.View.Sequence, msg.View.Round)
@@ -800,17 +800,16 @@ func (p *Pbft) getNextMessage(span trace.Span) (*MessageReq, bool) {
 			return nil, true
 		case <-p.ctx.Done():
 			return nil, false
-		case <-p.updateCh:
+		case <-p.msgQueue.notifyMessageCh:
 		}
 	}
 }
 
 func (p *Pbft) PushMessageInternal(msg *MessageReq) {
-	p.msgQueue.pushMessage(msg)
-
-	select {
-	case p.updateCh <- struct{}{}:
-	default:
+	if msg.Type == MessageReq_Commit {
+		p.msgQueue.pushCommitMessage(msg)
+	} else {
+		p.msgQueue.pushMessage(msg)
 	}
 }
 
@@ -822,7 +821,11 @@ func (p *Pbft) PushMessage(msg *MessageReq) {
 	}
 
 	p.logger.Printf("[TRACE] receive message: type=%s, sequence=%d, round=%d", msg.Type.String(), msg.View.Sequence, msg.View.Round)
-	p.PushMessageInternal(msg)
+	if msg.Type == MessageReq_Commit {
+		p.msgQueue.pushCommitMessage(msg)
+	} else {
+		p.msgQueue.pushMessage(msg)
+	}
 }
 
 // ReadMessageWithDiscards reads next message with discards from message queue based on current state, sequence and round

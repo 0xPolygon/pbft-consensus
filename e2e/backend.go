@@ -82,10 +82,6 @@ func (bf *BackendFake) ValidatorSet() pbft.ValidatorSet {
 	}
 }
 
-func (bf *BackendFake) ValidateCommit(from pbft.NodeID, seal []byte) error {
-	return nil
-}
-
 // SetBackendData implements IntegrationBackend interface and sets the data needed for backend
 func (bf *BackendFake) SetBackendData(n *node) {
 	bf.nodes = n.nodes

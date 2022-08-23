@@ -523,30 +523,12 @@ func TestTransition_ValidateState_MoveToCommitState(t *testing.T) {
 	m := newMockPbft(t, []string{"A", "B", "C", "D"}, "A")
 	m.setState(ValidateState)
 
-	// Prepare messages
-	m.emitMsg(&MessageReq{
-		From: "A",
-		Type: MessageReq_Prepare,
-		View: ViewMsg(1, 0),
-	})
-	m.emitMsg(&MessageReq{
-		From: "B",
-		Type: MessageReq_Prepare,
-		View: ViewMsg(1, 0),
-	})
-	// repeated message is not included
-	m.emitMsg(&MessageReq{
-		From: "B",
-		Type: MessageReq_Prepare,
-		View: ViewMsg(1, 0),
-	})
-	m.emitMsg(&MessageReq{
-		From: "C",
-		Type: MessageReq_Prepare,
-		View: ViewMsg(1, 0),
-	})
-
 	// Commit messages
+	m.emitMsg(&MessageReq{
+		From: "B",
+		Type: MessageReq_Commit,
+		View: ViewMsg(1, 0),
+	})
 	m.emitMsg(&MessageReq{
 		From: "C",
 		Type: MessageReq_Commit,
@@ -561,12 +543,11 @@ func TestTransition_ValidateState_MoveToCommitState(t *testing.T) {
 	m.runCycle(context.Background())
 
 	m.expect(expectResult{
-		sequence:    1,
-		state:       CommitState,
-		prepareMsgs: 3,
-		commitMsgs:  3, // Commit messages (A proposer sent commit via state machine loop, C and D sent commit via emit message)
-		locked:      true,
-		outgoing:    1, // A commit message
+		sequence:   1,
+		state:      CommitState,
+		commitMsgs: 3, // Commit messages (B, C and D sent commit via emit message)
+		locked:     true,
+		outgoing:   1, // A commit message
 	})
 }
 
@@ -593,7 +574,7 @@ func TestTransition_ValidateState_WrongMessageType(t *testing.T) {
 		Hash:     digest,
 		View:     ViewMsg(1, 0),
 	}
-	heap.Push(&m.msgQueue.validateStateQueue, msg)
+	heap.Push(m.msgQueue.validateStateQueue, msg)
 	assert.PanicsWithError(t, "BUG: Unexpected message type: Preprepare in ValidateState", func() { m.runCycle(context.Background()) })
 }
 
@@ -696,64 +677,65 @@ func TestDoneState_RunCycle_Panics(t *testing.T) {
 // Use case #1: Cancellation is triggered and state machine remains in the AcceptState.
 // Use case #2: Cancellation is not triggered and state machine converges to the DoneState.
 func TestPbft_Run(t *testing.T) {
-	m := newMockPbft(t, []string{"A", "B", "C"}, "A")
-	m.state.view = ViewMsg(1, 0)
-	m.setProposal(&Proposal{
-		Data: mockProposal,
-		Time: time.Now(),
-	})
+	t.Run("With cancellation", func(t *testing.T) {
+		m := newMockPbft(t, []string{"A", "B", "C"}, "A")
+		m.state.view = ViewMsg(1, 0)
+		m.setProposal(&Proposal{
+			Data: mockProposal,
+			Time: time.Now(),
+		})
 
-	// Prepare messages
-	m.emitMsg(&MessageReq{
-		From: "A",
-		Type: MessageReq_Prepare,
-		View: ViewMsg(1, 0),
-	})
-	m.emitMsg(&MessageReq{
-		From: "B",
-		Type: MessageReq_Prepare,
-		View: ViewMsg(1, 0),
-	})
-	m.emitMsg(&MessageReq{
-		From: "C",
-		Type: MessageReq_Prepare,
-		View: ViewMsg(1, 0),
-	})
+		// Prepare messages
+		m.emitMsg(createMessage("A", MessageReq_Prepare))
+		m.emitMsg(createMessage("B", MessageReq_Prepare))
+		m.emitMsg(createMessage("C", MessageReq_Prepare))
 
-	// Jump out from a state machine loop straight away
-	waitSignal := make(chan struct{})
-	go func() {
-		close(waitSignal)
-		for {
-			if m.getState() == AcceptState {
-				m.cancelFn()
-				return
+		// Jump out from a state machine loop straight away
+		waitSignal := make(chan struct{})
+		go func() {
+			close(waitSignal)
+			for {
+				if m.getState() == AcceptState {
+					m.cancelFn()
+					return
+				}
 			}
-		}
-	}()
+		}()
 
-	<-waitSignal
-	// Make sure that if there is a cancellation trigger, state machine remains in the AcceptState.
-	m.Run(m.ctx)
+		<-waitSignal
+		// Make sure that if there is a cancellation trigger, state machine remains in the AcceptState.
+		m.Run(m.ctx)
 
-	m.expect(expectResult{
-		state:       AcceptState,
-		sequence:    1,
-		prepareMsgs: 0,
-		commitMsgs:  0,
-		outgoing:    0,
+		m.expect(expectResult{
+			state:    AcceptState,
+			sequence: 1,
+		})
 	})
 
-	// Make sure that if there is no cancellation trigger, state machine converges to the DoneState.
-	m.Run(context.Background())
+	t.Run("Without cancellation", func(t *testing.T) {
+		m := newMockPbft(t, []string{"A", "B", "C"}, "A")
+		m.state.view = ViewMsg(1, 0)
+		m.setProposal(&Proposal{
+			Data: mockProposal,
+			Time: time.Now(),
+		})
 
-	m.expect(expectResult{
-		state:       DoneState,
-		sequence:    1,
-		prepareMsgs: 1,
-		commitMsgs:  1,
-		outgoing:    3,
-		locked:      true,
+		// Prepare messages
+		m.emitMsg(createMessage("A", MessageReq_Prepare))
+		m.emitMsg(createMessage("B", MessageReq_Prepare))
+		m.emitMsg(createMessage("C", MessageReq_Prepare))
+
+		// Make sure that if there is no cancellation trigger, state machine converges to the DoneState.
+		m.Run(context.Background())
+
+		m.expect(expectResult{
+			state:       DoneState,
+			sequence:    1,
+			prepareMsgs: 1,
+			commitMsgs:  1,
+			outgoing:    3,
+			locked:      true,
+		})
 	})
 }
 
@@ -1019,10 +1001,6 @@ func (m *mockBackend) HookValidateHandler(validate validateDelegate) *mockBacken
 func (m *mockBackend) HookIsStuckHandler(isStuck isStuckDelegate) *mockBackend {
 	m.isStuckFn = isStuck
 	return m
-}
-
-func (m *mockBackend) ValidateCommit(from NodeID, seal []byte) error {
-	return nil
 }
 
 func (m *mockBackend) Hash(p []byte) []byte {

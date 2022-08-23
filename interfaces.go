@@ -5,6 +5,8 @@ type ValidatorSet interface {
 	CalcProposer(round uint64) NodeID
 	Includes(id NodeID) bool
 	Len() int
+	// VerifySeal validates seal against proposal hash
+	VerifySeal(nodeID NodeID, seal, proposalHash []byte) error
 }
 
 // Logger represents logger behavior
@@ -56,7 +58,4 @@ type Backend interface {
 
 	// ValidatorSet returns the validator set for the current round
 	ValidatorSet() ValidatorSet
-
-	// ValidateCommit is used to validate that a given commit is valid
-	ValidateCommit(from NodeID, seal []byte) error
 }

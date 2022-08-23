@@ -64,3 +64,7 @@ func (v *ValStringStub) Includes(id NodeID) bool {
 func (v *ValStringStub) Len() int {
 	return len(*v)
 }
+
+func (v *ValStringStub) VerifySeal(nodeID NodeID, seal, proposalHash []byte) error {
+	return nil
+}
