@@ -230,6 +230,7 @@ func (p *Pbft) setSequence(sequence uint64) {
 		Sequence: sequence,
 	}
 	p.setRound(0)
+	p.state.unlock()
 }
 
 func (p *Pbft) setRound(round uint64) {
@@ -498,10 +499,6 @@ func (p *Pbft) runCommitState(ctx context.Context) {
 
 	committedSeals := p.state.getCommittedSeals()
 	proposal := p.state.proposal.Copy()
-
-	// at this point either if it works or not we need to unlock the state
-	// to allow for other proposals to be produced if it insertion fails
-	p.state.unlock()
 
 	pp := &SealedProposal{
 		Proposal:       proposal,
