@@ -140,7 +140,6 @@ func (s *state) lock() {
 
 func (s *state) unlock() {
 	s.proposal = nil
-
 	atomic.StoreUint64(&s.locked, 0)
 }
 

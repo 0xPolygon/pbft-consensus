@@ -753,6 +753,7 @@ func TestPbft_Run(t *testing.T) {
 		prepareMsgs: 1,
 		commitMsgs:  1,
 		outgoing:    3,
+		locked:      true,
 	})
 }
 
