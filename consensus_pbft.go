@@ -118,7 +118,7 @@ func New(validator SignKey, transport Transport, opts ...ConfigOption) *Pbft {
 		validator:    validator,
 		state:        newState(),
 		transport:    transport,
-		msgQueue:     newMsgQueue(),
+		msgQueue:     newMsgQueue(config.Logger),
 		config:       config,
 		logger:       config.Logger,
 		tracer:       config.Tracer,
@@ -145,10 +145,6 @@ func (p *Pbft) SetBackend(backend Backend) error {
 		return err
 	}
 
-	// run commit validation routine
-	// (it is run here, because e2e tests are using the same instance of pbft when restarting a nodes)
-	p.msgQueue.initCommitValidationRoutine(p.logger)
-
 	return nil
 }
 
@@ -164,7 +160,9 @@ func (p *Pbft) Run(ctx context.Context) {
 	for p.getState() != DoneState && p.getState() != SyncState {
 		select {
 		case <-ctx.Done():
-			p.msgQueue.commitValidation.close()
+			// TODO: Figure out when to call it
+			// (if called here, it is not right because of E2E tests, which reuse same pbft instance for multiple node restarts)
+			// p.msgQueue.commitValidation.close()
 			return
 		default:
 		}
@@ -788,11 +786,7 @@ func (p *Pbft) PushMessage(msg *MessageReq) {
 		return
 	}
 
-	if msg.Type == MessageReq_Commit {
-		p.msgQueue.pushCommitMessage(msg)
-	} else {
-		p.msgQueue.pushMessage(msg)
-	}
+	p.PushMessageInternal(msg)
 }
 
 // ReadMessageWithDiscards reads next message with discards from message queue based on current state, sequence and round

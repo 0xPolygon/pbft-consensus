@@ -1,13 +1,14 @@
 package pbft
 
 import (
+	"log"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func TestMsgQueue_RoundChangeState(t *testing.T) {
-	m := newMsgQueue()
+	m := newMsgQueue(&log.Logger{})
 
 	// insert non round change messages
 	{
@@ -44,7 +45,7 @@ func TestMsgQueue_RoundChangeState(t *testing.T) {
 
 	// insert future messages to the queue => such messages should not be retrieved back
 	{
-		m = newMsgQueue()
+		m = newMsgQueue(&log.Logger{})
 		m.pushMessage(createMessage("A", MessageReq_RoundChange, ViewMsg(3, 1)))
 		assert.Nil(t, m.readMessage(RoundChangeState, ViewMsg(1, 1)))
 

@@ -75,13 +75,14 @@ func (m *msgQueue) getQueue(st State) *msgQueueImpl {
 }
 
 // newMsgQueue creates a new message queue structure
-func newMsgQueue() *msgQueue {
+func newMsgQueue(logger Logger) *msgQueue {
 	m := &msgQueue{
 		roundChangeStateQueue: &msgQueueImpl{},
 		acceptStateQueue:      &msgQueueImpl{},
 		validateStateQueue:    &msgQueueImpl{},
 		notifyMessageCh:       make(chan struct{}, 1), //hack: there is a bug when you have several messages pushed on the same time.
 	}
+	m.initCommitValidationRoutine(logger)
 	return m
 }
 
@@ -189,9 +190,10 @@ func (c *commitValidationRoutine) run() {
 	}
 }
 
-func (c *commitValidationRoutine) close() {
-	close(c.closeCh)
-}
+// TODO: Figure out when to call it
+// func (c *commitValidationRoutine) close() {
+// 	close(c.closeCh)
+// }
 
 // pushPendingCommitMessage adds new commit message to the pending commit messages queue
 func (c *commitValidationRoutine) pushPendingCommitMessage(msg *MessageReq) {
