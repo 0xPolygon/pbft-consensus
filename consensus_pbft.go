@@ -119,7 +119,7 @@ func New(validator SignKey, transport Transport, opts ...ConfigOption) *Pbft {
 		validator:    validator,
 		state:        newState(),
 		transport:    transport,
-		msgQueue:     newMsgQueue(),
+		msgQueue:     newMsgQueue(config.Logger),
 		config:       config,
 		logger:       config.Logger,
 		tracer:       config.Tracer,
@@ -141,10 +141,6 @@ func (p *Pbft) SetBackend(backend Backend) error {
 	// set the current set of validators
 	p.state.validators = p.backend.ValidatorSet()
 
-	// run commit validation routine
-	// (it is run here, because e2e tests are using the same instance of pbft when restarting a nodes)
-	p.msgQueue.initCommitValidationRoutine(p.logger)
-
 	return nil
 }
 
@@ -160,7 +156,9 @@ func (p *Pbft) Run(ctx context.Context) {
 	for p.getState() != DoneState && p.getState() != SyncState {
 		select {
 		case <-ctx.Done():
-			p.msgQueue.commitValidation.close()
+			// TODO: Figure out when to call it
+			// (if called here, it is not right because of E2E tests, which reuse same pbft instance for multiple node restarts)
+			// p.msgQueue.commitValidation.close()
 			return
 		default:
 		}
