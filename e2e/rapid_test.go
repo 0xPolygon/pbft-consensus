@@ -601,6 +601,11 @@ func runCluster(ctx context.Context,
 	for i := range cluster {
 		cluster[i].SetInitialState(context.Background())
 	}
+	defer func() {
+		for i := range cluster {
+			cluster[i].Close()
+		}
+	}()
 
 	stuckList := helper.NewBoolSlice(len(cluster))
 	doneList := helper.NewBoolSlice(len(cluster))
@@ -631,7 +636,6 @@ func runCluster(ctx context.Context,
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
-
 		}
 	}
 }

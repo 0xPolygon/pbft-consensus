@@ -190,10 +190,10 @@ func (c *commitValidationRoutine) run() {
 	}
 }
 
-// TODO: Figure out when to call it
-// func (c *commitValidationRoutine) close() {
-// 	close(c.closeCh)
-// }
+// close function is used to gracefully shutdown commit validation routine
+func (c *commitValidationRoutine) close() {
+	close(c.closeCh)
+}
 
 // pushPendingCommitMessage adds new commit message to the pending commit messages queue
 func (c *commitValidationRoutine) pushPendingCommitMessage(msg *MessageReq) {
