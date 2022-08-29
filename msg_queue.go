@@ -142,7 +142,6 @@ func (c *commitValidationRoutine) run() {
 	validateMsgWorker := func(commitMsgsCh <-chan *MessageReq, stateInfo *stateInfo) {
 		for commitMsg := range commitMsgsCh {
 			if err := stateInfo.validators.VerifySeal(commitMsg.From, commitMsg.Seal, stateInfo.proposalHash); err != nil {
-				// TODO: Report open telemetry tracing for invalid commit messages?
 				c.logger.Printf("[ERROR] Commit message is invalid (%v). Error: %s", commitMsg, err)
 				return
 			}
@@ -251,7 +250,7 @@ func (m *msgQueueImpl) readMessageWithDiscardsLocked(view *View, pbftState State
 		if pbftState == RoundChangeState {
 			// if we are in RoundChangeState we only care about sequence
 			// since we are interested in knowing all the possible rounds
-			if msg.View.Sequence > view.Sequence {
+			if msg.View.getSequence() > view.getSequence() {
 				// future message
 				return nil, discarded
 			}
@@ -331,15 +330,19 @@ func (m *msgQueueImpl) Pop() interface{} {
 //
 // If v.Round < y.Round => -1 ELSE 1
 func cmpView(v, y *View) int {
-	if v.Sequence != y.Sequence {
-		if v.Sequence < y.Sequence {
+	vSequence := v.getSequence()
+	ySequence := y.getSequence()
+	if vSequence != ySequence {
+		if vSequence < ySequence {
 			return -1
 		} else {
 			return 1
 		}
 	}
-	if v.Round != y.Round {
-		if v.Round < y.Round {
+	vRound := v.getRound()
+	yRound := y.getRound()
+	if vRound != yRound {
+		if vRound < yRound {
 			return -1
 		} else {
 			return 1
