@@ -192,6 +192,7 @@ func (c *Cluster) Stop() {
 		if n.IsRunning() {
 			n.Stop()
 		}
+		n.pbft.Close()
 	}
 	if err := c.tracer.Shutdown(context.Background()); err != nil {
 		panic("failed to shutdown TracerProvider")

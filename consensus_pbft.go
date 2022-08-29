@@ -156,9 +156,6 @@ func (p *Pbft) Run(ctx context.Context) {
 	for p.getState() != DoneState && p.getState() != SyncState {
 		select {
 		case <-ctx.Done():
-			// TODO: Figure out when to call it
-			// (if called here, it is not right because of E2E tests, which reuse same pbft instance for multiple node restarts)
-			// p.msgQueue.commitValidation.close()
 			return
 		default:
 		}
@@ -169,6 +166,11 @@ func (p *Pbft) Run(ctx context.Context) {
 		// emit stats when the round is ended
 		p.emitStats()
 	}
+}
+
+// Close function is used to tear down all the resources being used by the consensus algorithm
+func (p *Pbft) Close() {
+	p.msgQueue.commitValidation.close()
 }
 
 func (p *Pbft) SetInitialState(ctx context.Context) {
@@ -819,11 +821,7 @@ func (p *Pbft) PushMessage(msg *MessageReq) {
 	}
 
 	p.logger.Printf("[TRACE] receive message: type=%s, sequence=%d, round=%d", msg.Type.String(), msg.View.Sequence, msg.View.Round)
-	if msg.Type == MessageReq_Commit {
-		p.msgQueue.pushCommitMessage(msg)
-	} else {
-		p.msgQueue.pushMessage(msg)
-	}
+	p.PushMessageInternal(msg)
 }
 
 // ReadMessageWithDiscards reads next message with discards from message queue based on current state, sequence and round

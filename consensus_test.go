@@ -786,6 +786,7 @@ func TestRoundChange_PropertyMajorityOfVotingPowerAggreement(t *testing.T) {
 				return nil
 			},
 		}, WithLogger(log.New(io.Discard, "", log.LstdFlags)))
+		defer node.Close()
 		node.state.validators = &validators
 		node.config.VotingPower = votingPower
 		node.state.view = &View{
