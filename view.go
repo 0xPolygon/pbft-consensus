@@ -1,6 +1,9 @@
 package pbft
 
-import "fmt"
+import (
+	"fmt"
+	"sync/atomic"
+)
 
 type View struct {
 	// round is the current round/height being finalized
@@ -22,6 +25,14 @@ func (v *View) Copy() *View {
 	vv := new(View)
 	*vv = *v
 	return vv
+}
+
+func (v *View) getSequence() uint64 {
+	return atomic.LoadUint64(&v.Sequence)
+}
+
+func (v *View) getRound() uint64 {
+	return atomic.LoadUint64(&v.Round)
 }
 
 func (v *View) String() string {
