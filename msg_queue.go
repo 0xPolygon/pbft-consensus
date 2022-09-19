@@ -90,7 +90,7 @@ func newMsgQueue(logger Logger) *msgQueue {
 // which validates commit messages
 func (m *msgQueue) initCommitValidationRoutine(logger Logger) {
 	m.commitValidation = newCommitValidationRoutine(logger, m.pushMessage)
-	go m.commitValidation.run()
+	go m.commitValidation.run(nil)
 }
 
 type stateInfo struct {
@@ -137,14 +137,19 @@ func newCommitValidationRoutine(logger Logger, validMsgHandler func(msg *Message
 }
 
 // run contains main part of the commit messages validation logic
-func (c *commitValidationRoutine) run() {
+func (c *commitValidationRoutine) run(doneCh chan struct{}) {
+	if doneCh == nil {
+		doneCh = make(chan struct{})
+	}
 	// validateMsgWorker validates single commit message
 	validateMsgWorker := func(commitMsgsCh <-chan *MessageReq, stateInfo *stateInfo) {
 		for commitMsg := range commitMsgsCh {
 			if err := stateInfo.validators.VerifySeal(commitMsg.From, commitMsg.Seal, stateInfo.proposalHash); err != nil {
+				doneCh <- struct{}{}
 				c.logger.Printf("[ERROR] Commit message is invalid (%v). Error: %s", commitMsg, err)
 				return
 			}
+			doneCh <- struct{}{}
 			c.validMsgHandler(commitMsg)
 		}
 	}
@@ -155,7 +160,7 @@ func (c *commitValidationRoutine) run() {
 		// wait for:
 		// 1. new messages on the queue
 		// 2. update of the round
-		// 3. close message
+		// 3. close trigger
 		select {
 		case <-c.notifyPendingCommitCh:
 			if stateInfo == nil {

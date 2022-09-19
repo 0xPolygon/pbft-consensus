@@ -2,9 +2,11 @@ package pbft
 
 import (
 	"log"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMsgQueue_RoundChangeState(t *testing.T) {
@@ -131,4 +133,37 @@ func TestCmpView(t *testing.T) {
 	for _, c := range cases {
 		assert.Equal(t, cmpView(c.x, c.y), c.expectedResult)
 	}
+}
+
+func TestCommitValidationRoutine_AllMessagesValid(t *testing.T) {
+	validatorIds := []NodeID{"A", "B", "C", "D", "E", "F", "G"}
+	actualValidMsgs := 0
+	lock := sync.Mutex{}
+	validMsgFn := func(msg *MessageReq) {
+		lock.Lock()
+		actualValidMsgs++
+		lock.Unlock()
+	}
+	commitRoutine := newCommitValidationRoutine(&log.Logger{}, validMsgFn)
+	currentView := ViewMsg(1, 0)
+	for _, validatorId := range validatorIds {
+		commitRoutine.pushPendingCommitMessage(createMessage(validatorId, MessageReq_Commit, currentView))
+	}
+	require.Equal(t, commitRoutine.pendingCommitMsgs.Len(), len(validatorIds))
+
+	doneCh := make(chan struct{}, len(validatorIds))
+	go commitRoutine.run(doneCh)
+	defer commitRoutine.close()
+
+	commitRoutine.updateStateInfoCh <- &stateInfo{
+		proposalHash: mockProposal,
+		view:         currentView,
+		validators:   NewValStringStub(validatorIds, CreateEqualVotingPowerMap(validatorIds)),
+	}
+
+	for i := 0; i < len(validatorIds); i++ {
+		<-doneCh
+	}
+	require.Equal(t, len(validatorIds), actualValidMsgs)
+	require.Empty(t, commitRoutine.pendingCommitMsgs)
 }
