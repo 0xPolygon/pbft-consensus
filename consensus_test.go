@@ -562,7 +562,7 @@ func TestTransition_ValidateState_WrongMessageType(t *testing.T) {
 
 	// Create preprepare message and push it to validate state message queue
 	msg := createMessage(NodeID("A"), MessageReq_Preprepare, ViewMsg(1, 0))
-	heap.Push(m.msgQueue.validateStateQueue, msg)
+	heap.Push(&m.msgQueue.validateStateQueue, msg)
 	assert.PanicsWithError(t, "BUG: Unexpected message type: Preprepare in ValidateState from node A", func() { m.runCycle(context.Background()) })
 }
 

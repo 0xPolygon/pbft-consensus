@@ -2,7 +2,7 @@ package pbft
 
 import (
 	"log"
-	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -137,12 +137,9 @@ func TestCmpView(t *testing.T) {
 
 func TestCommitValidationRoutine_AllMessagesValid(t *testing.T) {
 	validatorIds := []NodeID{"A", "B", "C", "D", "E", "F", "G"}
-	actualValidMsgs := 0
-	lock := sync.Mutex{}
+	actualValidMsgs := uint64(0)
 	validMsgFn := func(msg *MessageReq) {
-		lock.Lock()
-		actualValidMsgs++
-		lock.Unlock()
+		atomic.AddUint64(&actualValidMsgs, 1)
 	}
 	commitRoutine := newCommitValidationRoutine(&log.Logger{}, validMsgFn)
 	currentView := ViewMsg(1, 0)
@@ -151,6 +148,7 @@ func TestCommitValidationRoutine_AllMessagesValid(t *testing.T) {
 	}
 	require.Equal(t, commitRoutine.pendingCommitMsgs.Len(), len(validatorIds))
 
+	// TODO:
 	doneCh := make(chan struct{}, len(validatorIds))
 	go commitRoutine.run(doneCh)
 	defer commitRoutine.close()
@@ -164,6 +162,6 @@ func TestCommitValidationRoutine_AllMessagesValid(t *testing.T) {
 	for i := 0; i < len(validatorIds); i++ {
 		<-doneCh
 	}
-	require.Equal(t, len(validatorIds), actualValidMsgs)
+	require.Equal(t, uint64(len(validatorIds)), atomic.LoadUint64(&actualValidMsgs))
 	require.Empty(t, commitRoutine.pendingCommitMsgs)
 }

@@ -2,20 +2,19 @@ package pbft
 
 import (
 	"container/heap"
-	"math"
 	"sync"
 )
 
 // msgQueue defines the structure that holds message queues for different PBFT states
 type msgQueue struct {
 	// roundChangeStateQueue is a heap implementation for the round change message queue
-	roundChangeStateQueue *msgQueueImpl
+	roundChangeStateQueue msgQueueImpl
 
 	// acceptStateQueue is a heap implementation for the accept state message queue
-	acceptStateQueue *msgQueueImpl
+	acceptStateQueue msgQueueImpl
 
 	// validateStateQueue is a heap implementation for the validate state message queue
-	validateStateQueue *msgQueueImpl
+	validateStateQueue msgQueueImpl
 
 	// notifyMessageCh is a channel used to notify when a new message is pushed to the message queue
 	notifyMessageCh chan struct{}
@@ -64,22 +63,22 @@ func (m *msgQueue) readMessageWithDiscards(st State, current *View) (*MessageReq
 func (m *msgQueue) getQueue(st State) *msgQueueImpl {
 	if st == RoundChangeState {
 		// round change
-		return m.roundChangeStateQueue
+		return &m.roundChangeStateQueue
 	} else if st == AcceptState {
 		// preprepare
-		return m.acceptStateQueue
+		return &m.acceptStateQueue
 	} else {
 		// prepare and commit
-		return m.validateStateQueue
+		return &m.validateStateQueue
 	}
 }
 
 // newMsgQueue creates a new message queue structure
 func newMsgQueue(logger Logger) *msgQueue {
 	m := &msgQueue{
-		roundChangeStateQueue: &msgQueueImpl{},
-		acceptStateQueue:      &msgQueueImpl{},
-		validateStateQueue:    &msgQueueImpl{},
+		roundChangeStateQueue: msgQueueImpl{},
+		acceptStateQueue:      msgQueueImpl{},
+		validateStateQueue:    msgQueueImpl{},
 		notifyMessageCh:       make(chan struct{}, 1), //hack: there is a bug when you have several messages pushed on the same time.
 	}
 	m.initCommitValidationRoutine(logger)
@@ -145,8 +144,8 @@ func (c *commitValidationRoutine) run(doneCh chan struct{}) {
 	validateMsgWorker := func(commitMsgsCh <-chan *MessageReq, stateInfo *stateInfo) {
 		for commitMsg := range commitMsgsCh {
 			if err := stateInfo.validators.VerifySeal(commitMsg.From, commitMsg.Seal, stateInfo.proposalHash); err != nil {
-				doneCh <- struct{}{}
 				c.logger.Printf("[ERROR] Commit message is invalid (%v). Error: %s", commitMsg, err)
+				doneCh <- struct{}{}
 				return
 			}
 			doneCh <- struct{}{}
@@ -155,8 +154,12 @@ func (c *commitValidationRoutine) run(doneCh chan struct{}) {
 	}
 
 	var stateInfo *stateInfo
+	var commitMsgsCh chan *MessageReq
+	for i := 0; i < maxWorkersCount; i++ {
+		go validateMsgWorker(commitMsgsCh, stateInfo)
+	}
+
 	for {
-		commitMsgsCh := make(chan *MessageReq, pendingCommitsBufferSize)
 		// wait for:
 		// 1. new messages on the queue
 		// 2. update of the round
@@ -168,17 +171,12 @@ func (c *commitValidationRoutine) run(doneCh chan struct{}) {
 			}
 		case info := <-c.updateStateInfoCh:
 			stateInfo = info
-			close(commitMsgsCh)
+			if commitMsgsCh != nil {
+				close(commitMsgsCh)
+			}
 			commitMsgsCh = make(chan *MessageReq, pendingCommitsBufferSize)
 		case <-c.closeCh:
 			return
-		}
-
-		c.lock.RLock()
-		workersNum := int(math.Min(float64(maxWorkersCount), float64(c.pendingCommitMsgs.Len())))
-		c.lock.RUnlock()
-		for i := 0; i < workersNum; i++ {
-			go validateMsgWorker(commitMsgsCh, stateInfo)
 		}
 
 		for {
