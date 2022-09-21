@@ -2,8 +2,7 @@ nodes=5
 duration=25m
 
 test:
-	go test -v --race -shuffle=on -coverprofile=coverage.out -covermode=atomic ./...
-
+	go test -v -race -shuffle=on -coverprofile=coverage.out -covermode=atomic ./...
 
 property-tests:
 	cd ./e2e && go test -v -run TestProperty -rapid.steps 10000

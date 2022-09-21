@@ -16,6 +16,9 @@ type msgQueue struct {
 	// validateStateQueue is a heap implementation for the validate state message queue
 	validateStateQueue msgQueueImpl
 
+	// logger instance
+	logger Logger
+
 	// notifyMessageCh is a channel used to notify when a new message is pushed to the message queue
 	notifyMessageCh chan struct{}
 
@@ -79,23 +82,26 @@ func newMsgQueue(logger Logger) *msgQueue {
 		roundChangeStateQueue: msgQueueImpl{},
 		acceptStateQueue:      msgQueueImpl{},
 		validateStateQueue:    msgQueueImpl{},
+		logger:                logger,
 		notifyMessageCh:       make(chan struct{}, 1), //hack: there is a bug when you have several messages pushed on the same time.
 	}
-	m.initCommitValidationRoutine(logger)
+	m.initCommitValidationRoutine()
 	return m
 }
 
-// initCommitValidationRoutine initializes and starts commit validation routine
-// which validates commit messages
-func (m *msgQueue) initCommitValidationRoutine(logger Logger) {
-	m.commitValidation = newCommitValidationRoutine(logger, m.pushMessage)
-	go m.commitValidation.run(nil)
+// initCommitValidationRoutine initializes and starts commit validation routine which validates commit messages
+func (m *msgQueue) initCommitValidationRoutine() {
+	m.commitValidation = newCommitValidationRoutine(m.handleCommitMsg)
+	go m.commitValidation.run()
 }
 
-type stateInfo struct {
-	proposalHash []byte
-	validators   ValidatorSet
-	view         *View
+// handleCommitMsg pushes valid commit messages into the message, otherwise it logs it
+func (m *msgQueue) handleCommitMsg(msg *MessageReq, err error) {
+	if err != nil {
+		m.logger.Printf("[ERROR] Commit message is invalid (%v). Error: %s", msg, err)
+	} else {
+		m.pushMessage(msg)
+	}
 }
 
 // updateStateInfo receives data needed for commit message validation
@@ -110,80 +116,113 @@ const (
 	pendingCommitsBufferSize = 10
 )
 
+type stateInfo struct {
+	proposalHash []byte
+	validators   ValidatorSet
+	view         *View
+}
+
+// copy function returns copy of stateInfo object.
+// However, validators field doesn't get copied.
+func (s *stateInfo) copy() *stateInfo {
+	copyProposalHash := make([]byte, len(s.proposalHash))
+	copy(copyProposalHash, s.proposalHash)
+	return &stateInfo{
+		proposalHash: copyProposalHash,
+		validators:   s.validators,
+		view:         s.view.Copy(),
+	}
+}
+
+// cancelableStateInfo is a wrapper around stateInfo object,
+// which contains cancellation ability
+type cancelableStateInfo struct {
+	stateInfo *stateInfo
+	resetCh   chan struct{}
+}
+
 // commitValidationRoutine encapsulates concurrent commit messages validation logic.
 // Valid commit messages are pushed to the validateStateQueue for further consumption by consensus algorithm.
 // Invalid commit messages are discarded.
 type commitValidationRoutine struct {
-	pendingCommitMsgs     *msgQueueImpl
-	lock                  sync.RWMutex
-	logger                Logger
-	validMsgHandler       func(msg *MessageReq)
-	updateStateInfoCh     chan *stateInfo
-	notifyPendingCommitCh chan struct{}
-	closeCh               chan struct{}
+	pendingCommitMsgs msgQueueImpl
+	lock              sync.RWMutex
+	msgHandler        func(*MessageReq, error)
+	updateStateInfoCh chan *stateInfo
+	closeCh           chan struct{}
 }
 
 // newCommitValidationRoutine creates a new instance of commitValidationRoutine object
-func newCommitValidationRoutine(logger Logger, validMsgHandler func(msg *MessageReq)) *commitValidationRoutine {
+func newCommitValidationRoutine(msgHandler func(*MessageReq, error)) *commitValidationRoutine {
 	return &commitValidationRoutine{
-		pendingCommitMsgs:     &msgQueueImpl{},
-		validMsgHandler:       validMsgHandler,
-		logger:                logger,
-		updateStateInfoCh:     make(chan *stateInfo),
-		notifyPendingCommitCh: make(chan struct{}),
-		closeCh:               make(chan struct{}),
+		pendingCommitMsgs: msgQueueImpl{},
+		msgHandler:        msgHandler,
+		updateStateInfoCh: make(chan *stateInfo),
+		closeCh:           make(chan struct{}),
 	}
 }
 
 // run contains main part of the commit messages validation logic
-func (c *commitValidationRoutine) run(doneCh chan struct{}) {
-	if doneCh == nil {
-		doneCh = make(chan struct{})
+func (c *commitValidationRoutine) run() {
+	var stateInfoWrapper *cancelableStateInfo
+	// before starting anything, we need to wait for the first state update
+	select {
+	case info := <-c.updateStateInfoCh:
+		stateInfoWrapper = &cancelableStateInfo{
+			stateInfo: info,
+			resetCh:   make(chan struct{}),
+		}
+
+	case <-c.closeCh:
+		return
 	}
+
+	commitMsgsCh := make(chan *MessageReq, pendingCommitsBufferSize)
 	// validateMsgWorker validates single commit message
-	validateMsgWorker := func(commitMsgsCh <-chan *MessageReq, stateInfo *stateInfo) {
-		for commitMsg := range commitMsgsCh {
-			if err := stateInfo.validators.VerifySeal(commitMsg.From, commitMsg.Seal, stateInfo.proposalHash); err != nil {
-				c.logger.Printf("[ERROR] Commit message is invalid (%v). Error: %s", commitMsg, err)
-				doneCh <- struct{}{}
-				return
+	validateMsgWorker := func() {
+	START:
+		tempState := stateInfoWrapper.stateInfo.copy()
+
+		for {
+			select {
+			case msg := <-commitMsgsCh:
+				// verify
+				err := tempState.validators.VerifySeal(msg.From, msg.Seal, tempState.proposalHash)
+				c.msgHandler(msg, err)
+
+			case <-stateInfoWrapper.resetCh:
+				// the round is done, refresh state info
+				goto START
 			}
-			doneCh <- struct{}{}
-			c.validMsgHandler(commitMsg)
 		}
 	}
 
-	var stateInfo *stateInfo
-	var commitMsgsCh chan *MessageReq
 	for i := 0; i < maxWorkersCount; i++ {
-		go validateMsgWorker(commitMsgsCh, stateInfo)
+		go validateMsgWorker()
 	}
 
 	for {
 		// wait for:
-		// 1. new messages on the queue
-		// 2. update of the round
-		// 3. close trigger
+		// 1. update of the round
+		// 2. cancel trigger
 		select {
-		case <-c.notifyPendingCommitCh:
-			if stateInfo == nil {
-				continue
-			}
 		case info := <-c.updateStateInfoCh:
-			stateInfo = info
-			if commitMsgsCh != nil {
-				close(commitMsgsCh)
+			// update the state info and close the context of the previous one
+			close(stateInfoWrapper.resetCh)
+			stateInfoWrapper = &cancelableStateInfo{
+				stateInfo: info,
+				resetCh:   make(chan struct{}),
 			}
-			commitMsgsCh = make(chan *MessageReq, pendingCommitsBufferSize)
 		case <-c.closeCh:
 			return
+		default:
 		}
 
 		for {
-			c.lock.RLock()
+			c.lock.Lock()
 			// read as many messages as possible for the current view
-			commitMsg, _ := c.pendingCommitMsgs.readMessageWithDiscardsLocked(stateInfo.view, ValidateState)
-			c.lock.RUnlock()
+			commitMsg, _ := c.pendingCommitMsgs.readMessageWithDiscardsLocked(stateInfoWrapper.stateInfo.view, ValidateState)
+			c.lock.Unlock()
 			if commitMsg == nil {
 				break
 			}
@@ -201,12 +240,14 @@ func (c *commitValidationRoutine) close() {
 func (c *commitValidationRoutine) pushPendingCommitMessage(msg *MessageReq) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	heap.Push(c.pendingCommitMsgs, msg)
+	heap.Push(&c.pendingCommitMsgs, msg)
+}
 
-	select {
-	case c.notifyPendingCommitCh <- struct{}{}:
-	default:
-	}
+// queueLength returns current length of pending commit messages queue (thread-safe)
+func (c *commitValidationRoutine) queueLength() int {
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+	return c.pendingCommitMsgs.Len()
 }
 
 // msgToState converts the message type to an State

@@ -4,6 +4,7 @@ import (
 	"log"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -138,30 +139,34 @@ func TestCmpView(t *testing.T) {
 func TestCommitValidationRoutine_AllMessagesValid(t *testing.T) {
 	validatorIds := []NodeID{"A", "B", "C", "D", "E", "F", "G"}
 	actualValidMsgs := uint64(0)
-	validMsgFn := func(msg *MessageReq) {
+	commitMsgsHandler := func(msg *MessageReq, _ error) {
 		atomic.AddUint64(&actualValidMsgs, 1)
 	}
-	commitRoutine := newCommitValidationRoutine(&log.Logger{}, validMsgFn)
 	currentView := ViewMsg(1, 0)
+	commitRoutine := newCommitValidationRoutine(commitMsgsHandler)
+	defer commitRoutine.close()
 	for _, validatorId := range validatorIds {
 		commitRoutine.pushPendingCommitMessage(createMessage(validatorId, MessageReq_Commit, currentView))
 	}
-	require.Equal(t, commitRoutine.pendingCommitMsgs.Len(), len(validatorIds))
-
-	// TODO:
-	doneCh := make(chan struct{}, len(validatorIds))
-	go commitRoutine.run(doneCh)
-	defer commitRoutine.close()
-
+	require.Equal(t, commitRoutine.queueLength(), len(validatorIds))
+	go commitRoutine.run()
 	commitRoutine.updateStateInfoCh <- &stateInfo{
 		proposalHash: mockProposal,
 		view:         currentView,
 		validators:   NewValStringStub(validatorIds, CreateEqualVotingPowerMap(validatorIds)),
 	}
 
-	for i := 0; i < len(validatorIds); i++ {
-		<-doneCh
+	for {
+		select {
+		case <-time.After(100 * time.Millisecond):
+			t.Fatalf("test failed due to timeout")
+		default:
+			if atomic.LoadUint64(&actualValidMsgs) < uint64(len(validatorIds)) {
+				continue
+			}
+			require.Equal(t, uint64(len(validatorIds)), atomic.LoadUint64(&actualValidMsgs))
+			require.Empty(t, commitRoutine.pendingCommitMsgs)
+			return
+		}
 	}
-	require.Equal(t, uint64(len(validatorIds)), atomic.LoadUint64(&actualValidMsgs))
-	require.Empty(t, commitRoutine.pendingCommitMsgs)
 }
